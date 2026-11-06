@@ -1245,6 +1245,10 @@ export const de: Translation = {
   "Resume download": "Fortsetzen",
   "Pause all": "Alle pausieren",
   "Resume all": "Alle fortsetzen",
+  "Pause and quit": "Pausieren und beenden",
+  "Pause downloads": "Downloads pausieren",
+  "Resume downloads": "Downloads fortsetzen",
+  "Quit {app}…": "{app} beenden…",
   "Paused, resume download": "Pausiert, Download fortsetzen",
   "Resume download of {title}": "Download von {title} fortsetzen",
   // The close button on a playback error.
@@ -1385,6 +1389,32 @@ export const de: Translation = {
     "{title}, {time}, wird nicht aufgenommen, solange Mr. Streamer beendet ist.",
   "Closing the window instead keeps recording.":
     "Schließt du stattdessen das Fenster, wird weiter aufgenommen.",
+  "Quit?": "Beenden?",
+  "Couldn't read background work. Try again.":
+    "Hintergrundaufgaben konnten nicht gelesen werden. Versuch es erneut.",
+  "Downloading {count}": "Downloads: {count}",
+  "Queued {count}": "Eingereiht: {count}",
+  "Waiting {count}": "Wartend: {count}",
+  "Paused {count}": "Pausiert: {count}",
+  "Quit while downloading?": "Während des Downloads beenden?",
+  "Quit while recording and downloading?": "Während Aufnahme und Download beenden?",
+  "Keep downloading": "Weiter laden",
+  "Keep going": "Weiterlaufen lassen",
+  "{count} downloads stop now. They continue from there when Mr. Streamer opens again.": {
+    one: "{count} Download stoppt jetzt. Er geht dort weiter, wenn Mr. Streamer wieder geöffnet wird.",
+    other:
+      "{count} Downloads stoppen jetzt. Sie gehen dort weiter, wenn Mr. Streamer wieder geöffnet wird.",
+  },
+  "{count} downloads stop, one at {percent}. They continue from there when Mr. Streamer opens again.":
+    {
+      one: "{count} Download stoppt bei {percent}. Er geht dort weiter, wenn Mr. Streamer wieder geöffnet wird.",
+      other:
+        "{count} Downloads stoppen, einer bei {percent}. Sie gehen dort weiter, wenn Mr. Streamer wieder geöffnet wird.",
+    },
+  "Closing the window instead keeps downloading.":
+    "Schließt du stattdessen das Fenster, wird weiter geladen.",
+  "Closing the window instead keeps both going.":
+    "Schließt du stattdessen das Fenster, läuft beides weiter.",
   "{size} used": "{size} belegt",
   "{size} of {limit} used": "{size} von {limit} belegt",
   "keeps {size} free": "behält {size} frei",
@@ -1573,4 +1603,13 @@ export const de: Translation = {
   "Shown before": "Bereits gesendet",
   Premiere: "Premiere",
   "{count} programmes so far": { one: "Bisher {count} Sendung", other: "Bisher {count} Sendungen" },
+  "Live rewind": "Live-Zurückspulen",
+  Live: "Live",
+  "{time} behind live": "{time} hinter live",
+  "{time} kept": "{time} gespeichert",
+  "Go live": "Zu live",
+  "Paused moment expired. Play resumes from {time}.":
+    "Die pausierte Stelle ist abgelaufen. Die Wiedergabe geht ab {time} weiter.",
+  "Rewind plays here only": "Zurückspulen gibt es nur hier",
+  "This stream can't rewind": "Dieser Stream kann nicht zurückspulen",
 };

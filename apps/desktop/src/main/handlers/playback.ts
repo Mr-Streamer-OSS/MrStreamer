@@ -128,6 +128,8 @@ export function playbackHandlers({
       Effect.andThen(coordination.begin, Effect.as(playback.closeAll, null)),
     "playback.diagnostic": ({ sessionId }) => playback.diagnostic(sessionId),
     "playback.failure": ({ sessionId, selector }) => playback.failure(sessionId, selector),
+    "playback.timeline": ({ sessionId }) => playback.timeline(sessionId),
+    "playback.seekLive": ({ sessionId, at, audio }) => playback.seekLive(sessionId, at, audio),
     "playback.tracks": ({ sessionId }) => playback.tracks(sessionId),
     "playback.playing": ({ sessionId }) => playback.playing(sessionId),
   };

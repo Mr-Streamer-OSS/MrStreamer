@@ -67,3 +67,28 @@ it("a stopped cold start never opens a stream when loading finishes; its replace
 
   expect(player.destroy).toHaveBeenCalledOnce();
 });
+
+it("chases live latency at live, but preserves retained replay including converted HLS", async () => {
+  const video = document.createElement("video");
+  const sound = { audio: null, audioLanguage: null };
+
+  for (const replay of [false, true]) {
+    const engine = createEngine(
+      "mpegts",
+      video,
+      "http://localhost/converted.ts?retained=1",
+      sound,
+      null,
+      replay,
+    );
+
+    try {
+      await vi.dynamicImportSettled();
+      expect(loading.create.mock.calls.at(-1)?.[1]).toMatchObject({
+        liveBufferLatencyChasing: !replay,
+      });
+    } finally {
+      engine.destroy();
+    }
+  }
+});

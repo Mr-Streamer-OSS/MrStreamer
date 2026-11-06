@@ -7,3 +7,4 @@ Read only the area needed for the changed path.
 - For interruptions, storage and lifecycle, read [Interruptions, storage and lifecycle](recordings/storage-recovery.md).
 - For shared capture, read [Shared capture](recordings/shared-capture.md).
 - For local-copy progress, read [Local-copy progress](recordings/progress.md).
+- For recording and background download coexistence, read [Background download coexistence](recordings/background.md).

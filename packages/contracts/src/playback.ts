@@ -37,6 +37,8 @@ export interface StreamSession {
   /** Loopback URL that proxies the provider stream. Carries no credentials. */
   readonly url: string;
   readonly format: StreamFormat;
+  /** Local HLS conversion fixes audio for this capture; another track opens a fresh capture. */
+  readonly convertedHls?: boolean;
   /**
    * For a recording from the catch-up archive, the stretch it plays: from where the provider's
    * recording begins, which can be up to a minute before the start asked for when the provider
@@ -164,3 +166,11 @@ export type StreamFailure =
     /** The stream arrived, but its format cannot be played or converted here. */
     | { readonly kind: "unsupported"; readonly detail: string }
   ) & { readonly diagnostic?: PlaybackDiagnostic };
+
+/** Retained arrival-time window in epoch milliseconds. Null means this route cannot rewind. */
+export interface LiveTimeline {
+  readonly start: number;
+  readonly end: number;
+  readonly cursor: number;
+  readonly expired: boolean;
+}

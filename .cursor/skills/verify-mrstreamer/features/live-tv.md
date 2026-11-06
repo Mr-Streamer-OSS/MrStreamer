@@ -18,3 +18,4 @@ Read only the area needed for the changed path.
 - For desktop playback diagnostic context, read [Desktop playback diagnostic context](live-tv/diagnostics.md).
 - For clear muxed MPEG-TS HLS, read [Clear muxed MPEG-TS HLS](live-tv/hls.md).
 - For android Explore app, read [Android Explore app](live-tv/android.md).
+- For local live rewind and retained timeline, read [Local retained timeline service](live-tv/timeline.md).

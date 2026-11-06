@@ -1,3 +1,4 @@
+import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
@@ -396,7 +397,7 @@ interface LiveSession extends SessionBase {
   /** Re-encode the picture even when the player could decode it; see `open`. */
   readonly repair: boolean;
   /** The sound track chosen by PID, or null for the channel's first. */
-  readonly audio: number | null;
+  audio: number | null;
   /** Without a chosen track, the language whose sound plays when the channel has it. */
   readonly audioLanguage: string | null;
   /** The tracks the stream carries, once it has been inspected. */
@@ -700,6 +701,17 @@ export class Playback extends Context.Service<
       sessionId: string,
       selector?: PlaybackFailureSelector,
     ): Effect.Effect<StreamFailure | null>;
+    /** Arrival-time history available to this local MPEG-TS view; null on other routes. */
+    timeline(sessionId: string): Effect.Effect<LiveTimeline | null>;
+    /**
+     * Moves the view's next read to `at`, or to live with null, with the sound track `audio`
+     * when given; null where the session can't rewind.
+     */
+    seekLive(
+      sessionId: string,
+      at: number | null,
+      audio?: number | null,
+    ): Effect.Effect<LiveTimeline | null>;
     /**
      * A channel's sound and subtitle tracks, from its program table; null until its stream has
      * started, and for movies and episodes.
@@ -1251,6 +1263,7 @@ function make(deps: PlaybackDeps) {
                 signal,
                 [],
                 variant.url,
+                null,
               );
 
               if (!answer.ok) throw new HlsInputFailure(answer.failure);
@@ -1681,7 +1694,31 @@ function make(deps: PlaybackDeps) {
         if (!input) throw hlsSubsetFailure();
         response.writeHead(200, { "Content-Type": "video/mp2t" });
 
-        for await (const chunk of convertedHls(session, input, signal)) {
+        // Keep the converted stream running while the local decoder is paused. History holds
+        // output TS, so replay preserves the converter's stable PIDs and presentation clock.
+        const chunks =
+          captures && !session.archive && !session.receiver
+            ? (
+                await captures.viewRequest(
+                  `hls-output:${session.id}`,
+                  session.id,
+                  async (captureSignal) =>
+                    new Response(
+                      ReadableStream.from(
+                        convertedHls(
+                          session,
+                          input,
+                          AbortSignal.any([captureSignal, session.closed.signal]),
+                        ),
+                      ),
+                      { headers: { "Content-Type": "video/mp2t" } },
+                    ),
+                  signal,
+                )
+              ).body!
+            : convertedHls(session, input, signal);
+
+        for await (const chunk of chunks) {
           if (!response.write(chunk)) await drained(response);
         }
 
@@ -3711,7 +3748,11 @@ function make(deps: PlaybackDeps) {
               ? await open(url, asking)
               : session.kind === "live" && session.format === "hls"
                 ? await captures.resource(shared, session.id, url, open, asking, session.joined)
-                : await captures.request(shared, session.id, (opened) => open(url, opened), asking);
+                : await (
+                    session.kind === "live" && !session.archive && !session.receiver
+                      ? captures.viewRequest
+                      : captures.request
+                  )(shared, session.id, (opened) => open(url, opened), asking);
         } catch (cause) {
           return {
             ok: false,
@@ -4312,6 +4353,7 @@ function make(deps: PlaybackDeps) {
               channel,
               url: `${base}/stream/${session.token}.${extension}`,
               format: session.delivery,
+              convertedHls: session.format === "hls" && session.delivery === "mpegts",
               ...defined({ archive: session.archive ?? undefined }),
             };
           }),
@@ -4522,6 +4564,23 @@ function make(deps: PlaybackDeps) {
           return session && !session.closed.signal.aborted ? session.diagnostic : null;
         }),
 
+      timeline: (sessionId: string) => Effect.sync(() => captures?.timeline(sessionId) ?? null),
+      seekLive: (sessionId: string, at: number | null, audio?: number | null) =>
+        Effect.sync(() => {
+          const session = sessions.get(sessionId);
+
+          if (
+            session?.kind !== "live" ||
+            session.archive ||
+            session.receiver ||
+            !captures?.seek(sessionId, at)
+          )
+            return null;
+
+          if (audio !== undefined) session.audio = audio;
+
+          return captures.timeline(sessionId);
+        }),
       tracks: (sessionId: string) =>
         Effect.sync(() => {
           const session = sessions.get(sessionId);

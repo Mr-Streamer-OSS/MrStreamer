@@ -12,3 +12,4 @@ Read only the area needed for the changed path.
 - For copied-video recovery and codecs, read [Copied-video recovery and codecs](downloads/playback.md).
 - For desktop layout and progress profiling, read [Desktop layout and progress profiling](downloads/layout-performance.md).
 - For default local-copy progress, read [Default local-copy progress](downloads/progress.md).
+- For background downloads and Close/Quit, read [Background lifecycle](downloads/background.md).

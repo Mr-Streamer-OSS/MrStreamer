@@ -9,8 +9,8 @@
 // none pins anything. A disk that fails a write keeps memory only from then on, so what reads
 // the live edge goes on.
 //
-// Each piece remembers when its first byte arrived: `offsetAt` finds the newest retained piece
-// that began at or before a time, a packet boundary to start reading from.
+// Each piece indexes arrivals at most four times a second, independently of its byte size.
+// Seeking reports the indexed arrival actually served, rather than the requested time.
 import { mkdir, open, rm, statfs } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -36,6 +36,7 @@ interface Piece {
   readonly offset: number;
   /** When its first byte arrived. */
   readonly at: number;
+  readonly marks: { offset: number; at: number }[];
   bytes: number;
   /** Its bytes while in memory, in order; null once on disk or evicted. */
   chunks: Uint8Array[] | null;
@@ -50,6 +51,8 @@ export interface HistoryBudget {
   readonly pieceBytes: number;
   /** Bytes the disk keeps free: below that, a piece stays in memory only. */
   readonly keepFree: number;
+  /** Retention duration, bounded to one hour. Defaults to thirty minutes. */
+  readonly retentionMs?: number | undefined;
 }
 
 /** The answer to a read: bytes from the offset, or that it is ahead of what arrived or evicted. */
@@ -58,13 +61,16 @@ type HistoryRead = Uint8Array | "ahead" | "evicted";
 export interface History {
   /** The offset after the last byte that arrived. */
   end(): number;
+  /** Arrival-time bounds of bytes still retained, or null before data arrives. */
+  bounds(): { readonly start: number; readonly end: number } | null;
   append(chunk: Uint8Array): void;
   /** Up to READ_BYTES from `offset`. */
   read(offset: number): Promise<HistoryRead>;
   /** Settles once something arrives past `offset`, the history ends, or `signal` aborts. */
   arrived(offset: number, signal: AbortSignal): Promise<void>;
-  /** Where the newest retained piece that began at or before `time` starts. */
+  /** Offset of the indexed arrival at or before `time`, clamped to retained bytes. */
   offsetAt(time: number): number;
+  positionAt(time: number): { offset: number; at: number };
   /** No more bytes come; readers read what is retained. */
   finish(): void;
   finished(): boolean;
@@ -194,12 +200,16 @@ export function historyStore(budget: HistoryBudget) {
    * A new capture's history, in a folder of its own. `needed` answers the lowest offset a reader
    * still needs; without it every piece is kept.
    */
-  function create(needed: () => number = () => 0): History {
+  function create(needed: () => number = () => 0, retaining: () => boolean = () => true): History {
     const state = new HistoryState(
       join(budget.folder, String(++made)),
       budget.pieceBytes,
       (bytes) => (leaving += bytes),
       needed,
+      () =>
+        retaining()
+          ? Math.max(0, Math.min(budget.retentionMs ?? 30 * 60_000, 60 * 60_000))
+          : Infinity,
     );
 
     histories.add(state);
@@ -211,10 +221,13 @@ export function historyStore(budget: HistoryBudget) {
 
     return {
       end: () => state.end,
+      bounds: () =>
+        state.pieces.length ? { start: state.pieces[0]!.at, end: state.latest } : null,
       append: (chunk) => state.append(chunk),
       read: (offset) => state.read(offset),
       arrived: (offset, signal) => state.arrived(offset, signal),
-      offsetAt: (time) => state.offsetAt(time),
+      offsetAt: (time) => state.positionAt(time).offset,
+      positionAt: (time) => state.positionAt(time),
       finish: () => state.finish(),
       finished: () => state.done,
       close: async () => {
@@ -238,6 +251,7 @@ const remove = (file: string) => rm(file, { force: true, maxRetries: 3, retryDel
 class HistoryState {
   readonly pieces: Piece[] = [];
   end = 0;
+  latest = 0;
   disk = 0;
   broken = false;
   closed = false;
@@ -251,17 +265,20 @@ class HistoryState {
   /** Hears of bytes evicted files take until they are removed: more, then fewer once gone. */
   private readonly leaving: (bytes: number) => void;
   private readonly needed: () => number;
+  private readonly retentionMs: () => number;
 
   constructor(
     folder: string,
     pieceBytes: number,
     leaving: (bytes: number) => void,
     needed: () => number,
+    retentionMs: () => number,
   ) {
     this.folder = folder;
     this.pieceBytes = pieceBytes;
     this.leaving = leaving;
     this.needed = needed;
+    this.retentionMs = retentionMs;
   }
 
   /** Whether every reader has read past `piece`, which then goes. */
@@ -278,15 +295,33 @@ class HistoryState {
 
   append(chunk: Uint8Array) {
     if (this.closed || this.done) return;
+    this.latest = Date.now();
+    const expired = this.pieces.findLast((piece) => piece.at < this.latest - this.retentionMs());
+
+    if (expired) void this.evictThrough(expired);
+
+    // Once the view leaves, a continuing recording need not keep consumed files until the
+    // next piece fills. Retain the partial writer piece and anything a reader still needs.
+    const consumed = this.pieces.findLast(
+      (piece) => piece.bytes >= this.pieceBytes && piece.offset + piece.bytes <= this.needed(),
+    );
+
+    if (consumed) void this.evictThrough(consumed);
+
     let rest = chunk;
 
     while (rest.length > 0) {
       let current = this.pieces.at(-1);
 
       if (!current?.chunks || current.file || current.bytes >= this.pieceBytes) {
-        current = { offset: this.end, at: Date.now(), bytes: 0, chunks: [], file: null };
+        current = { offset: this.end, at: Date.now(), marks: [], bytes: 0, chunks: [], file: null };
         this.pieces.push(current);
       }
+
+      const last = current.marks.at(-1);
+
+      if (!last || this.latest - last.at >= 250)
+        current.marks.push({ offset: this.end, at: this.latest });
 
       const take = Math.min(rest.length, this.pieceBytes - current.bytes);
       current.chunks!.push(rest.subarray(0, take));
@@ -417,8 +452,13 @@ class HistoryState {
     });
   }
 
-  offsetAt(time: number) {
-    return this.pieces.findLast((each) => each.at <= time)?.offset ?? this.start();
+  positionAt(time: number) {
+    const piece = this.pieces.findLast((each) => each.at <= time) ?? this.pieces[0];
+
+    return (
+      piece?.marks.findLast((mark) => mark.at <= time) ??
+      piece?.marks[0] ?? { offset: this.end, at: this.latest }
+    );
   }
 
   finish() {

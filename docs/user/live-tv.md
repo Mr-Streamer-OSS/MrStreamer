@@ -190,7 +190,7 @@ When Mr. Streamer can't save a Stop or a recording's end, its row says **Not sav
 
 ### Closing, quitting and updates
 
-Closing the window never asks. While a recording's time goes on or a schedule is kept, Mr. Streamer keeps running without its window, and opening it again shows the window. On Windows and Linux a tray icon then has **Open Mr. Streamer** and **Quit Mr. Streamer**, and Mr. Streamer quits by itself once nothing records, nothing is scheduled and what it had to save about them is saved.
+Closing the window never asks. While a recording's time goes on or a schedule is kept, Mr. Streamer keeps running without its window, and opening it again shows the window. Runnable downloads also keep the app running. The native menu shows download counts, **Open Mr. Streamer**, download Pause/Resume and **Quit Mr. Streamer**. On Windows and Linux, Mr. Streamer quits by itself once no downloads can run, nothing records, nothing is scheduled and what it had to save about recordings is saved. Paused downloads alone do not keep it running.
 
 Quitting while something records, with ⌘Q, Ctrl+Q or the tray, asks first. **Quit while recording?** offers **Quit**, which stops the recordings and keeps what they recorded, and **Keep recording**. A schedule still to come doesn't record while Mr. Streamer is closed. A shutdown or logout doesn't ask: recordings whose time remains go on when Mr. Streamer starts again.
 
@@ -240,3 +240,25 @@ While you reorder favourites or a list, the keys are these alone:
 | Tab                             | Go to Cancel, Save and the chosen row's buttons |
 | Enter                           | Save                                            |
 | Escape                          | Cancel                                          |
+
+## Live rewind
+
+_From 0.0.24. Pause and rewind a channel while it goes on arriving._
+
+When a channel plays on this computer as MPEG-TS, Watch shows a timeline under its controls. It spans what Mr. Streamer has kept of the channel since it started playing: up to the last 30 minutes, less when the temporary folder's 2 GiB, shared with recordings and other channels, or the 5 GB it leaves free on the disk runs out first. The times at its ends are the oldest moment kept and now. Next to them, Watch says **Live**, or how far behind live you are, and how much is kept.
+
+- **Pause** stops the picture while the channel keeps arriving. **Play** goes on from where it stopped.
+- **Back 10 seconds** and **Forward 10 seconds** skip and resume playback; forward past now goes live.
+- Drag the timeline and let go to watch from there.
+- **Go live** returns to now.
+
+When you pause longer than the channel is kept, the moment you paused at is gone; Watch says so, and Play goes on from the oldest moment still kept. Switching channel and Stop let go of what was kept, while a recording of the channel goes on; quitting empties it too.
+
+| Key                         | While watching a channel with a timeline |
+| --------------------------- | ---------------------------------------- |
+| Space, K                    | Pause, and play on                       |
+| J, L                        | Back or forward 10 seconds               |
+| End                         | Go live                                  |
+| Left, Right on the timeline | 10 seconds; Page Up, Page Down a minute  |
+
+An HLS channel has this timeline only after local codec repair converts clear muxed MPEG-TS segments to MPEG-TS output. Replay uses the picture and sound captured in that output. Choosing another sound track restarts capture and its timeline. Direct HLS, including encrypted streams, separate audio renditions, fMP4, byte ranges and low-latency parts, has no retained timeline. Catch-up programmes and a channel playing on a TV also have no timeline. Their keys say **This stream can't rewind**, or **Rewind plays here only** on a TV. When the provider breaks off, the channel reconnects as before and its timeline starts again from then.
