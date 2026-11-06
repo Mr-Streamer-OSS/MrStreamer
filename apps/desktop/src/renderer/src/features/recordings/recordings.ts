@@ -16,7 +16,7 @@ import { currentLanguage, formatDate, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { call, listen } from "../../lib/ipc.ts";
 import { titlePlayer } from "../../player/title-player.ts";
-import { rulesQuery, schedulesQuery, useSchedules } from "./schedules.ts";
+import { rulesQuery, schedulesQuery, useRules, useSchedules } from "./schedules.ts";
 
 const recordingsQuery = () =>
   queryOptions({
@@ -123,15 +123,20 @@ export function formatLimit(bytes: number): string {
 
 const anyRecording = (list: readonly Recording[]) => list.length > 0;
 
-/**
- * Whether any recording is kept or scheduled, for the window bar's entry: true until both lists
- * are read, so one that failed can be read again from Recordings.
- */
+/** Keeps Recordings reachable for retained or unread inventories, including following rules. */
 export function useAnyRecording(): boolean {
   const recorded = useQuery({ ...recordingsQuery(), select: anyRecording }).data;
   const scheduled = useSchedules().data;
+  const rules = useRules();
 
-  return recorded !== false || scheduled === undefined || scheduled.length > 0;
+  return (
+    recorded !== false ||
+    scheduled === undefined ||
+    scheduled.length > 0 ||
+    rules.isError ||
+    rules.data === undefined ||
+    rules.data.length > 0
+  );
 }
 
 /** The recording capturing `channel` now, if one does. */
