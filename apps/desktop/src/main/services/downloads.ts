@@ -176,8 +176,8 @@ export class Downloads extends Context.Service<
     ): Effect.Effect<{ readonly path: string; readonly type: string } | null>;
     /**
      * A subscription is going: its unfinished downloads end, their transfer and files with them.
-     * Its copies stay. Unreadable startup inventory, refused recovery or failed cleanup refuses
-     * removal, keeping the subscription available for retry after storage is readable on restart.
+     * Its copies stay. Unreadable startup inventory or refused recovery refuses removal until a
+     * healthy restart. Failed cleanup keeps the subscription available for retry in the same run.
      */
     subscriptionGone(subscriptionId: string): Effect.Effect<void, Failed>;
     /** The list after every change, each later than the last, a few times a second at most. */
@@ -1384,7 +1384,6 @@ function make(deps: DownloadsDeps) {
           // Both took a while. A removal drains unfinished downloads while the subscription is
           // excluded, before deleting its login. Check its source again and use an existing copy
           // if the same title was added meanwhile.
-          // The final synchronous source check below authorizes publication after shaping the reply.
           if (!(yield* subscriptions.stands(source))) {
             return yield* new Failed({ error: { kind: "no-subscription" } });
           }
@@ -1418,7 +1417,7 @@ function make(deps: DownloadsDeps) {
 
           const result = yield* downloadOf(record, owners, busy);
           yield* attempt(async () => {
-            // The earlier asynchronous roster check cannot authorize this final publication.
+            // Keep this source check and publication synchronous: no await may separate them.
             if (!subscriptions.standsNow(source))
               throw new Failed({ error: { kind: "no-subscription" } });
             write(record);
