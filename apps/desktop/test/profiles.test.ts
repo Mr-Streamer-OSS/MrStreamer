@@ -49,6 +49,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
+import * as Cause from "effect/Cause";
 import type { OutputStatus } from "@mrstreamer/contracts/output";
 import * as Context from "effect/Context";
 import { ViewingStore } from "@mrstreamer/core/viewing/service";
@@ -773,6 +774,11 @@ it("household IPC background catalogue work retains admitted settings and refuse
     { owner: a.id, language: "fr", adults: true },
   ]);
   expect(Exit.isFailure(completed)).toBe(true);
+
+  if (Exit.isFailure(completed))
+    expect(Cause.squash(completed.cause)).toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
 }, 10_000);
 
 it("keeps a failed post-selection configuration visible and retries it before admitting work", async () => {

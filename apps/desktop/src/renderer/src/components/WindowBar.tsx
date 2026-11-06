@@ -182,7 +182,7 @@ export function WindowBar({
         </nav>
       )}
       <div className="ml-auto flex items-center gap-1.5">
-        {/* Each of these can open Settings or a page. */}
+        {/* Recovery keeps optional notices hidden so selection and Retry remain the focus. */}
         {!recovery && (
           <>
             <UpdateNotice compact={(back ? backFold : fold) === "arrow"} />
