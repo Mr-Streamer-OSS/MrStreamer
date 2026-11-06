@@ -1683,6 +1683,54 @@ describe.skipIf(!hasTools)("downloads", () => {
     await again.quit();
   }, 60_000);
 
+  it("refuses account removal while the startup inventory is unreadable and retries after repair", async () => {
+    const started = await connected();
+    const { provider, subscriptionId, downloads, dataDir, find } = started;
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await started.quit();
+
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      db.exec("alter table downloads rename column record to unreadable");
+      const refused = await app(dataDir);
+
+      try {
+        await expect(refused.downloads.list()).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+        await expect(refused.roster.remove(subscriptionId, false)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+        expect((await refused.subscriptions.list()).map((each) => each.id)).toContain(
+          subscriptionId,
+        );
+        expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+      } finally {
+        await refused.quit();
+        db.exec("alter table downloads rename column unreadable to record");
+      }
+    } finally {
+      db.close();
+    }
+
+    const recovered = await app(dataDir);
+    expect((await recovered.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" } },
+    ]);
+    await recovered.roster.remove(subscriptionId, false);
+    expect(await recovered.subscriptions.list()).toEqual([]);
+    expect((await recovered.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" } },
+    ]);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    await recovered.quit();
+  }, 60_000);
+
   it("refuses account removal until startup recovery can save, then removes only unfinished downloads", async () => {
     const started = await connected();
     const { provider, subscriptionId, downloads, dataDir, find } = started;
@@ -1839,8 +1887,10 @@ describe.skipIf(!hasTools)("downloads", () => {
       releaseFirst.resolve();
       await lateDrain.promise;
       tmdb.failSeasons(null);
-      await expect(adding).rejects.toBeDefined();
-      await expect(current.downloads.add(firstFilm.ref)).rejects.toBeDefined();
+      await expect(adding).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+      await expect(current.downloads.add(firstFilm.ref)).rejects.toMatchObject({
+        error: { kind: "no-subscription" },
+      });
       releaseLate.resolve();
       expect(await removal).toMatchObject({ error: { kind: "unexpected" } });
       expect((await current.subscriptions.list()).map((each) => each.id).sort()).toEqual(

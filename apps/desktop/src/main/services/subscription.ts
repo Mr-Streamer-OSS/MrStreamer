@@ -206,9 +206,9 @@ interface Saved {
   readonly provider: Provided | null;
 }
 
-/** Optional erasure and owner settlement around durable login removal. */
+/** Reversible precommit work and owner settlement around durable login removal. */
 export interface RemovalSteps {
-  /** Optional viewing erasure. A refusal keeps the source and its caches usable. */
+  /** Work while the source is excluded, before login deletion. Refusal restores source usability. */
   readonly erase?: Effect.Effect<void, Failed>;
   /** Existing owners settle admitted writes before folder deletion, after the login is gone. */
   readonly settle?: readonly Effect.Effect<void>[];

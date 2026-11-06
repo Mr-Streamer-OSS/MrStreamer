@@ -176,7 +176,8 @@ export class Downloads extends Context.Service<
     ): Effect.Effect<{ readonly path: string; readonly type: string } | null>;
     /**
      * A subscription is going: its unfinished downloads end, their transfer and files with them.
-     * Its copies stay. A refused recovery or cleanup fails removal so the subscription can retry.
+     * Its copies stay. Unreadable startup inventory, refused recovery or failed cleanup refuses
+     * removal, keeping the subscription available for retry after storage is readable on restart.
      */
     subscriptionGone(subscriptionId: string): Effect.Effect<void, Failed>;
     /** The list after every change, each later than the last, a few times a second at most. */
@@ -234,10 +235,9 @@ function make(deps: DownloadsDeps) {
     const loadedCleanup = yield* Effect.result(store.cleanups);
     let selectedFolder = configured._tag === "Success" ? (configured.success ?? root) : root;
 
-    // Without its table nothing can be queued or listed either: each call says so, as the store
-    // says it then, in the interface language of that moment. A read that works later still fails:
-    // nothing on disk was checked against the table at the start. A refused startup recovery save
-    // below sets it too, so the next start recovers that copy again.
+    // Without a complete startup inventory nothing can be queued or listed. A later successful
+    // read cannot validate files skipped at startup; a new start must check them. A refused
+    // recovery save below also latches its original failure until the next start retries it.
     let unloaded =
       configured._tag === "Failure"
         ? store.folder.pipe(Effect.andThen(Effect.fail(configured.failure)))
@@ -1381,10 +1381,10 @@ function make(deps: DownloadsDeps) {
           const owners = yield* accounts;
           const busy = yield* coordination.busy;
 
-          // Both took a while. A subscription removed or logged in anew meanwhile had its unfinished
-          // downloads ended without this one (a removal ends them again once it is gone, after
-          // this look), and the same title may have been added meanwhile: that one is the answer.
-          // Nothing waits between the second look and the write.
+          // Both took a while. A removal drains unfinished downloads while the subscription is
+          // excluded, before deleting its login. Check its source again and use an existing copy
+          // if the same title was added meanwhile.
+          // The final synchronous source check below authorizes publication after shaping the reply.
           if (!(yield* subscriptions.stands(source))) {
             return yield* new Failed({ error: { kind: "no-subscription" } });
           }
@@ -1417,7 +1417,12 @@ function make(deps: DownloadsDeps) {
           };
 
           const result = yield* downloadOf(record, owners, busy);
-          yield* attempt(async () => write(record));
+          yield* attempt(async () => {
+            // The earlier asynchronous roster check cannot authorize this final publication.
+            if (!subscriptions.standsNow(source))
+              throw new Failed({ error: { kind: "no-subscription" } });
+            write(record);
+          });
           yield* Effect.forkIn(
             Effect.promise(() => {
               const work = keepArtwork(record.id, kept.artwork);
