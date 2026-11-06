@@ -1200,6 +1200,18 @@ export const nl: Translation = {
     "Onvoltooide downloads zijn met hun abonnement verdwenen.",
   "Subscription removed, copy kept": "Abonnement verwijderd, kopie bewaard",
   "Delete copy": "Kopie verwijderen",
+  "New downloads go to {folder}": "Nieuwe downloads gaan naar {folder}",
+  "Change folder": "Map wijzigen",
+  "Select {name}": "{name} selecteren",
+  "{count} selected": { one: "{count} geselecteerd", other: "{count} geselecteerd" },
+  "Move to {folder}": "Verplaatsen naar {folder}",
+  "Moving to {folder}": "Wordt verplaatst naar {folder}",
+  "Cancel move": "Verplaatsen annuleren",
+  "Delete {count} downloads": {
+    one: "{count} download verwijderen",
+    other: "{count} downloads verwijderen",
+  },
+  "{done} of {total} done": "{done} van {total} klaar",
   Offline: "Offline",
   "Disk full. Free some space, then retry.":
     "Schijf vol. Maak wat ruimte vrij en probeer het opnieuw.",

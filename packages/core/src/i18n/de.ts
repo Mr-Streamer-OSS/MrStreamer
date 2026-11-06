@@ -1210,6 +1210,18 @@ export const de: Translation = {
     "Unfertige Downloads endeten mit ihrem Abonnement.",
   "Subscription removed, copy kept": "Abonnement entfernt, Kopie behalten",
   "Delete copy": "Kopie löschen",
+  "New downloads go to {folder}": "Neue Downloads landen in {folder}",
+  "Change folder": "Ordner ändern",
+  "Select {name}": "{name} auswählen",
+  "{count} selected": { one: "{count} ausgewählt", other: "{count} ausgewählt" },
+  "Move to {folder}": "Nach {folder} verschieben",
+  "Moving to {folder}": "Wird nach {folder} verschoben",
+  "Cancel move": "Verschieben abbrechen",
+  "Delete {count} downloads": {
+    one: "{count} Download löschen",
+    other: "{count} Downloads löschen",
+  },
+  "{done} of {total} done": "{done} von {total} erledigt",
   Offline: "Offline",
   "Disk full. Free some space, then retry.":
     "Speicher voll. Gib etwas Platz frei und versuch es erneut.",

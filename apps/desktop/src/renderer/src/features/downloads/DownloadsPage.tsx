@@ -12,12 +12,24 @@
 // go together under its name, which folds them away, season by season in the series' order, with
 // the episodes between them that aren't on this computer (see @mrstreamer/core/downloads/series).
 // Everything here is read from this computer; artwork comes from the copies' own folders.
+//   Under the heading, the household folder new downloads go to, with Change folder. Each row,
+// and each series, has a round box to select it; with any selected, a bar offers what fits them:
+// Pause, Resume, Retry, Move to the folder for finished copies, and Delete, which asks again with
+// its count on a second press. Each answer is per download: a row that failed says why, stays
+// selected and Try again runs the action again on those. A copy moving says so on its row, with
+// Cancel move, which keeps the original.
 //   With no subscription saved the page stands alone, opened from Connect: its bar has only
 //   Downloads, and Recordings once any is kept, and Add subscription goes back to the form.
 import { useMutation } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronDown, Pause, Play } from "lucide-react";
-import { Fragment, useLayoutEffect, useMemo, useState } from "react";
-import type { Download } from "@mrstreamer/contracts/downloads";
+import { ArrowDown, ArrowUp, Check, ChevronDown, Minus, Pause, Play } from "lucide-react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type {
+  Download,
+  DownloadBulkAction,
+  DownloadBulkResult,
+  DownloadFolder,
+} from "@mrstreamer/contracts/downloads";
+import type { AppError } from "@mrstreamer/contracts/errors";
 import { copyShelf, type ShelfSeries } from "@mrstreamer/core/downloads/series";
 import { formatBytes, formatNumber, t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
@@ -52,6 +64,71 @@ function handOn(had: Element | null) {
   if (other instanceof HTMLButtonElement && !other.disabled) other.focus();
 }
 
+/** What the selection bar runs: a bulk command, or moving finished copies to the folder. */
+type Action = DownloadBulkAction | "move";
+
+/** The latest action's answer: how many of how many went, and why each other one didn't. */
+interface Outcome {
+  readonly action: Action;
+  readonly total: number;
+  readonly done: number;
+  readonly failed: ReadonlyMap<string, AppError>;
+  /** The failed ones, and for a move the ones after the first failure it never tried. */
+  readonly again: readonly string[];
+}
+
+/** Which of `items` each action applies to: only these are sent, so its count is honest. */
+function applicable(items: readonly Download[], action: Action): string[] {
+  return items.flatMap(({ id, status }) =>
+    (
+      action === "pause"
+        ? status.kind === "transferring" || status.kind === "queued" || status.kind === "waiting"
+        : action === "resume"
+          ? status.kind === "paused"
+          : action === "retry"
+            ? status.kind === "failed"
+            : action === "move"
+              ? status.kind === "complete"
+              : true
+    )
+      ? [id]
+      : [],
+  );
+}
+
+/**
+ * Runs `action` on `ids`. A move goes one copy at a time so each answer is its own, and stops at
+ * the first that fails or is cancelled, as main would: the rest stay where they are. A call that
+ * fails whole fails each of its downloads.
+ */
+async function perform(action: Action, ids: readonly string[]): Promise<DownloadBulkResult> {
+  if (action !== "move") {
+    try {
+      return await call("downloads.bulk", { ids: [...ids], action });
+    } catch (cause) {
+      return { succeeded: [], failed: ids.map((id) => ({ id, error: appError(cause) })) };
+    }
+  }
+
+  const succeeded: string[] = [];
+
+  for (const id of ids) {
+    try {
+      await call("downloads.moveCopies", { ids: [id] });
+      succeeded.push(id);
+    } catch (cause) {
+      return { succeeded, failed: [{ id, error: appError(cause) }] };
+    }
+  }
+
+  return { succeeded, failed: [] };
+}
+
+/** The last name in a folder's path, as a button names where it moves copies. */
+function folderName(path: string): string {
+  return path.split(/[\\/]/).findLast(Boolean) ?? path;
+}
+
 export function DownloadsPage({ standalone = false }: { standalone?: boolean }) {
   const list = useDownloads();
   const items = list.data?.items ?? [];
@@ -72,9 +149,75 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
       pause ? call("downloads.pauseAll") : call("downloads.resumeAll"),
   });
 
+  const storage = list.data?.storage;
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const chosen = items.filter((item) => selected.has(item.id));
+  const heading = useRef<HTMLHeadingElement>(null);
+
+  const select = (ids: readonly string[], on: boolean) =>
+    setSelected((previous) => {
+      const next = new Set(previous);
+
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+
+      return next;
+    });
+
+  const run = useMutation({
+    mutationFn: ({ action, ids }: { action: Action; ids: readonly string[] }) =>
+      perform(action, ids),
+    onSuccess: ({ succeeded, failed }, { action, ids }) => {
+      const went = new Set(succeeded);
+      setOutcome({
+        action,
+        total: ids.length,
+        done: succeeded.length,
+        failed: new Map(failed.map(({ id, error }) => [id, error])),
+        again: ids.filter((id) => !went.has(id)),
+      });
+    },
+  });
+
+  // Pressed again while one is under way, an action does nothing; it stays pressable.
+  const start = (action: Action, ids: readonly string[]) => {
+    if (run.isPending || ids.length === 0) return;
+    setOutcome(null);
+    run.mutate({ action, ids });
+  };
+
+  const finish = () => {
+    setSelected(new Set());
+    setOutcome(null);
+    run.reset();
+  };
+
+  const picking: Picking = {
+    selected,
+    select,
+    moving: new Set(storage?.moving),
+    failed: outcome?.failed ?? new Map(),
+    folder: storage ? folderName(storage.path) : "",
+  };
+
   // Where the keyboard is as this list is drawn, for `handOn` once it is.
   const had = document.activeElement;
-  useLayoutEffect(() => handOn(had));
+  useLayoutEffect(() => {
+    handOn(had);
+
+    // The bar went with the keyboard on it, by Done or deleting the last selected: the heading
+    // takes it, so the keyboard stays on the page.
+    if (
+      had instanceof HTMLElement &&
+      had.closest("[data-selection]") &&
+      !had.isConnected &&
+      (document.activeElement === null || document.activeElement === document.body)
+    )
+      heading.current?.focus();
+  });
 
   const summary = list.data
     ? [
@@ -92,7 +235,13 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
       {standalone ? <OfflineBar /> : <WindowBar className="bg-black" />}
       <div className="min-h-0 flex-1 overflow-y-auto px-10 pt-2 pb-10">
         <div className="mb-3 flex items-baseline gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("Downloads")}</h1>
+          <h1
+            ref={heading}
+            tabIndex={-1}
+            className="text-2xl font-semibold tracking-tight outline-none"
+          >
+            {t("Downloads")}
+          </h1>
           {items.length > 0 && (
             <span className="text-sm text-muted-foreground tabular-nums">
               {formatNumber(items.length)}
@@ -120,6 +269,40 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
             {t("Couldn't save. Try again.")}
           </p>
         )}
+        {storage && <Folder storage={storage} />}
+        {chosen.length > 0 && (
+          <SelectionBar
+            chosen={chosen}
+            folder={storage ? folderName(storage.path) : null}
+            start={start}
+            finish={finish}
+          />
+        )}
+        <div role="status" className="empty:hidden mb-3 flex items-center gap-3 text-[0.8125rem]">
+          {outcome && (
+            <>
+              <span className={cn(outcome.again.length > 0 && "text-destructive")}>
+                {t("{done} of {total} done", {
+                  done: outcome.done,
+                  total: outcome.total,
+                })}
+              </span>
+              {outcome.again.length > 0 && (
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    start(
+                      outcome.action,
+                      outcome.again.filter((id) => items.some((item) => item.id === id)),
+                    )
+                  }
+                >
+                  {t("Try again")}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
         {list.error ? (
           <p className="text-sm text-destructive">{describeError(appError(list.error))}</p>
         ) : list.data && items.length === 0 ? (
@@ -131,7 +314,13 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
           <section aria-label={t("Queue")}>
             <h2 className="mt-2 mb-1 text-[0.9375rem] font-semibold">{t("Queue")}</h2>
             {queue.map((item) => (
-              <Row key={item.id} item={item} first={line[0] === item} last={line.at(-1) === item} />
+              <Row
+                key={item.id}
+                item={item}
+                picking={picking}
+                first={line[0] === item}
+                last={line.at(-1) === item}
+              />
             ))}
           </section>
         )}
@@ -147,9 +336,9 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
             </h2>
             {shelf.map((item) =>
               item.kind === "copy" ? (
-                <Row key={item.copy.id} item={item.copy} />
+                <Row key={item.copy.id} item={item.copy} picking={picking} />
               ) : (
-                <SeriesCopies key={item.key} series={item} />
+                <SeriesCopies key={item.key} series={item} picking={picking} />
               ),
             )}
           </section>
@@ -214,7 +403,7 @@ function waiting(item: Download): boolean {
  * series' order, with the episodes between them that aren't here. The arrow folds the episodes
  * away, and back, in place.
  */
-function SeriesCopies({ series }: { series: ShelfSeries }) {
+function SeriesCopies({ series, picking }: { series: ShelfSeries; picking: Picking }) {
   const [open, setOpen] = useState(true);
   const [newest] = series.copies;
 
@@ -225,6 +414,8 @@ function SeriesCopies({ series }: { series: ShelfSeries }) {
   );
 
   const size = series.copies.reduce((sum, copy) => sum + (copy.size ?? 0), 0);
+  const ids = series.copies.map(({ id }) => id);
+  const picked = ids.filter((id) => picking.selected.has(id)).length;
 
   const facts = [
     newest.subscription?.name ?? t("Subscription removed, copy kept"),
@@ -242,7 +433,13 @@ function SeriesCopies({ series }: { series: ShelfSeries }) {
       data-series={series.key}
       className="border-b border-white/8 last:border-b-0 [&>:last-child]:border-b-0"
     >
-      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-4 border-b border-white/8 py-3">
+      <div className="grid grid-cols-[1.375rem_2.5rem_minmax(0,1fr)_auto] items-center gap-4 border-b border-white/8 py-3">
+        <Pick
+          label={t("Select {name}", { name: newest.name })}
+          checked={picked === ids.length}
+          mixed={picked > 0 && picked < ids.length}
+          onChange={(on) => picking.select(ids, on)}
+        />
         <span className="block aspect-[2/3] overflow-hidden rounded-md">
           <Artwork url={newest.posterUrl} name={newest.name} size="thumb" plain />
         </span>
@@ -264,14 +461,14 @@ function SeriesCopies({ series }: { series: ShelfSeries }) {
       {open &&
         series.seasons.map((season) => (
           <Fragment key={season.key}>
-            <div className="mt-2.5 ml-14 text-[0.8125rem] font-semibold">
+            <div className="mt-2.5 ml-[5.875rem] text-[0.8125rem] font-semibold">
               {season.number === 0
                 ? t("Specials")
                 : t("Season {number}", { number: String(season.number) })}
             </div>
             {season.entries.map((entry) =>
               entry.kind === "copy" ? (
-                <Row key={entry.copy.id} item={entry.copy} inSeries />
+                <Row key={entry.copy.id} item={entry.copy} picking={picking} inSeries />
               ) : (
                 <Gap
                   key={`gap:${entry.episodes[0]}`}
@@ -292,7 +489,7 @@ function Gap({ season, episodes }: { season: number; episodes: readonly number[]
   const last = episodes.at(-1) ?? first;
 
   return (
-    <div className="ml-14 grid grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-4 border-b border-white/8 py-1.5 text-xs text-muted-foreground last:border-b-0">
+    <div className="ml-[5.875rem] grid grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-4 border-b border-white/8 py-1.5 text-xs text-muted-foreground last:border-b-0">
       <span />
       <span className="truncate">
         {episodes.length > 1
@@ -308,11 +505,13 @@ function Gap({ season, episodes }: { season: number; episodes: readonly number[]
 
 function Row({
   item,
+  picking,
   first = false,
   last = false,
   inSeries = false,
 }: {
   item: Download;
+  picking: Picking;
   /** Whether it is the first, or last, of the downloads waiting their turn. */
   first?: boolean;
   last?: boolean;
@@ -330,6 +529,10 @@ function Row({
 
   const move = useMutation({
     mutationFn: (by: -1 | 1) => call("downloads.move", { id: item.id, by }),
+  });
+
+  const cancelMove = useMutation({
+    mutationFn: () => call("downloads.cancelMove", { id: item.id }),
   });
 
   // Pressed again while it is under way, a change does nothing; it isn't disabled meanwhile,
@@ -388,9 +591,11 @@ function Row({
       ? item.progress
       : null;
 
-  const line = statusLine(item);
-  const failed = status.kind === "failed" || status.kind === "missing";
-  const error = remove.error ?? retry.error;
+  const relocating = picking.moving.has(item.id);
+  const line = relocating ? t("Moving to {folder}", { folder: picking.folder }) : statusLine(item);
+  const failed = !relocating && (status.kind === "failed" || status.kind === "missing");
+  const failure = picking.failed.get(item.id);
+  const error = remove.error ?? retry.error ?? cancelMove.error;
   const unkept = hold.error ?? move.error;
 
   return (
@@ -399,12 +604,17 @@ function Row({
       className={cn(
         "grid items-center gap-4 border-b border-white/8 last:border-b-0",
         numbered
-          ? "ml-14 grid-cols-[1.75rem_minmax(0,1fr)_auto] py-1.5"
-          : "grid-cols-[2.5rem_minmax(0,1fr)_auto] py-3",
+          ? "grid-cols-[1.375rem_2.5rem_1.75rem_minmax(0,1fr)_auto] py-1.5"
+          : "grid-cols-[1.375rem_2.5rem_minmax(0,1fr)_auto] py-3",
       )}
     >
+      <Pick
+        label={t("Select {name}", { name: numbered ? `${item.name} · ${name}` : name })}
+        checked={picking.selected.has(item.id)}
+        onChange={(on) => picking.select([item.id], on)}
+      />
       {numbered && title.kind === "episode" ? (
-        <span className="text-right text-xs text-muted-foreground tabular-nums">
+        <span className="col-start-3 text-right text-xs text-muted-foreground tabular-nums">
           {title.episode}
         </span>
       ) : (
@@ -434,8 +644,10 @@ function Row({
             {line && <span className="min-w-0 truncate">{line}</span>}
           </div>
         )}
-        {error && (
-          <div className="mt-1 text-xs text-destructive">{describeError(appError(error))}</div>
+        {(failure ?? error) && (
+          <div className="mt-1 text-xs text-destructive">
+            {describeError(failure ?? appError(error))}
+          </div>
         )}
         {unkept && (
           <div role="alert" className="mt-1 text-xs text-destructive">
@@ -496,7 +708,17 @@ function Row({
             {t("Retry")}
           </Button>
         )}
-        {copy || status.kind === "failed" ? (
+        {relocating && (
+          <Button
+            size="sm"
+            onClick={() => {
+              if (!cancelMove.isPending) cancelMove.mutate();
+            }}
+          >
+            {t("Cancel move")}
+          </Button>
+        )}
+        {relocating ? null : copy || status.kind === "failed" ? (
           <Button
             variant={confirming ? "destructive" : "ghost"}
             size="sm"
@@ -521,6 +743,160 @@ function Row({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** What a row needs of the page's selection: whether it is picked, moving or failed last time. */
+interface Picking {
+  readonly selected: ReadonlySet<string>;
+  readonly select: (ids: readonly string[], on: boolean) => void;
+  readonly moving: ReadonlySet<string>;
+  readonly failed: ReadonlyMap<string, AppError>;
+  /** The last name of the folder copies move to, as a moving row says. */
+  readonly folder: string;
+}
+
+/** The round box that selects a row, or every copy of a series, `mixed` while only some are. */
+function Pick({
+  label,
+  checked,
+  mixed = false,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  mixed?: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  const box = useRef<HTMLInputElement>(null);
+
+  useLayoutEffect(() => {
+    if (box.current) box.current.indeterminate = mixed;
+  });
+
+  return (
+    <span className="relative grid size-[22px] place-items-center">
+      <input
+        ref={box}
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="peer size-[22px] appearance-none rounded-full border-[1.5px] border-white/60 bg-black/30 outline-none checked:border-foreground checked:bg-foreground indeterminate:border-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <Check
+        strokeWidth={3}
+        className="pointer-events-none absolute size-[13px] text-black opacity-0 peer-checked:opacity-100"
+      />
+      <Minus
+        strokeWidth={3}
+        className="pointer-events-none absolute size-[13px] opacity-0 peer-indeterminate:opacity-100"
+      />
+    </span>
+  );
+}
+
+/**
+ * The household folder new downloads go to, and Change folder, which opens the system's folder
+ * picker in main. Closing the picker changes nothing; a folder that can't be used says why.
+ */
+function Folder({ storage }: { storage: DownloadFolder }) {
+  const choose = useMutation({ mutationFn: () => call("downloads.chooseFolder") });
+
+  return (
+    <>
+      <div className="mb-3 flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        <span className="min-w-0 truncate" title={storage.path}>
+          {t("New downloads go to {folder}", { folder: storage.path })}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-my-1"
+          onClick={() => {
+            if (!choose.isPending) choose.mutate();
+          }}
+        >
+          {t("Change folder")}
+        </Button>
+      </div>
+      {choose.error && (
+        <p role="alert" className="-mt-2 mb-3 text-[0.8125rem] text-destructive">
+          {describeError(appError(choose.error))}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * With any download selected: how many, then each action that fits some of them, sent only for
+ * those. Delete asks again with its count on a second press, and forgets once the keyboard leaves
+ * it or Escape is pressed. Done clears the selection.
+ */
+function SelectionBar({
+  chosen,
+  folder,
+  start,
+  finish,
+}: {
+  chosen: readonly Download[];
+  /** The last name of the household folder, or null where this computer has none to move to. */
+  folder: string | null;
+  start: (action: Action, ids: readonly string[]) => void;
+  finish: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  const button = (action: Action, label: string) => {
+    const ids = applicable(chosen, action);
+
+    return (
+      ids.length > 0 && (
+        <Button key={action} size="sm" onClick={() => start(action, ids)}>
+          {label}
+        </Button>
+      )
+    );
+  };
+
+  return (
+    <div
+      role="group"
+      aria-label={t("{count} selected", { count: chosen.length })}
+      data-selection
+      className="mb-3 flex h-11 items-center gap-2 rounded-full bg-accent pr-1.5 pl-4"
+    >
+      <span className="text-[0.8125rem] font-semibold tabular-nums">
+        {t("{count} selected", { count: chosen.length })}
+      </span>
+      <span className="grow" />
+      {button("pause", t("Pause download"))}
+      {button("resume", t("Resume download"))}
+      {button("retry", t("Retry"))}
+      {folder !== null && button("move", t("Move to {folder}", { folder }))}
+      <Button
+        size="sm"
+        variant={confirming ? "destructive" : "secondary"}
+        onBlur={() => setConfirming(false)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && confirming) {
+            event.preventDefault();
+            setConfirming(false);
+          }
+        }}
+        onClick={() => {
+          if (!confirming) return setConfirming(true);
+          setConfirming(false);
+          start("remove", applicable(chosen, "remove"));
+        }}
+      >
+        {confirming ? t("Delete {count} downloads", { count: chosen.length }) : t("Delete")}
+      </Button>
+      <Button variant="ghost" size="sm" onClick={finish}>
+        {t("Done")}
+      </Button>
     </div>
   );
 }

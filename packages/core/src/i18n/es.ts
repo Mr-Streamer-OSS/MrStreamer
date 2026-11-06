@@ -1271,6 +1271,18 @@ export const es: Translation = {
     "Las descargas sin terminar acabaron con su suscripción.",
   "Subscription removed, copy kept": "Suscripción quitada, copia conservada",
   "Delete copy": "Eliminar copia",
+  "New downloads go to {folder}": "Las nuevas descargas van a {folder}",
+  "Change folder": "Cambiar carpeta",
+  "Select {name}": "Seleccionar {name}",
+  "{count} selected": { one: "{count} seleccionada", other: "{count} seleccionadas" },
+  "Move to {folder}": "Mover a {folder}",
+  "Moving to {folder}": "Moviendo a {folder}",
+  "Cancel move": "Cancelar movimiento",
+  "Delete {count} downloads": {
+    one: "Eliminar {count} descarga",
+    other: "Eliminar {count} descargas",
+  },
+  "{done} of {total} done": "{done} de {total} hechas",
   Offline: "Sin conexión",
   "Disk full. Free some space, then retry.":
     "Disco lleno. Libera algo de espacio y vuelve a intentarlo.",
