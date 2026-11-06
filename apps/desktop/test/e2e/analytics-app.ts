@@ -246,7 +246,7 @@ const updateFeed = createServer((_req, res) => {
 
 const actions: { action: string; at: string }[] = [];
 
-const observations: Record<string, unknown> & {
+const observations: Record<string, Json | undefined> & {
   guideFavouriteRenames?: {
     capturedAt: number;
     count: number;
@@ -272,7 +272,7 @@ const prefixCounters: {
   transitions: { at: number; total: number }[];
 }[] = [];
 
-const pointerInputs: Record<string, unknown>[] = [];
+const pointerInputs: Record<string, Json | undefined>[] = [];
 const log: string[] = [];
 let app: ChildProcess | undefined;
 let page: Page | undefined;
@@ -319,8 +319,8 @@ let debuggingPort = 0;
 const broadcasts = new Set<ChildProcess>();
 let failure: unknown;
 const cleanupErrors: string[] = [];
-const exits: Record<string, unknown>[] = [];
-const endTree: unknown[] = [];
+const exits: Record<string, Json | undefined>[] = [];
+const endTree: Json[] = [];
 
 /** Validate a clone, then compare the complete raw wire body before any unknown-key deletion. */
 function captured(payload: Json): CaptureEvent {
@@ -383,7 +383,7 @@ function live() {
   return page;
 }
 
-async function send(method: string, params: Record<string, unknown> = {}) {
+async function send(method: string, params: Record<string, Json | undefined> = {}) {
   abort.signal.throwIfAborted();
   const reply = await live().send(method, params);
 
@@ -397,7 +397,7 @@ let startupSample: Awaited<ReturnType<typeof startupProbe>>["read"] | undefined;
 let startupPreferences: Awaited<ReturnType<typeof startupProbe>>["preferences"] | undefined;
 let startupReadDelayMs = 0;
 let startupCaptureFrom = 0;
-const startupSamples: unknown[] = [];
+const startupSamples: Json[] = [];
 
 async function captureStartup() {
   const sample = startupSample;
@@ -877,7 +877,10 @@ async function verifyAbout() {
 
   if (shown.source !== target.source || !shown.text.includes(target.version))
     throw new Error("About does not match the pinned version/source");
-  await snapshot("about-" + (observations["instances"] as unknown[]).length);
+  const instances = observations["instances"];
+
+  if (!Array.isArray(instances)) throw new Error("Missing observed instances");
+  await snapshot("about-" + instances.length);
   await keyEscape();
 }
 
@@ -940,8 +943,8 @@ async function namedButton(selector: string, name: string, title = false) {
   actions.push({ action: `Pressed ${name}`, at: new Date().toISOString() });
 }
 
-async function analyticsFile(): Promise<Record<string, unknown>> {
-  const kept: unknown = JSON.parse(await readFile(join(profile, "analytics.json"), "utf8"));
+async function analyticsFile(): Promise<Record<string, Json | undefined>> {
+  const kept: Json = JSON.parse(await readFile(join(profile, "analytics.json"), "utf8"));
 
   if (!record(kept)) throw new Error("Invalid analytics state.");
 
@@ -966,7 +969,7 @@ async function usageCount(key: UsageKey): Promise<number> {
   }
 
   try {
-    let kept: Record<string, unknown>;
+    let kept: Record<string, Json | undefined>;
 
     if (diagnostic) {
       const bytes = await readFile(join(profile, "analytics.json"));
@@ -2087,13 +2090,11 @@ try {
     )
       throw new Error("Re-enable did not observe an unknown current version exactly once.");
 
-    const diagnostics = await live().evaluate<unknown>(
-      "window.mrStreamer.invoke('diagnostics.preview')",
-    );
+    const diagnostics = await live().evaluate("window.mrStreamer.invoke('diagnostics.preview')");
 
     if (JSON.stringify(diagnostics).includes(first.distinct_id))
       throw new Error("Installation identity leaked into diagnostics.");
-    const stored: unknown = JSON.parse(await readFile(join(profile, "analytics.json"), "utf8"));
+    const stored: Json = JSON.parse(await readFile(join(profile, "analytics.json"), "utf8"));
 
     if (
       !record(stored) ||
@@ -2210,7 +2211,7 @@ try {
     await connectFixture();
 
     const outbox = async () => {
-      const kept: unknown = JSON.parse(await readFile(join(profile, "analytics.json"), "utf8"));
+      const kept: Json = JSON.parse(await readFile(join(profile, "analytics.json"), "utf8"));
 
       if (!record(kept) || !Array.isArray(kept["pending"]))
         throw new Error("Invalid analytics outbox.");

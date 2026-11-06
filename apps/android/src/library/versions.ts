@@ -1,4 +1,3 @@
-import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
@@ -30,7 +29,7 @@ export function versionMemory(storage: {
   writeJson(name: string, value: Json): void;
 }) {
   const file = "library-versions.json";
-  let raw: unknown;
+  let raw: Json | undefined;
 
   try {
     raw = storage.readJson(file);
@@ -38,19 +37,16 @@ export function versionMemory(storage: {
     // An unreadable file is never an empty preference file.
   }
 
-  let picks: Record<string, unknown> =
-    type.keywords.object.root.allows(raw) && !isCallable(raw) && !Array.isArray(raw)
-      ? Object.fromEntries(Object.entries(raw))
-      : {};
+  const object = (value: Json | undefined): value is JsonObject =>
+    type.keywords.object.root.allows(value) && !Array.isArray(value);
+
+  let picks: JsonObject = object(raw) ? Object.fromEntries(Object.entries(raw)) : {};
 
   return {
     get: (key: string) => (type.keywords.string.root.allows(picks[key]) ? picks[key] : undefined),
     set(key: string, version: string | null) {
       // Reread before saving: null starts again; an unreadable file remains retryable.
       const saved = storage.readJson(file);
-
-      const object = (value: Json): value is JsonObject =>
-        type.keywords.object.root.allows(value) && !Array.isArray(value);
 
       if (saved !== null && !object(saved)) throw new Error("Couldn't save version");
       const next: Record<string, Json | undefined> = saved === null ? {} : { ...saved };

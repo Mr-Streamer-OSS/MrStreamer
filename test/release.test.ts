@@ -1054,7 +1054,7 @@ else console.log(JSON.stringify({workflow_runs:fixture.runs}));
         zip: validationArchive(evidence).toString("base64"),
       };
 
-      const execute = (patch: Record<string, unknown> = {}, workflowSha = sha) => {
+      const execute = (patch: Record<string, Json | undefined> = {}, workflowSha = sha) => {
         const output = join(dir, "output");
         writeFileSync(output, "");
 

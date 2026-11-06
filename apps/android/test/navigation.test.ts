@@ -1,7 +1,12 @@
+import type { Tabs as NavigatorTabs } from "expo-router/js-tabs";
+import type { ComponentProps } from "react";
+
 import { Window, type Element } from "happy-dom";
 import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Store } from "../src/platform/store.ts";
+
+type CapturedNavigator = Omit<ComponentProps<typeof NavigatorTabs>, "tabBar" | "children">;
 
 // Paper A's navigation as the viewer meets it: Connect or the destinations, the destinations
 // along the bottom on a phone and down a rail from 600dp, Search, Downloads and Settings opening
@@ -20,7 +25,7 @@ const scenario = vi.hoisted(() => ({
   segments: ["(tabs)", "(live)"] as string[],
   asked: [] as string[],
   /** What the tabs layout gave the navigator, but its children and bar. */
-  navigator: {} as Record<string, unknown>,
+  navigator: {} as Partial<CapturedNavigator>,
   /** The destination the tabs show. */
   focused: "",
   /** Back's listeners, oldest first. */
@@ -269,8 +274,7 @@ vi.mock("expo-router/js-tabs", async () => {
   }: {
     tabBar: Bar;
     children: ReactNode;
-    [key: string]: unknown;
-  }) => {
+  } & CapturedNavigator) => {
     scenario.navigator = rest;
 
     const routes = Children.toArray(children)

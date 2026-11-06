@@ -809,7 +809,7 @@ async function main(): Promise<void> {
 
       return;
     case "record": {
-      const manifest: Record<string, unknown> = JSON.parse(readFileSync(MANIFEST, "utf8"));
+      const manifest: Record<string, Json | undefined> = JSON.parse(readFileSync(MANIFEST, "utf8"));
       const next = recordedVersion(String(manifest.version), values.version ?? "");
 
       if (next) {

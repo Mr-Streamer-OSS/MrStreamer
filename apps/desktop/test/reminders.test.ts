@@ -1,3 +1,5 @@
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 // Programme reminders through the app's services, against the fake provider and a guide served
 // for the test, with a test clock the test moves and a stand-in for the system's notifications.
 import { existsSync, readFileSync } from "node:fs";
@@ -16,6 +18,9 @@ import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import type { FakeProvider } from "./fake-provider.ts";
 import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+
+/** A parsed JSON object whose fields stay as stored. */
+const JsonRecord = arkType({ "[string]": JsonValue });
 
 // Each guide download is indexed in a worker thread started from source.
 vi.setConfig({ testTimeout: 20_000 });
@@ -59,9 +64,11 @@ function fakeNotifier(file: string, supported = true) {
     show(notice, on) {
       if (refuse === "throw") throw new Error("The system broke.");
 
-      const kept = JSON.parse(readFileSync(file, "utf8")) as {
-        subscriptions: Record<string, { id: string; state: unknown }[]>;
-      };
+      const kept = arkType({
+        subscriptions: arkType({
+          "[string]": arkType({ id: "string", state: JsonValue }).array(),
+        }),
+      }).assert(JSON.parse(readFileSync(file, "utf8")));
 
       storedAtShow.push(
         Object.values(kept.subscriptions)
@@ -573,9 +580,9 @@ describe("programme reminders", () => {
     expect((await again.reminders.list()).reminders).toEqual([]);
     expect(notices.shown).toHaveLength(1);
 
-    const read = JSON.parse(await readFile(join(dataDir, "reminders.json"), "utf8")) as {
-      subscriptions: Record<string, unknown>;
-    };
+    const read = arkType({ subscriptions: JsonRecord }).assert(
+      JSON.parse(await readFile(join(dataDir, "reminders.json"), "utf8")),
+    );
 
     expect(read.subscriptions["gone-subscription"]).toBeUndefined();
   });
@@ -641,9 +648,11 @@ describe("programme reminders", () => {
     await app.close();
     const path = join(dataDir, "reminders.json");
 
-    const file = JSON.parse(await readFile(path, "utf8")) as {
-      subscriptions: Record<string, Record<string, unknown>[]>;
-    };
+    const file = arkType({
+      subscriptions: arkType({
+        "[string]": JsonRecord.array(),
+      }),
+    }).assert(JSON.parse(await readFile(path, "utf8")));
 
     const [entry] = file.subscriptions[app.subscriptionId] ?? [];
     const later = { kind: "later", when: "never" };
@@ -776,7 +785,9 @@ describe("programme reminders", () => {
     // The clock runs on past its start a quarter of a minute at a time, and nothing else asks.
     for (let time = at("20:28") + 15_000; time <= at("20:31"); time += MINUTE / 4) {
       await again.clockTo(time);
-      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      if (time >= at("20:30"))
+        await vi.waitFor(() => expect(notices.shown.map((each) => each.id)).toEqual([reminder.id]));
     }
 
     expect(notices.shown.map((each) => each.id)).toEqual([reminder.id]);

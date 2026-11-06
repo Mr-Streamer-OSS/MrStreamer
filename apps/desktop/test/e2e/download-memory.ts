@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Measures what a download holds in memory while it transfers a large file, and that what it
@@ -114,7 +115,7 @@ async function measure(mebibytes: number, out: string | undefined) {
   const origin = `http://127.0.0.1:${port}`;
   const dir = await mkdtemp(join(tmpdir(), "download-memory-"));
   const part = join(dir, "media.mkv.part");
-  const results: Record<string, unknown>[] = [];
+  const results: Record<string, Json | undefined>[] = [];
   const baseline = process.memoryUsage().rss;
 
   try {

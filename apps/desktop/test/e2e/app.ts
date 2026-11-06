@@ -113,7 +113,11 @@ export async function connect(
     closeListeners.clear();
   });
 
-  const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000) =>
+  const send = (
+    method: string,
+    params: Record<string, Json | undefined> = {},
+    timeoutMs = 10_000,
+  ) =>
     new Promise<{ result?: Json | undefined; error?: Json | undefined }>((resolve) => {
       if (closed) {
         resolve({ error: "DevTools connection closed" });
@@ -162,7 +166,7 @@ export async function connect(
         closeListeners.delete(listener);
       };
     },
-    async evaluate<T>(expression: string, timeoutMs = 10_000): Promise<T> {
+    async evaluate<T = Json | undefined>(expression: string, timeoutMs = 10_000): Promise<T> {
       const reply = await send(
         "Runtime.evaluate",
         {

@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Smoke test for a built app: connects it to the fake provider through the login form and checks
@@ -90,7 +91,7 @@ const evidenceRoot = join(import.meta.dirname, "../../../../.local/verification"
 mkdirSync(evidenceRoot, { recursive: true });
 
 const evidence = mkdtempSync(join(evidenceRoot, "packaged-app-"));
-const observed: Record<string, unknown> = {};
+const observed: Record<string, Json | undefined> = {};
 const provider = await startFakeProvider({ channels: 60, live: true });
 const hls = await startFakeHls({ realtime: true });
 const app = launch(executable, rest, { port, profile });

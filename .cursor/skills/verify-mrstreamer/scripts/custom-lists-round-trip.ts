@@ -183,7 +183,7 @@ export async function customListRoundTripScenario(
   // The prior release on the same profile.
   await d.launch("en_US", "prior");
   await d.wait(() => d.exists("document.querySelector('header')"));
-  d.observed["priorStatus"] = await d.evaluate<unknown>(
+  d.observed["priorStatus"] = await d.evaluate<Json>(
     "(async () => { const r = await window.mrStreamer.invoke('updates.status'); return r.ok ? { installed: r.value.installed ?? r.value.current ?? null, channel: r.value.channel, distribution: r.value.distribution } : r; })()",
   );
   d.observed["priorUserAgent"] = await d.evaluate<string>("navigator.userAgent");
@@ -288,7 +288,7 @@ export async function customListRoundTripScenario(
   d.observed["diskAfterCandidateStart"] = candidate;
   check(candidate.membersOfErased === 0, "The erased account's channels stayed in the file");
   // The prior release's viewing shows: both favourites it starred.
-  d.observed["favouritesAfter"] = await d.evaluate<unknown>(
+  d.observed["favouritesAfter"] = await d.evaluate<Json>(
     "(async () => { const r = await window.mrStreamer.invoke('viewing.get'); return r.ok ? r.value.favourites.length : null; })()",
   );
   check(d.observed["favouritesAfter"] === 2, "The prior release's favourites are gone");

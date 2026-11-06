@@ -355,7 +355,7 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
     await openGuides();
   };
 
-  const languages: Record<string, unknown> = {};
+  const languages: Record<string, Json | undefined> = {};
 
   for (const each of ["en-US", "nl-NL", "de-DE", "fr-FR", "es-ES"] as const) {
     if (each !== locale) await pick(each);

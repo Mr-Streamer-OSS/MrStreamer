@@ -124,7 +124,13 @@ async function run() {
   const logs: string[] = [];
   const actions: { action: string; at: string }[] = [];
 
-  const observed: Record<string, unknown> = {
+  const observed: Record<
+    string,
+    | Json
+    | readonly (Json | undefined)[]
+    | Record<string, Json | readonly (Json | undefined)[] | undefined>
+    | undefined
+  > = {
     bundleSha256: createHash("sha256").update(bundle).digest("hex"),
     endpointInBundle: ENDPOINT,
     // Other methods and paths under /ingest must not leave the site.
@@ -378,7 +384,7 @@ app.on('window-all-closed', () => app.quit());
       return page;
     };
 
-    const send = async (method: string, params: Record<string, unknown> = {}) => {
+    const send = async (method: string, params: Record<string, Json | undefined> = {}) => {
       const reply = await live().send(method, params);
 
       if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
@@ -488,7 +494,11 @@ app.on('window-all-closed', () => app.quit());
         .at(-1);
 
       if (!found) return undefined;
-      const { properties } = JSON.parse(found.raw) as { properties: Record<string, unknown> };
+      const packet: Json = JSON.parse(found.raw);
+
+      if (!record(packet) || !record(packet["properties"]))
+        throw new Error("Missing entry properties");
+      const properties = packet["properties"];
 
       return [properties["entry_source"], properties["entry_medium"], properties["entry_campaign"]];
     };
@@ -573,7 +583,7 @@ app.on('window-all-closed', () => app.quit());
     const reachedSections = () =>
       captures.flatMap((c) => {
         if (!c.raw.includes('"feature_section_viewed"')) return [];
-        const body: unknown = JSON.parse(c.raw);
+        const body: Json = JSON.parse(c.raw);
 
         if (
           !(arkType.keywords.object.root.allows(body) && !isCallable(body)) ||
@@ -687,7 +697,7 @@ app.on('window-all-closed', () => app.quit());
     // 1c. Where a visit entered. The browser reports each referrer, here as a whole private
     // address; the page may send and keep only fixed codes. Pages opened from the site or the
     // address bar keep the tab's entry; a tagged link or another site starts a new one.
-    const entries: Record<string, unknown> = {};
+    const entries: Record<string, Json | readonly (Json | undefined)[] | undefined> = {};
     const fromTag = captures.length;
     act("Open Home from a tagged GitHub link whose referrer is a full private address");
     await send("Page.navigate", {

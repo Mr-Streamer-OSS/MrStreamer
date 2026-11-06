@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 // What a marketing capture run takes and how it records each master, for marketing-capture.ts.
 // See docs/contributing/marketing-artwork.md.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -54,7 +55,26 @@ export interface CaptureEntry {
 }
 
 /** The build, system and inputs a master was captured from. */
-export type Provenance = Readonly<Record<string, unknown>>;
+export type Provenance = Omit<
+  Partial<ReturnType<typeof import("./marketing-capture.ts").provenance>>,
+  "electron"
+> & {
+  readonly electron?: string | undefined;
+  readonly status?: string;
+  readonly method?: string;
+  readonly nativeSession?: Json;
+  readonly evidence?: string;
+  readonly language?: string;
+  readonly caption?: string;
+  readonly sources?: Json | undefined;
+  readonly media?: Json | undefined;
+  readonly buildFiles?: Json | undefined;
+  readonly fixtureFiles?: Json | undefined;
+  readonly analytics?: Json | undefined;
+  readonly credits?: readonly string[];
+  readonly limitations?: readonly string[];
+  readonly linuxCaptureScriptSha256?: string;
+};
 
 interface CaptureManifest {
   readonly captures: readonly { readonly name: string }[];

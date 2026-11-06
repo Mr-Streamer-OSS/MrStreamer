@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
@@ -23,7 +24,7 @@ const open = (html: string) => {
     .replace(/<script type="module"[^>]*><\/script>/g, "");
 };
 
-const appData = (): Record<string, unknown> =>
+const appData = (): Record<string, Json | undefined> =>
   JSON.parse(document.querySelector('script[type="application/ld+json"]')?.textContent ?? "{}");
 
 const links = () =>

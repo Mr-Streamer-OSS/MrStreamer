@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // Optional diagnostics for measure-app.ts. These samples are deliberately separate from the
 // comparator's latency metrics: CPU, scheduler wakeups and V8 samples have different limits.
@@ -199,7 +200,11 @@ function bundleIdentity(executable: string, appDirectory: string | undefined) {
   };
 }
 
-async function command<T>(page: Page, method: string, params: Record<string, unknown> = {}) {
+async function command<T>(
+  page: Page,
+  method: string,
+  params: Record<string, Json | undefined> = {},
+) {
   const reply = await page.send(method, params);
 
   if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
