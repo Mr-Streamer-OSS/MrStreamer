@@ -1668,12 +1668,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       { id: done.id, status: { kind: "complete" }, progress: { position: 3, duration: 10 } },
     ]);
     expect(await recovered.downloads.copy(done.id)).toEqual(copy);
-
-    const played = await recovered.playback.openCopy(
-      await recovered.downloads.copy(done.id),
-      DECODERS,
-    );
-
+    const played = await recovered.playback.openCopy(copy, DECODERS);
     expect(await recovered.subtitles.saved(played.sessionId)).toEqual(keptSubtitles);
     await recovered.playback.close(played.sessionId);
     expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
@@ -1734,10 +1729,8 @@ describe.skipIf(!hasTools)("downloads", () => {
       (cause: unknown) => cause,
     );
 
-    expect.soft(removal).toMatchObject(failure);
-    expect
-      .soft((await refused.subscriptions.list()).map((each) => each.id))
-      .toContain(subscriptionId);
+    expect(removal).toMatchObject(failure);
+    expect((await refused.subscriptions.list()).map((each) => each.id)).toContain(subscriptionId);
     expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
     expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
     await refused.quit();
@@ -1759,19 +1752,9 @@ describe.skipIf(!hasTools)("downloads", () => {
 
     const again = await app(dataDir);
     expect((await again.subscriptions.list()).map((each) => each.id)).toEqual([other.id]);
-    expect((await again.downloads.list()).items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: done.id,
-          status: expect.objectContaining({ kind: "complete" }),
-        }),
-        expect.objectContaining({
-          id: otherDone.id,
-          status: expect.objectContaining({ kind: "complete" }),
-        }),
-      ]),
-    );
-    expect((await again.downloads.list()).items).toHaveLength(2);
+    const items = (await again.downloads.list()).items;
+    expect(items.map((each) => each.id).sort()).toEqual([done.id, otherDone.id].sort());
+    expect(items.every((each) => each.status.kind === "complete")).toBe(true);
     expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
     expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
     await again.quit();

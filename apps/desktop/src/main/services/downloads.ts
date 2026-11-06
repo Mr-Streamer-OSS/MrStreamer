@@ -236,7 +236,8 @@ function make(deps: DownloadsDeps) {
 
     // Without its table nothing can be queued or listed either: each call says so, as the store
     // says it then, in the interface language of that moment. A read that works later still fails:
-    // nothing on disk was checked against the table at the start.
+    // nothing on disk was checked against the table at the start. A refused startup recovery save
+    // below sets it too, so the next start recovers that copy again.
     let unloaded =
       configured._tag === "Failure"
         ? store.folder.pipe(Effect.andThen(Effect.fail(configured.failure)))
@@ -403,7 +404,6 @@ function make(deps: DownloadsDeps) {
         const saved = yield* Effect.result(store.put(complete));
 
         if (saved._tag === "Failure") {
-          // Keep the renamed file for the next start; this run cannot claim completion or transfer it.
           unloaded = Effect.fail(saved.failure);
           break;
         }
