@@ -62,6 +62,7 @@ export const copyProgress = Effect.gen(function* () {
     });
 
   const of = (owner: ActiveProfile) => ({
+    owner,
     /** Seed once, including absence and zero. A failed migration leaves the legacy data intact. */
     read: (kind: CopyKind, id: string, legacy: Position | null) =>
       access(owner, (db, owner): Position | null => {
@@ -106,6 +107,7 @@ export const copyProgress = Effect.gen(function* () {
 
   return {
     admit,
+    of,
     // Existing callers retain their request-time semantics until their session contract carries
     // its admitted owner. Copy-open paths retain `admit` across asynchronous file checks.
     read: (kind: CopyKind, id: string, legacy: Position | null) =>

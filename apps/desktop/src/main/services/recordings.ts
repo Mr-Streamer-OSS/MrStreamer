@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // Recordings: local copies of a live channel, captured by this app while it runs. The viewer
 // starts one on the channel they see, until a stop time; it ends there, or when the viewer stops
 // it or quits, and what it captured stays until the viewer deletes it, whatever room it takes. An
@@ -220,9 +221,14 @@ export class Recordings extends Context.Service<
      * An ended recording's file for playback to open, with where it got to; null when no recording
      * has that id. Fails, listing it as missing, when its file went.
      */
-    copy(id: string): Effect.Effect<LocalCopy | null, Failed>;
+    copy(id: string, owner?: ActiveProfile): Effect.Effect<LocalCopy | null, Failed>;
     /** Keeps how far an ended recording played. */
-    recordProgress(id: string, position: number, duration: number): Effect.Effect<void, Failed>;
+    recordProgress(
+      id: string,
+      position: number,
+      duration: number,
+      owner?: ActiveProfile,
+    ): Effect.Effect<void, Failed>;
     /** Where new recordings go, the room they may take, and how much they take. */
     readonly storage: Effect.Effect<RecordingStorage, Failed>;
     setLimits(limits: RecordingLimits): Effect.Effect<RecordingStorage, Failed>;
@@ -352,7 +358,13 @@ function make(deps: RecordingsDeps) {
 
     const pendingProgress = new Map<
       string,
-      { position: number; duration: number; retryAt: number }
+      {
+        id: string;
+        owner: ReturnType<typeof personal.of>;
+        position: number;
+        duration: number;
+        retryAt: number;
+      }
     >();
 
     const subscriptions = yield* Subscriptions;
@@ -1896,7 +1908,7 @@ function make(deps: RecordingsDeps) {
       asleep = null;
 
       for (const [id, progress] of pendingProgress) {
-        if (!records.has(id)) {
+        if (!records.has(progress.id)) {
           pendingProgress.delete(id);
           continue;
         }
@@ -1905,7 +1917,7 @@ function make(deps: RecordingsDeps) {
         progress.retryAt = Date.now() + RETRY_MS;
 
         const saved = yield* Effect.result(
-          personal.write("recording", id, progress.position, progress.duration),
+          progress.owner.write("recording", progress.id, progress.position, progress.duration),
         );
 
         if (saved._tag === "Success" && pendingProgress.get(id) === progress)
@@ -2449,9 +2461,9 @@ function make(deps: RecordingsDeps) {
           // Room it took may let a paused one go on.
           yield* retryPaused;
         }),
-      copy: (id: string) =>
+      copy: (id: string, captured?: ActiveProfile) =>
         Effect.gen(function* () {
-          const owner = yield* personal.admit;
+          const owner = captured ? personal.of(captured) : yield* personal.admit;
           const record = records.get(id);
 
           if (!record || record.status.kind === "missed") return null;
@@ -2484,14 +2496,16 @@ function make(deps: RecordingsDeps) {
 
           return {
             id,
+            owner: owner.owner,
             path: fileOf(record),
             container: "ts",
             title: { kind: "movie", id },
             progress: yield* owner.read("recording", id, record.progress ?? null),
           } satisfies LocalCopy;
         }),
-      recordProgress: (id: string, position: number, duration: number) =>
+      recordProgress: (id: string, position: number, duration: number, captured?: ActiveProfile) =>
         Effect.gen(function* () {
+          const owner = captured ? personal.of(captured) : yield* personal.admit;
           yield* usable;
           const record = records.get(id);
 
@@ -2499,12 +2513,13 @@ function make(deps: RecordingsDeps) {
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("This recording is no longer there.") },
             });
-          const progress = { position, duration, retryAt: Date.now() + RETRY_MS };
-          pendingProgress.set(id, progress);
-          yield* personal.write("recording", id, position, duration).pipe(
+          const key = JSON.stringify([owner.owner.id, id]);
+          const progress = { id, owner, position, duration, retryAt: Date.now() + RETRY_MS };
+          pendingProgress.set(key, progress);
+          yield* owner.write("recording", id, position, duration).pipe(
             Effect.tap(() =>
               Effect.sync(() => {
-                if (pendingProgress.get(id) === progress) pendingProgress.delete(id);
+                if (pendingProgress.get(key) === progress) pendingProgress.delete(key);
               }),
             ),
             Effect.onError(() => wake),

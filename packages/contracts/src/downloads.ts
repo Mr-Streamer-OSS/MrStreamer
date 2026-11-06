@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "./profiles.ts";
 // Movies and episodes downloaded to this computer, as the UI sees them. A download names the exact
 // provider file it was made from, but a finished copy needs no subscription: it plays from disk,
 // with its own details, artwork and progress, after its subscription expired or was removed. Media paths,
@@ -128,6 +129,8 @@ export interface DownloadList {
 
 /** What plays a downloaded copy: like a title session, of a file on this computer. */
 export interface CopySession {
+  /** Captured when the copy was opened; old clients may omit it. */
+  readonly owner?: ActiveProfile;
   readonly sessionId: string;
   readonly copy: string;
   /** Loopback URL. Carries no path. */

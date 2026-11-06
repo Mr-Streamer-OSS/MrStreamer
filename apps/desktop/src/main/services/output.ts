@@ -1,3 +1,5 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
+import { AdmittedViewing } from "./profiles.ts";
 import {
   appDiagnostic,
   streamDiagnostic,
@@ -141,6 +143,7 @@ interface Playing {
 
 /** A title opened for the receiver. */
 interface OpenedTitle {
+  readonly record: ViewingRecord["Service"];
   readonly measurement: string | null;
   /** The public open turn that prepared this session, when one was supplied. */
   readonly turn: number | undefined;
@@ -195,6 +198,7 @@ export class Output extends Context.Service<
       channel: OwnedId,
       options: {
         readonly measurement?: string | undefined;
+        readonly owner?: ActiveProfile | undefined;
         readonly variants: readonly string[];
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
@@ -345,7 +349,7 @@ function make(deps: OutputDeps) {
         const position = positionOf(now);
 
         if (position <= 0) return;
-        yield* viewing
+        yield* title.record
           .recordProgress(
             randomUUID(),
             title.info.title,
@@ -921,6 +925,7 @@ function make(deps: OutputDeps) {
         channel: OwnedId,
         options: {
           readonly measurement?: string | undefined;
+          readonly owner?: ActiveProfile | undefined;
           readonly variants: readonly string[];
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
@@ -938,6 +943,7 @@ function make(deps: OutputDeps) {
 
             const stream = yield* playback.openReceiver(channel, yield* target(connection), {
               variants: options.variants,
+              owner: options.owner,
               audio: options.audio ?? null,
               audioLanguage: options.audioLanguage ?? null,
               turn: options.turn,
@@ -973,6 +979,18 @@ function make(deps: OutputDeps) {
 
         return one(
           Effect.gen(function* () {
+            const admitted = yield* Effect.serviceOption(AdmittedViewing);
+
+            // Standalone/older callers have no profile admission; retain their supplied record.
+            const record: ViewingRecord["Service"] =
+              admitted._tag === "Some"
+                ? {
+                    ...admitted.value.record,
+                    recordProgress: (...args) =>
+                      admitted.value.run(admitted.value.record.recordProgress(...args)),
+                  }
+                : viewing;
+
             const connection = yield* receiver;
             yield* inTurn(asked.turn);
             yield* drop(true);
@@ -995,6 +1013,7 @@ function make(deps: OutputDeps) {
             };
 
             opened.set(session.sessionId, {
+              record,
               info,
               offset: session.offset,
               since,

@@ -1,18 +1,37 @@
+import { Library } from "./library.ts";
+import { OnDemand } from "./ondemand.ts";
+import { Watchlist } from "./watchlist.ts";
+import { CustomLists } from "./custom-lists.ts";
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
-import { ViewingStore } from "@mrstreamer/core/viewing/service";
+import {
+  ViewingStore,
+  ViewingRecord,
+  LegacyViewing,
+  ViewingAccount,
+  ViewingChannels,
+  ViewingSeries,
+} from "@mrstreamer/core/viewing/service";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { defined } from "@mrstreamer/core/defined";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
+import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import { profileStorage } from "../platform/profile-store.ts";
 import { WatchlistStore } from "../platform/watchlist-store.ts";
 import { CustomListStore } from "../platform/custom-lists-store.ts";
-import { Settings, type InstallationConsent } from "./preferences.ts";
-import { Subscriptions } from "./subscription.ts";
+import {
+  Settings,
+  AdmittedSettings,
+  withInstallationConsent,
+  type InstallationConsent,
+} from "./preferences.ts";
+import { Subscriptions, type SavedSubscription } from "./subscription.ts";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import type { UsageObservers } from "../analytics/observers.ts";
 import * as Layer from "effect/Layer";
@@ -50,11 +69,41 @@ export function personalStoresLayer({
   ).pipe(Layer.provide(database ?? databaseLayer(profileDirectory(dataDir, profileId))));
 }
 
-/** The complete personal service environment an admitted operation may use. */
-type PersonalServices = ViewingStore | WatchlistStore | CustomListStore | Settings;
+/** Captured record for receiver callbacks that outlive the request which opened them. */
+export class AdmittedViewing extends Context.Service<
+  AdmittedViewing,
+  {
+    readonly record: ViewingRecord["Service"];
+    readonly run: ProfileAdmission["run"];
+  }
+>()("mrstreamer/AdmittedViewing") {}
 
-interface ProfileAdmission {
+// Operations each hold one permit. Erasure/deletion take them all after invalidating admissions.
+const PROFILE_OPERATIONS = Number.MAX_SAFE_INTEGER;
+
+type ProfileUpdate =
+  | { readonly kind: "active"; readonly active: ActiveProfile }
+  | { readonly kind: "viewing"; readonly profileId: string; readonly sequence: number }
+  | { readonly kind: "watchlist" | "lists" | "erased"; readonly profileId: string };
+
+/** The complete personal service environment an admitted operation may use. */
+type PersonalServices =
+  | ViewingStore
+  | WatchlistStore
+  | CustomListStore
+  | Settings
+  | ViewingRecord
+  | Watchlist
+  | CustomLists;
+
+export interface ProfileAdmission {
   readonly owner: ActiveProfile;
+  readonly services: {
+    readonly viewing: ViewingRecord["Service"];
+    readonly watchlist: Watchlist["Service"];
+    readonly lists: CustomLists["Service"];
+    readonly settings: Settings["Service"];
+  };
   /** A retained admission never resolves the active owner again, even when run much later. */
   readonly run: <A, E>(work: Effect.Effect<A, E, PersonalServices>) => Effect.Effect<A, E | Failed>;
 }
@@ -77,9 +126,18 @@ export function makeProfiles({
 }) {
   return Effect.gen(function* () {
     const storage = yield* profileStorage;
+    const events = yield* PubSub.unbounded<ProfileUpdate>();
+    const scope = yield* Effect.scope;
     const subscriptions = yield* Subscriptions;
+
+    const shared = yield* Effect.context<
+      Subscriptions | Library | OnDemand | ViewingAccount | ViewingChannels | ViewingSeries
+    >();
+
+    const original = yield* Effect.context<PersonalServices>();
     const one = yield* Semaphore.make(1);
     let active = yield* storage.active;
+    let configuredFor: string | null = active.id === DEFAULT_PROFILE_ID ? active.id : null;
 
     const handles = new Map<
       string,
@@ -118,30 +176,70 @@ export function makeProfiles({
         if (id !== DEFAULT_PROFILE_ID && !consent)
           return yield* refused("Profile switching requires the installation consent owner.");
 
-        const runtime = ManagedRuntime.make(
-          Layer.merge(
-            personalStoresLayer({ dataDir, profileId: id, ...defined({ usage }) }),
-            (consent
-              ? Settings.profileLayer(dataDir, id, consent, usage)
-              : Settings.layer(dataDir, usage)
-            ).pipe(Layer.provide(Layer.succeed(Subscriptions, subscriptions))),
-          ),
-        );
+        const settings = (
+          consent
+            ? Settings.profileLayer(dataDir, id, consent, usage)
+            : Settings.layer(dataDir, usage)
+        ).pipe(Layer.provide(Layer.succeed(Subscriptions, subscriptions)));
 
-        const context = yield* Effect.tryPromise({
-          try: () => runtime.context(),
-          catch: failedWith,
-        });
+        const stores = personalStoresLayer({ dataDir, profileId: id, ...defined({ usage }) });
+        const personal = Layer.mergeAll(stores, settings);
+
+        const features = Layer.mergeAll(
+          ViewingRecord.layer.pipe(
+            Layer.provide(
+              Layer.effect(
+                LegacyViewing,
+                Effect.map(Settings, (settings) => ({
+                  take: settings.legacyLists,
+                  drop: settings.dropLegacyLists,
+                })),
+              ),
+            ),
+          ),
+          Watchlist.layer,
+          CustomLists.layer,
+        ).pipe(Layer.provideMerge(personal), Layer.provide(Layer.succeedContext(shared)));
+
+        const runtime = id === DEFAULT_PROFILE_ID ? null : ManagedRuntime.make(features);
+
+        const context = runtime
+          ? yield* Effect.tryPromise({ try: () => runtime.context(), catch: failedWith })
+          : consent
+            ? Context.add(
+                original,
+                Settings,
+                withInstallationConsent(Context.get(original, Settings), consent),
+              )
+            : original;
 
         const handle = {
           context,
-          dispose: () => runtime.dispose(),
-          one: yield* Semaphore.make(1),
+          dispose: () => runtime?.dispose() ?? Promise.resolve(),
+          one: yield* Semaphore.make(PROFILE_OPERATIONS),
           closed: false,
           epoch: 0,
         };
 
         handles.set(id, handle);
+
+        const watches = [
+          Stream.runForEach(Context.get(context, ViewingRecord).changes, (sequence) =>
+            PubSub.publish(events, { kind: "viewing", profileId: id, sequence }),
+          ),
+          Stream.runForEach(Context.get(context, Watchlist).changes, () =>
+            PubSub.publish(events, { kind: "watchlist", profileId: id }),
+          ),
+          Stream.runForEach(Context.get(context, CustomLists).changes, () =>
+            PubSub.publish(events, { kind: "lists", profileId: id }),
+          ),
+        ];
+
+        for (const watch of watches) {
+          if (runtime) runtime.runFork(watch);
+          else yield* Effect.forkIn(watch, scope);
+        }
+
         // A closed/unreadable database must fail admission, never appear as an empty profile.
         yield* Context.get(context, CustomListStore).lists;
 
@@ -156,9 +254,78 @@ export function makeProfiles({
       }),
     );
 
+    const admitFor = (expected?: ActiveProfile) =>
+      one.withPermits(1)(
+        Effect.gen(function* () {
+          if (configuredFor !== active.id)
+            return yield* refused(
+              "Viewing profile configuration did not finish; select the profile again to retry.",
+            );
+
+          if (expected && (expected.id !== active.id || expected.revision !== active.revision))
+            return yield* refused("Viewing profile changed; retry this request.");
+          const owner = { ...active };
+          const handle = yield* opened(owner.id);
+          const epoch = handle.epoch;
+
+          const run: ProfileAdmission["run"] = (work) =>
+            Effect.suspend(() => {
+              if (handle.closed || handle.epoch !== epoch)
+                return Effect.fail(
+                  refused("This profile admission has ended; retry the operation."),
+                );
+
+              return handle.one.withPermits(1)(
+                Effect.gen(function* () {
+                  if (handle.closed || handle.epoch !== epoch)
+                    return yield* refused("This profile admission has ended; retry the operation.");
+
+                  return yield* Effect.provideContext(
+                    work,
+                    Context.add(
+                      Context.add(handle.context, AdmittedViewing, {
+                        record: Context.get(handle.context, ViewingRecord),
+                        run,
+                      }),
+                      AdmittedSettings,
+                      {
+                        settings: Context.get(handle.context, Settings),
+                        current: () => active.id === owner.id && active.revision === owner.revision,
+                      },
+                    ),
+                  );
+                }),
+              );
+            });
+
+          return {
+            owner,
+            run,
+            services: {
+              viewing: Context.get(handle.context, ViewingRecord),
+              watchlist: Context.get(handle.context, Watchlist),
+              lists: Context.get(handle.context, CustomLists),
+              settings: Context.get(handle.context, Settings),
+            },
+          } satisfies ProfileAdmission;
+        }),
+      );
+
+    if (configuredFor === null) {
+      const restored = yield* opened(active.id);
+      yield* Effect.provideService(Context.get(shared, OnDemand).reconfigure, AdmittedSettings, {
+        settings: Context.get(restored.context, Settings),
+        current: () => true,
+      });
+      configuredFor = active.id;
+    }
+
+    const activeRead: Effect.Effect<ActiveProfile, Failed> = Effect.sync(() => ({ ...active }));
+
     return {
+      changes: Stream.fromPubSub(events),
       list: storage.list,
-      active: Effect.sync(() => ({ ...active })),
+      active: activeRead,
       create: (name: string) =>
         one.withPermits(1)(
           Effect.suspend(() => {
@@ -176,38 +343,34 @@ export function makeProfiles({
                 );
           }),
         ),
-      admit: one.withPermits(1)(
-        Effect.gen(function* () {
-          const owner = { ...active };
-          const handle = yield* opened(owner.id);
-          const epoch = handle.epoch;
-
-          const run: ProfileAdmission["run"] = (work) =>
-            handle.one.withPermits(1)(
-              Effect.gen(function* () {
-                if (handle.closed || handle.epoch !== epoch)
-                  return yield* refused("This profile admission has ended; retry the operation.");
-
-                return yield* Effect.provideContext(work, handle.context);
-              }),
-            );
-
-          return { owner, run } satisfies ProfileAdmission;
-        }),
-      ),
+      admit: admitFor(),
+      admitFor,
       switch: (id: string) =>
         one.withPermits(1)(
           Effect.gen(function* () {
-            if (id === active.id) return { ...active };
+            if (id === active.id && configuredFor === id) return { ...active };
 
             if (!stopInteractive)
               return yield* refused(
                 "Profile switching is not enabled until interactive isolation is ready.",
               );
-            yield* opened(id);
+            const next = yield* opened(id);
             yield* stopInteractive();
             // Publish only after the durable selection commits; a failed save leaves the old owner.
             active = yield* storage.select(id);
+            configuredFor = null;
+            // While the lifecycle lock holds, no new-owner request reaches the shared catalogue
+            // before its existing worker has adopted this owner's TMDB configuration.
+            yield* Effect.provideService(
+              Context.get(shared, OnDemand).reconfigure,
+              AdmittedSettings,
+              {
+                settings: Context.get(next.context, Settings),
+                current: () => active.id === id,
+              },
+            );
+            configuredFor = id;
+            yield* PubSub.publish(events, { kind: "active", active: { ...active } });
 
             return { ...active };
           }),
@@ -222,7 +385,7 @@ export function makeProfiles({
 
             if (handle) {
               handle.closed = true;
-              yield* handle.one.withPermits(1)(
+              yield* handle.one.withPermits(PROFILE_OPERATIONS)(
                 Effect.tryPromise({ try: handle.dispose, catch: failedWith }),
               );
             }
@@ -235,7 +398,27 @@ export function makeProfiles({
             handles.delete(id);
           }),
         ),
-      eraseSource: (account: string) =>
+      prepareForget: (
+        subscription: SavedSubscription,
+        defaultForget?: ReturnType<Settings["Service"]["prepareForget"]>,
+      ) =>
+        one.withPermits(1)(
+          Effect.gen(function* () {
+            const settled = yield* Effect.forEach(yield* storage.list, (row) =>
+              Effect.gen(function* () {
+                if (row.deleting) return Effect.void;
+                const handle = yield* opened(row.id);
+
+                return yield* row.id === DEFAULT_PROFILE_ID && defaultForget
+                  ? defaultForget
+                  : Context.get(handle.context, Settings).prepareForget(subscription);
+              }),
+            );
+
+            return Effect.asVoid(Effect.forEach(settled, (settle) => settle));
+          }),
+        ),
+      eraseSource: (account: string, defaultErase?: Effect.Effect<void, Failed>) =>
         one.withPermits(1)(
           Effect.gen(function* () {
             const rows = yield* storage.list;
@@ -249,9 +432,12 @@ export function makeProfiles({
                 );
               const handle = yield* opened(row.id);
               handle.epoch++;
-              yield* handle.one.withPermits(1)(
-                Context.get(handle.context, ViewingStore).erase(account),
+              yield* handle.one.withPermits(PROFILE_OPERATIONS)(
+                row.id === DEFAULT_PROFILE_ID && defaultErase
+                  ? defaultErase
+                  : Context.get(handle.context, ViewingRecord).erase(account),
               );
+              yield* PubSub.publish(events, { kind: "erased", profileId: row.id });
             }
           }),
         ),
@@ -264,5 +450,53 @@ export class ProfileSessions extends Context.Service<
   Effect.Success<ReturnType<typeof makeProfiles>>
 >()("mrstreamer/ProfileSessions") {
   static readonly layer = (options: Parameters<typeof makeProfiles>[0]) =>
-    Layer.effect(ProfileSessions, makeProfiles(options));
+    Layer.effect(
+      ProfileSessions,
+      Effect.gen(function* () {
+        // Admission retries failed registry initialization. Do not turn a locked database at
+        // startup into guessed state, or poison all later calls with a cached failure.
+        const context = yield* Effect.context<Effect.Services<ReturnType<typeof makeProfiles>>>();
+        const scope = yield* Scope.Scope;
+        const one = yield* Semaphore.make(1);
+        let current: ProfileSessions["Service"] | undefined;
+
+        const ready = one.withPermits(1)(
+          Effect.suspend(() =>
+            current
+              ? Effect.succeed(current)
+              : makeProfiles(options).pipe(
+                  Effect.provideContext(Context.add(context, Scope.Scope, scope)),
+                  Effect.tap((made) =>
+                    Effect.sync(() => {
+                      current = made;
+                    }),
+                  ),
+                ),
+          ),
+        );
+
+        return {
+          changes: Stream.unwrap(Effect.map(ready, (profiles) => profiles.changes)).pipe(
+            Stream.orDie,
+          ),
+          list: Effect.flatMap(ready, (profiles) => profiles.list),
+          active: Effect.flatMap(ready, (profiles) => profiles.active),
+          admit: Effect.flatMap(ready, (profiles) => profiles.admit),
+          admitFor: (owner?: ActiveProfile) =>
+            Effect.flatMap(ready, (profiles) => profiles.admitFor(owner)),
+          create: (name: string) => Effect.flatMap(ready, (profiles) => profiles.create(name)),
+          switch: (id: string) => Effect.flatMap(ready, (profiles) => profiles.switch(id)),
+          remove: (id: string) => Effect.flatMap(ready, (profiles) => profiles.remove(id)),
+          prepareForget: (
+            subscription: SavedSubscription,
+            defaultForget?: ReturnType<Settings["Service"]["prepareForget"]>,
+          ) =>
+            Effect.flatMap(ready, (profiles) =>
+              profiles.prepareForget(subscription, defaultForget),
+            ),
+          eraseSource: (account: string, defaultErase?: Effect.Effect<void, Failed>) =>
+            Effect.flatMap(ready, (profiles) => profiles.eraseSource(account, defaultErase)),
+        };
+      }),
+    );
 }

@@ -34,7 +34,7 @@ import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { VerifiedFiles, verifiedFilesLayer } from "./platform/verified-files.ts";
 import { SavedSubtitles, savedSubtitlesLayer } from "./platform/saved-subtitles.ts";
-import { personalStoresLayer } from "./services/profiles.ts";
+import { personalStoresLayer, ProfileSessions } from "./services/profiles.ts";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { xmltvFetch } from "./providers/xmltv.ts";
 import { CustomLists } from "./services/custom-lists.ts";
@@ -85,6 +85,11 @@ export interface MainConfig {
   readonly downloads?: Pick<DownloadsDeps, "disk" | "fetch" | "observeTransfer">;
   /** The system's notifications, for reminders; they tell in the window alone without. */
   readonly notifier?: Notifier;
+  /** Only configured after interactive playback and renderer isolation are ready. */
+  readonly profiles?: Pick<
+    Parameters<typeof ProfileSessions.layer>[0],
+    "stopInteractive" | "consent"
+  >;
 }
 
 export type MainServices =
@@ -110,7 +115,8 @@ export type MainServices =
   | Downloads
   | Reminders
   | Recordings
-  | Profiles;
+  | Profiles
+  | ProfileSessions;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -294,34 +300,38 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     ...defined({ usage: config.usage }),
   });
 
+  const viewingPorts = Layer.mergeAll(
+    Layer.effect(ViewingAccount, Effect.map(Subscriptions, viewingAccount)),
+    Layer.effect(
+      ViewingChannels,
+      Effect.map(Library, (library) => ({ lookup: library.lookup })),
+    ),
+    // What a series is comes from the lists, and its episodes from its details, which the
+    // sheet a mark is made in has just read: both are kept, so neither asks the provider.
+    Layer.effect(
+      ViewingSeries,
+      Effect.map(OnDemand, (onDemand) => ({
+        identity: (series) =>
+          Effect.map(onDemand.titles("series", [series]), ([title]) =>
+            seriesIdentity(series, title),
+          ),
+        seasons: (series) =>
+          Effect.map(onDemand.details("series", series), (details) =>
+            details.kind === "series" ? seriesEpisodeSeasons(details) : [],
+          ),
+      })),
+    ),
+  );
+
   const viewing = ViewingRecord.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.effect(ViewingAccount, Effect.map(Subscriptions, viewingAccount)),
-        Layer.effect(
-          ViewingChannels,
-          Effect.map(Library, (library) => ({ lookup: library.lookup })),
-        ),
+        viewingPorts,
         Layer.effect(
           LegacyViewing,
           Effect.map(Settings, (settings) => ({
             take: settings.legacyLists,
             drop: settings.dropLegacyLists,
-          })),
-        ),
-        // What a series is comes from the lists, and its episodes from its details, which the
-        // sheet a mark is made in has just read: both are kept, so neither asks the provider.
-        Layer.effect(
-          ViewingSeries,
-          Effect.map(OnDemand, (onDemand) => ({
-            identity: (series) =>
-              Effect.map(onDemand.titles("series", [series]), ([title]) =>
-                seriesIdentity(series, title),
-              ),
-            seasons: (series) =>
-              Effect.map(onDemand.details("series", series), (details) =>
-                details.kind === "series" ? seriesEpisodeSeasons(details) : [],
-              ),
           })),
         ),
         stores,
@@ -333,7 +343,20 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const customLists = CustomLists.layer.pipe(Layer.provide(stores));
 
   // Downloads and recordings keep resume positions under the active profile.
-  const profiles = profilesLayer.pipe(Layer.provide(database));
+  const sessions = ProfileSessions.layer({
+    dataDir,
+    ...config.profiles,
+    ...defined({ usage: config.usage }),
+  }).pipe(
+    Layer.provide(Layer.mergeAll(database, viewingPorts, stores, viewing, watchlist, customLists)),
+    Layer.provide(services),
+  );
+
+  const profiles = Layer.effect(
+    Profiles,
+    Effect.map(ProfileSessions, (sessions) => ({ active: sessions.active })),
+  ).pipe(Layer.provideMerge(Layer.mergeAll(profilesLayer.pipe(Layer.provide(database)), sessions)));
+
   const personalCopies = Layer.mergeAll(database, profiles);
 
   const downloads = Downloads.layer({

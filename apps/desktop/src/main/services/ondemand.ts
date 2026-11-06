@@ -82,7 +82,7 @@ import type {
 } from "../ondemand/protocol.ts";
 import { DetailCache, type ProviderDetailKey, type DetailKey } from "../platform/detail-cache.ts";
 import { VerifiedFiles } from "../platform/verified-files.ts";
-import { Settings } from "./preferences.ts";
+import { Settings, viewingPreferences, AdmittedSettings } from "./preferences.ts";
 import {
   Subscriptions,
   sameSource,
@@ -313,12 +313,13 @@ function make(deps: OnDemandDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
     const settings = yield* Settings;
+    const preferences = viewingPreferences(settings);
     const cache = Option.getOrNull(yield* Effect.serviceOption(DetailCache));
     const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
 
     /** The language whose versions titles show and play first. */
     const language = Effect.map(
-      settings.get,
+      preferences,
       (preferences) => preferences.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
     );
 
@@ -331,7 +332,7 @@ function make(deps: OnDemandDeps) {
     const keyOf = (preferences: { readonly tmdbKey?: string }) =>
       preferences.tmdbKey?.trim() || deps.tmdbKey;
 
-    let tmdbKey = keyOf(yield* settings.get);
+    let tmdbKey = keyOf(yield* preferences);
 
     let metadataProgress: MetadataProgress = {
       known: 0,
@@ -521,9 +522,25 @@ function make(deps: OnDemandDeps) {
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 
     const call = <M extends WorkerMethod>(method: M, args: WorkerCalls[M]["args"]) =>
-      Effect.tryPromise({
-        try: () => worker.call(method, args),
-        catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
+      Effect.gen(function* () {
+        const admitted = yield* Effect.serviceOption(AdmittedSettings);
+
+        return yield* Effect.tryPromise({
+          try: () => {
+            // Source facts can finish after a switch. Keep the original admission, and refuse
+            // it at the worker entry rather than run it with the new viewer's configuration.
+            if (admitted._tag === "Some" && !admitted.value.current())
+              throw new Failed({
+                error: {
+                  kind: "unexpected",
+                  detail: "Viewing profile changed; retry this catalogue read.",
+                },
+              });
+
+            return worker.call(method, args);
+          },
+          catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
+        });
       });
 
     /** Whose lists a call to the worker is about. */
@@ -547,7 +564,7 @@ function make(deps: OnDemandDeps) {
       const saved = yield* listed;
 
       if (saved.length === 0) return [];
-      const adults = (yield* settings.get).adultTitles ?? false;
+      const adults = (yield* preferences).adultTitles ?? false;
       const worked = yield* call("status", { owners: saved.map(ownerOf), adults });
 
       return saved.map((subscription, at) => ({ subscription, worked: worked[at] ?? NOTHING }));
@@ -564,7 +581,7 @@ function make(deps: OnDemandDeps) {
 
     const stampOf = (source: SavedSubscription) =>
       Effect.gen(function* () {
-        const adults = (yield* settings.get).adultTitles ?? false;
+        const adults = (yield* preferences).adultTitles ?? false;
         const [status] = yield* call("status", { owners: [ownerOf(source)], adults });
 
         return status?.importRevision === source.importRevision
@@ -837,13 +854,15 @@ function make(deps: OnDemandDeps) {
         const now = yield* Clock.currentTimeMillis;
         const value = validAbout(key, now);
 
+        const personalKey = keyOf(yield* preferences);
+
         if (
           (kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS)) ||
-          !tmdbKey
+          !personalKey
         )
           return { value, flight: undefined };
         const flightKey = JSON.stringify([sourceKey(source), key]);
-        const client = tmdb({ key: tmdbKey, ...defined({ api: deps.tmdbApi || undefined }) });
+        const client = tmdb({ key: personalKey, ...defined({ api: deps.tmdbApi || undefined }) });
 
         const flight = yield* shared(
           asking,
@@ -1216,12 +1235,14 @@ function make(deps: OnDemandDeps) {
             ? kept.value
             : null;
 
+        const personalKey = keyOf(yield* preferences);
+
         if (
           (kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS)) ||
-          !tmdbKey
+          !personalKey
         )
           return usable;
-        const client = tmdb({ key: tmdbKey, ...defined({ api: deps.tmdbApi || undefined }) });
+        const client = tmdb({ key: personalKey, ...defined({ api: deps.tmdbApi || undefined }) });
 
         const fiber = yield* shared(
           seasonFlights,
@@ -1348,7 +1369,7 @@ function make(deps: OnDemandDeps) {
           (owners, language) =>
             Effect.gen(function* () {
               // Titles for adults only once the viewer asked for them.
-              if (id === "adult" && !(yield* settings.get).adultTitles) {
+              if (id === "adult" && !(yield* preferences).adultTitles) {
                 return { name: "For adults", total: 0, titles: [] };
               }
 
@@ -1394,7 +1415,7 @@ function make(deps: OnDemandDeps) {
             language: yield* language,
             kind,
             files: yield* knownFiles(kind),
-            adults: (yield* settings.get).adultTitles ?? false,
+            adults: (yield* preferences).adultTitles ?? false,
           });
         }),
 
@@ -1487,7 +1508,7 @@ function make(deps: OnDemandDeps) {
             ...query,
             owners: saved.map(ownerOf),
             language: yield* language,
-            adults: query.home ? false : ((yield* settings.get).adultTitles ?? false),
+            adults: query.home ? false : ((yield* preferences).adultTitles ?? false),
           });
         }),
 
@@ -1632,7 +1653,7 @@ function make(deps: OnDemandDeps) {
         }),
 
       reconfigure: Effect.gen(function* () {
-        const next = keyOf(yield* settings.get);
+        const next = keyOf(yield* preferences);
 
         if (next === tmdbKey) return;
         tmdbKey = next;

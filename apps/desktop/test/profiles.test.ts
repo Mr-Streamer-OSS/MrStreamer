@@ -7,13 +7,18 @@ import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
+import * as Context from "effect/Context";
 import { ViewingStore } from "@mrstreamer/core/viewing/service";
 import { personalStoresLayer, ProfileSessions } from "../src/main/services/profiles.ts";
 import { WatchlistStore } from "../src/main/platform/watchlist-store.ts";
 import { CustomListStore } from "../src/main/platform/custom-lists-store.ts";
+import { Playback } from "../src/main/services/playback.ts";
+import { Output } from "../src/main/services/output.ts";
+import { Recordings } from "../src/main/services/recordings.ts";
+import { startFakeTmdb } from "./fake-tmdb.ts";
+import { VerifiedFiles } from "../src/main/platform/verified-files.ts";
 import { copyProgress } from "../src/main/platform/profile-copy-progress.ts";
 import { Database } from "../src/main/platform/database.ts";
-import { databaseLayer } from "../src/main/platform/database.ts";
 import { Profiles, profileDirectory } from "../src/main/platform/profile-store.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { analyticsFixture } from "./e2e/analytics-fixture.ts";
@@ -346,25 +351,18 @@ describe("profile lifecycle before UI enablement", () => {
   it("retains admitted owners across switch, erases all owners retryably, and deletes only inactive personal data", async () => {
     const dataDir = await tempDir();
     let stops = 0;
-    const database = databaseLayer(dataDir);
 
     const runtime = runtimeFor(
-      ProfileSessions.layer({
-        dataDir,
-        consent: { read: Effect.succeed(true), write: () => Effect.void },
-        stopInteractive: () =>
-          Effect.sync(() => {
-            stops++;
-          }),
-      }).pipe(
-        Layer.provide(
-          Layer.merge(
-            database,
-            Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
-          ),
-        ),
-        Layer.orDie,
-      ),
+      mainLayer({
+        ...testConfig(dataDir),
+        profiles: {
+          consent: { read: Effect.succeed(true), write: () => Effect.void },
+          stopInteractive: () =>
+            Effect.sync(() => {
+              stops++;
+            }),
+        },
+      }),
     );
 
     const profiles = await promised(runtime, ProfileSessions);
@@ -447,15 +445,10 @@ it("profile consent edits use the installation Analytics owner across switch and
 
   const open = async () => {
     const runtime = runtimeFor(
-      ProfileSessions.layer({ dataDir, consent, stopInteractive: () => Effect.void }).pipe(
-        Layer.provide(
-          Layer.merge(
-            databaseLayer(dataDir),
-            Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
-          ),
-        ),
-        Layer.orDie,
-      ),
+      mainLayer({
+        ...testConfig(dataDir),
+        profiles: { consent, stopInteractive: () => Effect.void },
+      }),
     );
 
     return { runtime, profiles: await promised(runtime, ProfileSessions) };
@@ -513,4 +506,230 @@ it("copy progress callbacks keep the owner admitted before file reads and later 
     position: 120,
     duration: 1000,
   });
+});
+
+it("refuses an old catalogue read after held file facts cross a profile switch and recovers for the current owner", async () => {
+  const dataDir = await tempDir();
+  const remote = await startFakeTmdb();
+  onTestFinished(() => remote.close());
+  const config = { ...testConfig(dataDir), tmdbApi: remote.url };
+
+  const app = runtimeFor(
+    mainLayer({
+      ...config,
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const provider = await fakeProvider();
+  const roster = await promised(app, Roster);
+  const source = await roster.add(demoLogin(provider));
+  const catalogue = await promised(app, OnDemand);
+  await catalogue.refresh(source.id);
+  const profiles = await promised(app, ProfileSessions);
+  const a = await profiles.admit();
+  const b = await profiles.create("B");
+  const context = await app.context();
+  const facts = Context.get(context, VerifiedFiles);
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => release.resolve());
+  let hold = false;
+
+  const isolated = runtimeFor(
+    OnDemand.layer({
+      dataDir,
+      worker: config.catalogueWorker,
+      tmdbKey: null,
+      tmdbApi: remote.url,
+      userAgent,
+      region: config.region,
+    }).pipe(
+      Layer.provide(
+        Layer.succeedContext(
+          Context.add(context, VerifiedFiles, {
+            ...facts,
+            read: (account, stamp) =>
+              Effect.gen(function* () {
+                if (hold) {
+                  hold = false;
+                  arrived.resolve();
+                  yield* Effect.promise(() => release.promise);
+                }
+
+                return yield* facts.read(account, stamp);
+              }),
+          }),
+        ),
+      ),
+    ),
+  );
+
+  const service = await isolated.runPromise(OnDemand);
+  const query = { kind: "movie" as const, id: "all" as const, offset: 0, limit: 20, filters: {} };
+  hold = true;
+  const pending = app.runPromise(a.run(service.collection(query)));
+  const refused = expect(pending).rejects.toMatchObject({ error: { kind: "unexpected" } });
+  await arrived.promise;
+  await profiles.switch(b.id);
+  const admittedB = await profiles.admit();
+  await app.runPromise(
+    admittedB.run(
+      Effect.flatMap(Settings, (settings) => settings.update({ tmdbKey: "fixture-profile-b-key" })),
+    ),
+  );
+  await app.runPromise(admittedB.run(service.reconfigure));
+  release.resolve();
+  await refused;
+  const current = await app.runPromise(admittedB.run(service.collection(query)));
+  expect(current.total).toBeGreaterThan(0);
+});
+
+it("keeps a failed post-selection configuration visible and retries it before admitting work", async () => {
+  const dataDir = await tempDir();
+  let refuse = false;
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: {
+          read: Effect.sync(() => {
+            if (refuse) throw new Error("fixture consent read refused");
+
+            return true;
+          }),
+          write: () => Effect.void,
+        },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const profiles = await promised(runtime, ProfileSessions);
+  const b = await profiles.create("B");
+  refuse = true;
+  await expect(profiles.switch(b.id)).rejects.toThrow("fixture consent read refused");
+  expect((await profiles.active()).id).toBe(b.id);
+  await expect(profiles.admit()).rejects.toBeDefined();
+  refuse = false;
+  expect((await profiles.switch(b.id)).id).toBe(b.id);
+  expect((await profiles.admit()).owner.id).toBe(b.id);
+});
+
+it("source removal cannot succeed on partial cross-profile erasure or revive an invalidated admission", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const provider = await fakeProvider();
+  const roster = await promised(runtime, Roster);
+  const source = await roster.add(demoLogin(provider));
+  const library = await promised(runtime, Library);
+  await library.refresh(source.id);
+  const profiles = await promised(runtime, ProfileSessions);
+  const a = await profiles.admit();
+  const channel = { subscriptionId: source.id, id: "2014" };
+  await runtime.runPromise(a.run(a.services.viewing.setFavourite("same-command", channel, true)));
+  const b = await profiles.create("B");
+  await profiles.switch(b.id);
+  const admittedB = await profiles.admit();
+  await runtime.runPromise(
+    admittedB.run(admittedB.services.viewing.setFavourite("same-command", channel, true)),
+  );
+  const lock = new DatabaseSync(join(profileDirectory(dataDir, b.id), "mrstreamer.db"));
+
+  try {
+    lock.exec("begin immediate");
+    await expect(roster.remove(source.id, true)).rejects.toBeDefined();
+  } finally {
+    lock.exec("rollback");
+    lock.close();
+  }
+
+  const subscriptions = await promised(runtime, Subscriptions);
+  expect((await subscriptions.list()).map(({ id }) => id)).toContain(source.id);
+  await expect(
+    runtime.runPromise(a.run(a.services.viewing.recordWatch("late", channel))),
+  ).rejects.toBeDefined();
+  await expect(
+    runtime.runPromise(admittedB.run(admittedB.services.viewing.recordWatch("late", channel))),
+  ).rejects.toBeDefined();
+  const currentB = await profiles.admit();
+  expect(
+    (await runtime.runPromise(currentB.run(currentB.services.viewing.state))).favourites,
+  ).toEqual([channel]);
+  await roster.remove(source.id, true);
+  expect(await subscriptions.list()).toEqual([]);
+  await profiles.switch("default");
+  const currentA = await profiles.admit();
+  expect(
+    (await runtime.runPromise(currentA.run(currentA.services.viewing.state))).favourites,
+  ).toEqual([]);
+});
+
+it("profile switching closes interactive playback and pending opens while a household recording keeps its id and stream", async () => {
+  const dataDir = await tempDir();
+  let stop: () => Effect.Effect<void> = () => Effect.void;
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => stop(),
+      },
+    }),
+  );
+
+  const playback = await promised(runtime, Playback);
+  const raw = await runtime.runPromise(Playback);
+  const output = await runtime.runPromise(Output);
+  stop = () => Effect.andThen(raw.closeForProfile, output.disconnect);
+  const provider = await fakeProvider({ live: true });
+  const source = await (await promised(runtime, Roster)).add(demoLogin(provider));
+  await (await promised(runtime, Library)).refresh(source.id);
+
+  const tracks = provider.catalogue.channels.find(
+    (channel) => channel.fixture === "h264-subtitles.mpegts",
+  );
+
+  if (!tracks) throw new Error("The fixture has no subtitle channel.");
+  const channel = { subscriptionId: source.id, id: String(tracks.streamId) };
+  const recordings = await promised(runtime, Recordings);
+  const started = await recordings.start(channel, Date.now() + 60_000);
+
+  if (started.kind !== "started") throw new Error("The household recording did not start.");
+
+  try {
+    const watching = await playback.open(channel, ["h264", "aac"]);
+    const pendingTurn = await playback.begin();
+    const asked = provider.streamRequests();
+    const profiles = await promised(runtime, ProfileSessions);
+    const b = await profiles.create("B");
+    await profiles.switch(b.id);
+    expect(await playback.playing(watching.sessionId)).toBeNull();
+    await expect(
+      playback.open(channel, ["h264", "aac"], { turn: pendingTurn }),
+    ).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Something else played in the meantime." },
+    });
+    const recording = (await recordings.list()).find(({ id }) => id === started.recording.id);
+    expect(recording?.status.kind).toBe("recording");
+    expect(provider.streamRequests()).toBe(asked);
+    expect(provider.activeStreams()).toBe(1);
+  } finally {
+    await recordings.stop(started.recording.id);
+  }
 });

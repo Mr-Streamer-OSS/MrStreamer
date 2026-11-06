@@ -79,7 +79,7 @@ import {
 } from "./playback.ts";
 import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
-import type { ActiveProfile } from "./profiles.ts";
+import { ActiveProfileSchema, type ActiveProfile } from "./profiles.ts";
 import type { Reminder, ReminderList } from "./reminders.ts";
 import {
   RecordingPlanSchema,
@@ -336,7 +336,12 @@ export const ipcInputs = {
   "recordings.cancel": () => type({ id: "string > 0" }),
   /** Keeps how far an ended recording played, as `downloads.recordProgress` does for a copy. */
   "recordings.recordProgress": () =>
-    type({ id: "string > 0", position: "number >= 0", duration: "number > 0" }),
+    type({
+      id: "string > 0",
+      position: "number >= 0",
+      duration: "number > 0",
+      "owner?": ActiveProfileSchema(),
+    }),
   "recordings.storage": none,
   /** Bytes to keep free on the disk, and the space recordings may take, null for no limit. */
   "recordings.setLimits": () =>
@@ -637,7 +642,12 @@ export const ipcInputs = {
   "downloads.move": () => type({ id: "string > 0", by: "-1 | 1" }),
   /** Remembers how far a copy played here, with the copy alone. */
   "downloads.recordProgress": () =>
-    type({ id: "string > 0", position: "number >= 0", duration: "number > 0" }),
+    type({
+      id: "string > 0",
+      position: "number >= 0",
+      duration: "number > 0",
+      "owner?": ActiveProfileSchema(),
+    }),
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
@@ -1058,6 +1068,15 @@ export type IpcArgs<M extends IpcMethod> =
 
 /** Events the main process pushes to the UI. */
 export interface IpcEvents {
+  "profiles.activeChanged": ActiveProfile;
+  "profiles.viewingChanged": { readonly profileId: string; readonly sequence: number };
+  "profiles.watchlistChanged": { readonly profileId: string };
+  "profiles.listsChanged": { readonly profileId: string };
+  "profiles.preferencesChanged": {
+    readonly profileId: string;
+    readonly snapshot: PreferenceSnapshot;
+  };
+  "profiles.preferencesStale": { readonly profileId: string };
   /** Committed private preferences, ordered within this main-process lifetime only. */
   "preferences.changed": PreferenceSnapshot;
   /** A save could not read back composed state. Keep the last snapshot stale until a read succeeds. */

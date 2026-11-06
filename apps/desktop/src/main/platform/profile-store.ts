@@ -159,6 +159,22 @@ export const profileStorage = Effect.gen(function* () {
       db.prepare("select profile_id, revision from active_profile where slot = 1").get(),
     );
 
+    const profile = db
+      .prepare("select name, deleting from profiles where id = ?")
+      .get(row.profile_id);
+
+    if (
+      !profile ||
+      profile["deleting"] === 1 ||
+      (row.profile_id !== DEFAULT_PROFILE_ID && !profile["name"])
+    )
+      throw new Failed({
+        error: {
+          kind: "unexpected",
+          detail: "The active viewing profile cannot be read by this build.",
+        },
+      });
+
     return { id: row.profile_id, revision: row.revision };
   };
 

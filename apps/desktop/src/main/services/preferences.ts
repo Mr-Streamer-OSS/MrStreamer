@@ -152,15 +152,16 @@ export class Settings extends Context.Service<
     profileId: string,
     consent: InstallationConsent,
     usage?: UsageObservers,
-  ) => Layer.effect(Settings, make(dataDir, usage, profileId, consent));
+  ) =>
+    Layer.effect(
+      Settings,
+      Effect.map(make(dataDir, usage, profileId), (settings) =>
+        withInstallationConsent(settings, consent),
+      ),
+    );
 }
 
-function make(
-  dataDir: string,
-  usage: UsageObservers | undefined,
-  profileId: string,
-  consent?: InstallationConsent,
-) {
+function make(dataDir: string, usage: UsageObservers | undefined, profileId: string) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
     const personalDir = profileDirectory(dataDir, profileId);
@@ -303,13 +304,7 @@ function make(
       });
 
     return {
-      get: one.withPermits(1)(
-        Effect.gen(function* () {
-          const personal = effective(yield* stored);
-
-          return consent ? { ...personal, analyticsEnabled: yield* consent.read } : personal;
-        }),
-      ),
+      get: one.withPermits(1)(Effect.map(stored, effective)),
       liveBrowse: one.withPermits(1)(readBrowse),
       rememberLiveBrowse: (input: LiveDiscovery) =>
         one.withPermits(1)(
@@ -348,19 +343,10 @@ function make(
           }),
         ),
       update: (patch: Partial<Preferences>) =>
-        Effect.gen(function* () {
-          if (!consent) return effective(yield* change((previous) => ({ ...previous, ...patch })));
-          const { analyticsEnabled, ...personal } = patch;
-
-          if (analyticsEnabled !== undefined) yield* consent.write(analyticsEnabled);
-
-          const saved =
-            Object.keys(personal).length > 0
-              ? yield* change((previous) => ({ ...previous, ...personal }))
-              : yield* one.withPermits(1)(stored);
-
-          return { ...effective(saved), analyticsEnabled: yield* consent.read };
-        }),
+        Effect.map(
+          change((previous) => ({ ...previous, ...patch })),
+          effective,
+        ),
       interfaceLanguage: one.withPermits(1)(Effect.map(stored, (file) => file.interfaceLanguage)),
       setInterfaceLanguage: (choice: LanguageChoice) =>
         Effect.asVoid(change((previous) => ({ ...previous, interfaceLanguage: choice }))),
@@ -550,4 +536,55 @@ function discoverySelection(selection: LiveDiscovery): LiveDiscovery {
     case "all":
       return { kind: "all" };
   }
+}
+
+/** Overlay the live installation owner; no profile file stores or copies consent. */
+export function withInstallationConsent(
+  settings: Settings["Service"],
+  consent: InstallationConsent,
+): Settings["Service"] {
+  const get = Effect.gen(function* () {
+    const personal = yield* settings.get;
+
+    return { ...personal, analyticsEnabled: yield* consent.read };
+  });
+
+  return {
+    ...settings,
+    get,
+    update: (patch) =>
+      Effect.gen(function* () {
+        const { analyticsEnabled, ...personal } = patch;
+
+        if (analyticsEnabled !== undefined) yield* consent.write(analyticsEnabled);
+
+        if (Object.keys(personal).length > 0) yield* settings.update(personal);
+
+        return yield* get;
+      }),
+  };
+}
+
+/** Captured preferences for shared catalogue reads admitted by the window. */
+export class AdmittedSettings extends Context.Service<
+  AdmittedSettings,
+  {
+    readonly settings: Settings["Service"];
+    readonly current: () => boolean;
+  }
+>()("mrstreamer/AdmittedSettings") {}
+
+/** Shared catalogue facts may be reused; an admitted viewer's preferences are read only for it. */
+export function viewingPreferences(fallback: Settings["Service"]) {
+  return Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) => {
+    if (admitted._tag === "None") return fallback.get;
+
+    return Effect.andThen(
+      Effect.sync(() => {
+        if (!admitted.value.current())
+          throw new Error("Viewing profile changed; retry this catalogue read.");
+      }),
+      admitted.value.settings.get,
+    );
+  });
 }

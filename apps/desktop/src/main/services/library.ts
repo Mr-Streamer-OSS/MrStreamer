@@ -54,7 +54,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { t } from "@mrstreamer/core/i18n";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
-import { Settings } from "./preferences.ts";
+import { Settings, viewingPreferences } from "./preferences.ts";
 import {
   sameSource,
   Subscriptions,
@@ -371,7 +371,10 @@ function make(options: LibraryOptions) {
     };
 
     /** Whether Live TV's lists show channels for adults. */
-    const adults = Effect.map(settings.get, (preferences) => preferences.adultTitles ?? false);
+    const adults = Effect.map(
+      viewingPreferences(settings),
+      (preferences) => preferences.adultTitles ?? false,
+    );
 
     /** A subscription's status with its catalogue as the lists show it. */
     const statusNow = (subscription: SavedSubscription) =>

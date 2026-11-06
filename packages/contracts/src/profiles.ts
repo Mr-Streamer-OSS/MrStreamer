@@ -1,3 +1,5 @@
+import { type } from "arktype";
+import { lazy } from "./lazy.ts";
 // Viewing profiles as the window sees them. A viewing profile is one person's viewing space on a
 // shared installation (GLOSSARY.md). This release has one, Default, which owns the personal state
 // every earlier release kept: favourites, recent channels, progress, the Watchlist, channel lists
@@ -17,3 +19,8 @@ export interface ActiveProfile {
    */
   readonly revision: number;
 }
+
+/** Validated owner of an admitted desktop request or playback session. */
+export const ActiveProfileSchema = lazy(() =>
+  type({ id: "string > 0", revision: "number.integer >= 1" }),
+);

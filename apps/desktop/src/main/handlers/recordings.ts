@@ -76,8 +76,8 @@ export function recordingHandlers({
     "recordings.plan": ({ plan, id }) => recordings.plan(plan, id),
     "recordings.schedule": ({ plan, id }) => recordings.schedule(plan, id),
     "recordings.cancel": ({ id }) => Effect.as(recordings.cancel(id), null),
-    "recordings.recordProgress": ({ id, position, duration }) =>
-      Effect.as(recordings.recordProgress(id, position, duration), null),
+    "recordings.recordProgress": ({ id, position, duration, owner }) =>
+      Effect.as(recordings.recordProgress(id, position, duration, owner), null),
     "recordings.storage": () => recordings.storage,
     "recordings.setLimits": (limits) => recordings.setLimits(limits),
     "recordings.chooseFolder": () =>

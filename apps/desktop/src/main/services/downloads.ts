@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // Movies and episodes downloaded to this computer: the queue, its one transfer at a time, and the
 // copies that play without a subscription. Each download is a record in the database
 // (../platform/downloads-store.ts) and a UUID folder in a managed household destination, with
@@ -166,9 +167,14 @@ export class Downloads extends Context.Service<
      * the new order can't be written down.
      */
     move(id: string, by: -1 | 1): Effect.Effect<void, Failed>;
-    recordProgress(id: string, position: number, duration: number): Effect.Effect<void, Failed>;
+    recordProgress(
+      id: string,
+      position: number,
+      duration: number,
+      owner?: ActiveProfile,
+    ): Effect.Effect<void, Failed>;
     /** A complete copy, for playback to open; fails when it isn't, or its file is gone. */
-    copy(id: string): Effect.Effect<LocalCopy, Failed>;
+    copy(id: string, owner?: ActiveProfile): Effect.Effect<LocalCopy, Failed>;
     /** A copy's kept picture, for the app's artwork scheme; null without one. */
     artwork(
       id: string,
@@ -1539,16 +1545,17 @@ function make(deps: DownloadsDeps) {
           tell();
         }),
 
-      recordProgress: (id: string, position: number, duration: number) =>
-        Effect.suspend(() =>
-          records.get(id)?.state === "complete"
-            ? personal.write("download", id, position, duration)
-            : Effect.fail(notFound()),
-        ).pipe(Effect.tap(() => Effect.sync(tell))),
-
-      copy: (id: string) =>
+      recordProgress: (id: string, position: number, duration: number, owner?: ActiveProfile) =>
         Effect.gen(function* () {
-          const owner = yield* personal.admit;
+          const admitted = owner ? personal.of(owner) : yield* personal.admit;
+
+          if (records.get(id)?.state !== "complete") return yield* notFound();
+          yield* admitted.write("download", id, position, duration);
+        }).pipe(Effect.tap(() => Effect.sync(tell))),
+
+      copy: (id: string, captured?: ActiveProfile) =>
+        Effect.gen(function* () {
+          const owner = captured ? personal.of(captured) : yield* personal.admit;
           const record = records.get(id);
 
           if (record?.state !== "complete" || !existsSync(mediaOf(record))) {
@@ -1569,6 +1576,7 @@ function make(deps: DownloadsDeps) {
               (progress) =>
                 ({
                   id: record.id,
+                  owner: owner.owner,
                   path: mediaOf(record),
                   container: record.container,
                   title: record.title,
