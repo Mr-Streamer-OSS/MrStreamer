@@ -11,13 +11,18 @@
 //   chooser of where it plays, R tries a failed channel again. While a menu is open, keys are its
 //   own. Tab reaches what a failed channel offers, and Enter there presses it; Enter or Space on
 //   a message's cross closes the message.
+// A local MPEG-TS channel keeps its recent history while it plays, shown on a timeline under the
+// controls: Space or K pauses while the channel goes on arriving, J and L skip 10 seconds, End
+// goes live, and the slider seeks when let go. Other streams say they can't rewind.
 // A picture that stands still for a few seconds while it should play says "Waiting for data" at
 // the top right until it moves again or the channel reconnects.
 // While a receiver on the network plays the channel, the controls stay: there is no picture to
 // clear. Leaving Watch leaves the receiver playing; only Stop and Play here end it.
 // In the mini player the picture fills the small window; opening the list puts the window back.
-import { Play, Square } from "lucide-react";
+import { Slider as SliderPrimitive } from "@base-ui/react/slider";
+import { Pause, Play, RotateCcw, RotateCw, Square } from "lucide-react";
 import { useEffect, useRef, useState, type WheelEvent } from "react";
+import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
@@ -25,15 +30,19 @@ import { hasModifier, isTyping } from "../../app/platform.ts";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { closeWatch, useUi, type ChannelList } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
+import { SliderControl } from "../../components/ui/slider.tsx";
+import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
+import { clockTime } from "../../lib/format.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { useCategoryMap, useToggleFavourite } from "../../lib/queries.ts";
+import { clock } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { useLiveSession } from "../../player/media-session.ts";
 import { outputs, useOutput } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
-import { player, usePlayer } from "../../player/player.ts";
+import { LIVE_EDGE_MS, player, usePlayer } from "../../player/player.ts";
 import {
   adjacentChannel,
   useListChannels,
@@ -58,6 +67,10 @@ import type { LiveMenu } from "./LiveMore.tsx";
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
 const PAGE_ROWS = 10;
+const SKIP_MS = 10_000;
+
+/** How often the retained window and cursor are read again. */
+const TIMELINE_MS = 1000;
 
 // One zap per wheel gesture, with small trackpad movements accumulated first.
 const WHEEL_THRESHOLD = 80;
@@ -261,6 +274,16 @@ export function WatchScreen() {
     const view = new AbortController();
     outputs.viewShown(view.signal);
 
+    /** Whether the playing stream has a retained timeline, or says why not. */
+    function rewinds(): boolean {
+      if (player.state().timeline) return true;
+
+      if (player.onReceiver()) flash(t("Rewind plays here only"));
+      else if (player.state().phase.kind === "playing") flash(t("This stream can't rewind"));
+
+      return false;
+    }
+
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
 
@@ -308,6 +331,24 @@ export function WatchScreen() {
       }
 
       switch (event.key) {
+        case " ":
+        case "k":
+        case "K":
+          // A focused button takes Space itself.
+          if (event.key === " " && event.target instanceof HTMLButtonElement) return;
+
+          if (event.repeat || !rewinds()) break;
+          wake();
+          player.togglePause();
+          break;
+        case "j":
+        case "J":
+        case "l":
+        case "L":
+          if (!rewinds()) break;
+          wake();
+          void player.skip(event.key.toLowerCase() === "j" ? -SKIP_MS : SKIP_MS);
+          break;
         case "Escape":
           if (numberEntry.active()) numberEntry.cancel();
           else if (now.channelsOpen) closeChannels();
@@ -330,7 +371,13 @@ export function WatchScreen() {
 
         case "Home":
         case "End": {
-          if (!now.channelsOpen) return;
+          if (!now.channelsOpen) {
+            if (event.key === "Home" || !rewinds()) return;
+            wake();
+            void player.goLive();
+            break;
+          }
+
           const last = event.key === "End";
 
           if (now.picking) setEntry(last ? Math.max(now.entries.length - 1, 0) : 0);
@@ -561,23 +608,162 @@ export function WatchScreen() {
           onClose={closeChannels}
         />
       )}
-      <NowPlayingBar
-        visible={controlsVisible && !channelsOpen}
-        channel={channel}
-        categories={categories}
-        fullscreen={fullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        onOpenChannels={openChannels}
-        onSwitch={switchBy}
-        menu={menu}
-        keyboardMenu={keyboardMenu.current}
-        onMenu={setMenu}
-      />
+      {/* The timeline lifts the bar above it, and is gone where the stream can't rewind. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
+        <div className="relative">
+          <NowPlayingBar
+            visible={controlsVisible && !channelsOpen}
+            channel={channel}
+            categories={categories}
+            fullscreen={fullscreen}
+            onToggleFullscreen={toggleFullscreen}
+            onOpenChannels={openChannels}
+            onSwitch={switchBy}
+            menu={menu}
+            keyboardMenu={keyboardMenu.current}
+            onMenu={setMenu}
+          />
+        </div>
+        <LiveTimelineBar visible={controlsVisible && !channelsOpen} />
+      </div>
       <NumberEntry onChannel={(target) => player.play(target)} />
       <LiveSubtitleHint />
       <Flash />
       <ConnectingNote />
       <PlaybackAnnouncement channel={channel} />
+    </div>
+  );
+}
+
+/** The retained window of a local MPEG-TS view, read again every second while it shows. */
+function LiveTimelineBar({ visible }: { visible: boolean }) {
+  const timeline = usePlayer((state) => state.timeline);
+
+  return timeline && <RetainedTimeline timeline={timeline} visible={visible} />;
+}
+
+/**
+ * Pause, 10-second skips, the slider over what is kept, how far behind live and Go live. The
+ * slider seeks when let go; its own keys move 10 seconds, or a minute with Page Up and Down.
+ * A read that fails keeps the last window shown.
+ */
+function RetainedTimeline({ timeline, visible }: { timeline: LiveTimeline; visible: boolean }) {
+  const paused = usePlayer((state) => state.paused);
+  const [dragging, setDragging] = useState<number | null>(null);
+  useEffect(() => {
+    const timer = setInterval(() => void player.refreshTimeline().catch(() => {}), TIMELINE_MS);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const { start, end } = timeline;
+  const cursor = Math.min(end, Math.max(start, dragging ?? timeline.cursor));
+  const live = !paused && dragging === null && end - cursor < LIVE_EDGE_MS;
+
+  const behind = (at: number) =>
+    end - at < LIVE_EDGE_MS
+      ? t("Live")
+      : t("{time} behind live", { time: clock((end - at) / 1000) });
+
+  const seek = (at: number) =>
+    void (end - at < LIVE_EDGE_MS ? player.goLive() : player.seekLive(at));
+
+  const single = (value: number | readonly number[]) =>
+    Array.isArray(value) ? (value[0] ?? cursor) : value;
+
+  const pauseLabel = paused ? t("Play") : t("Pause");
+
+  return (
+    <div
+      role="group"
+      aria-label={t("Live rewind")}
+      data-live-timeline=""
+      className={cn(
+        "no-drag relative z-20 -mt-5 bg-[linear-gradient(to_bottom,transparent,rgb(0_0_0/0.9)_0.5rem)] px-10 pt-2 pb-6 transition-opacity duration-300 max-[720px]:mt-0 max-[720px]:px-4 max-[720px]:pb-4",
+        visible ? "pointer-events-auto opacity-100" : "opacity-0",
+      )}
+    >
+      {paused && timeline.expired && (
+        <p role="status" className="mb-2 text-[0.8125rem] font-medium">
+          {t("Paused moment expired. Play resumes from {time}.", {
+            time: clockTime(start, end),
+          })}
+        </p>
+      )}
+      <div className="flex items-center gap-1.5">
+        <Tooltip label={pauseLabel}>
+          <Button
+            variant="primary"
+            size="icon"
+            className="size-9"
+            aria-label={pauseLabel}
+            onClick={() => player.togglePause()}
+          >
+            {paused ? (
+              <Play className="size-4 translate-x-px fill-current" />
+            ) : (
+              <Pause className="size-4 fill-current" />
+            )}
+          </Button>
+        </Tooltip>
+        {(
+          [
+            [t("Back 10 seconds"), -SKIP_MS, RotateCcw],
+            [t("Forward 10 seconds"), SKIP_MS, RotateCw],
+          ] as const
+        ).map(([label, by, Icon]) => (
+          <Tooltip key={by} label={label}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9 text-foreground"
+              aria-label={label}
+              onClick={() => void player.skip(by)}
+            >
+              <Icon className="size-5" />
+            </Button>
+          </Tooltip>
+        ))}
+        <span className="ml-2.5 min-w-10 flex-none text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+          {clockTime(start, end)}
+        </span>
+        <SliderPrimitive.Root
+          value={cursor}
+          min={start}
+          max={Math.max(end, start + 1)}
+          step={SKIP_MS}
+          largeStep={60_000}
+          onValueChange={(next) => setDragging(single(next))}
+          onValueCommitted={(next) => {
+            seek(single(next));
+            setDragging(null);
+          }}
+          className="mx-1.5 min-w-24 flex-1"
+        >
+          <SliderControl className="flex h-6 w-full touch-none items-center">
+            <SliderPrimitive.Track className="relative h-1 w-full rounded-[2px] bg-white/28">
+              <SliderPrimitive.Indicator className="rounded-[2px] bg-foreground" />
+              <SliderPrimitive.Thumb
+                aria-label={t("Position")}
+                getAriaValueText={(_, value) => behind(value)}
+                className="size-3.5 rounded-full bg-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </SliderPrimitive.Track>
+          </SliderControl>
+        </SliderPrimitive.Root>
+        <span className="min-w-10 flex-none text-right text-xs font-semibold whitespace-nowrap tabular-nums">
+          {clockTime(end, end)}
+        </span>
+        <span className="ml-3 min-w-28 flex-none text-right text-[0.8125rem] font-medium whitespace-nowrap tabular-nums">
+          {behind(cursor)}
+        </span>
+        <span className="ml-3 flex-none text-xs whitespace-nowrap text-muted-foreground tabular-nums max-[720px]:hidden">
+          {t("{time} kept", { time: clock((end - start) / 1000) })}
+        </span>
+        <Button size="sm" className="ml-1.5" disabled={live} onClick={() => void player.goLive()}>
+          {t("Go live")}
+        </Button>
+      </div>
     </div>
   );
 }

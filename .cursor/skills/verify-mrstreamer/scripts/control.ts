@@ -39,6 +39,7 @@ import { settingsScenario } from "./settings.ts";
 import { controlsScenario } from "./controls.ts";
 import { backupChannel, customListSourcesScenario, customListsScenario } from "./custom-lists.ts";
 import { customListRoundTripScenario } from "./custom-lists-round-trip.ts";
+import { breakRewindStream, liveRewindScenario, rewindStreams } from "./live-rewind.ts";
 import { liveNamesScenario, longNamed } from "./live-names.ts";
 import { preferencesScenario } from "./preferences.ts";
 import { movedGuideScenario } from "./moved-guide.ts";
@@ -82,6 +83,7 @@ const scenarios = [
   "remove-during-guide",
   "moved-guide",
   "live-tv",
+  "live-rewind",
   "live-names",
   "guides",
   "guide-labels",
@@ -136,6 +138,13 @@ function scenarioProvider(scenario: Scenario): FakeProviderOptions {
       return { guideHours: { past: 6, ahead: 24 }, channelOf: gridded };
     case "guide-grid-cells":
       return { guideHours: { past: 6, ahead: 24 }, guideLengths: [1, 2, 30], channelOf: gridded };
+    case "live-rewind":
+      return {
+        guideHours: { past: 1, ahead: 3 },
+        guideLengths: [30],
+        channelOf: guided,
+        streams: rewindStreams,
+      };
     case "recordings":
       return {
         // Half-hour programmes, so Record offers When it ends.
@@ -1362,6 +1371,31 @@ async function run(scenario: Scenario, prior?: string) {
           streams: provider!.streamRequests(),
           active: provider!.activeStreams(),
         }),
+      );
+    } else if (scenario === "live-rewind") {
+      await liveRewindScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        {
+          pid: app!.pid!,
+          breakStream: breakRewindStream,
+          streams: () => ({
+            requests: provider!.streamRequests(),
+            active: provider!.activeStreams(),
+          }),
+        },
       );
     } else if (scenario === "live-tv") {
       await click("Open global Search", "document.querySelector('button[aria-label=Search]')");

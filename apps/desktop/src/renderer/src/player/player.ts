@@ -1,3 +1,4 @@
+import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import { readPreferences, updatePreferences } from "../lib/preferences.ts";
 import { t } from "@mrstreamer/core/i18n";
 import { appDiagnostic, streamDiagnostic } from "@mrstreamer/contracts/analytics";
@@ -230,6 +231,10 @@ export interface PlayerState {
    * and the player picks again.
    */
   readonly fixed: boolean;
+  /** The retained window of a local MPEG-TS view and where it plays; null where it can't rewind. */
+  readonly timeline: LiveTimeline | null;
+  /** That view is paused while its capture goes on. */
+  readonly paused: boolean;
 }
 
 const store = createStore<PlayerState>(() => ({
@@ -250,6 +255,8 @@ const store = createStore<PlayerState>(() => ({
   waiting: false,
   fellBack: null,
   fixed: false,
+  timeline: null,
+  paused: false,
 }));
 
 /** Reads player state in a component. */
@@ -297,6 +304,19 @@ interface Recording {
 
 /** The recording that plays; null while the channel plays live. */
 let archived: Recording | null = null;
+
+/**
+ * A local MPEG-TS view's retained session, which pause and seeks reload without opening another.
+ * The cursor is `cursorOrigin` plus the picture's position, once the reload after a seek has
+ * reported where it starts; until then, and while paused, it is the stored timeline's cursor.
+ */
+let retainedSession: StreamSession | null = null;
+let rewindSelection = 0;
+let cursorOrigin = 0;
+let cursorSettled = true;
+
+/** How close to the newest retained data still counts as live. */
+export const LIVE_EDGE_MS = 5000;
 
 /**
  * The open stream, and for a recording, which, from where the provider's recording starts, and
@@ -374,6 +394,15 @@ let recovery = UNTRIED;
 /** The viewer asked for this computer, so the channel goes on here when the receiver is let go of. */
 let returning = false;
 
+/** Where the retained view is, in arrival time. */
+function liveCursor(): number {
+  const { paused, timeline } = store.getState();
+
+  return paused || !cursorSettled
+    ? (timeline?.cursor ?? cursorOrigin)
+    : cursorOrigin + video.currentTime * 1000;
+}
+
 function cancelZap(): void {
   if (zapTimer) clearTimeout(zapTimer);
   zapTimer = null;
@@ -385,6 +414,10 @@ function cancelZap(): void {
  */
 function release(): void {
   if (!current) return;
+  retainedSession = null;
+  rewindSelection++;
+  cursorSettled = true;
+  store.setState({ timeline: null, paused: false });
 
   if (sameOwned(tuned, store.getState().channel)) channelPlayed += current.engine.played();
   // The recording goes on from where this stream got to, counted from where it started.
@@ -393,6 +426,8 @@ function release(): void {
   if (recording) recording.of.at = recording.from + Math.round(current.engine.played());
   observation.unbind();
   current.engine.destroy();
+  video.poster = "";
+  video.removeAttribute("poster");
   clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
   current = null;
@@ -468,7 +503,13 @@ function reconnecting(until: number | null): PlayerPhase {
  * process re-encode the picture, which conceals a damaged broadcast the way standalone players do;
  * it costs CPU, so it is the second try.
  */
-async function start(channel: LiveChannel, repair = false, preview = false): Promise<void> {
+async function start(
+  channel: LiveChannel,
+  repair = false,
+  preview = false,
+  retained?: StreamSession,
+  replay = false,
+): Promise<void> {
   if (!claim.keep()) return;
 
   if (outputs.remote()) {
@@ -486,8 +527,17 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   // a preview: it doesn't reconnect against another device.
   if (first) quiet = preview || !store.getState().audible;
 
-  if (first) tune(channel);
-  release();
+  if (!retained) {
+    if (first) tune(channel);
+    release();
+  } else {
+    current?.engine.destroy();
+    video.poster = "";
+    video.removeAttribute("poster");
+    recentSubtitlePackets = [];
+    clearSubtitles(video);
+  }
+
   // A recording opens where the streams before got to, and one played to its end is over.
   const recording = archived;
 
@@ -513,21 +563,23 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     };
 
     if (mine !== selection) return;
-    session = await call("playback.open", {
-      ...defined({ measurement: measurement ?? undefined }),
-      channel: ownedId(channel),
-      ...defined({
-        archive: recording ? { start: recording.at, end: recording.programme.stop } : undefined,
-      }),
-      decoders: [...decoders],
-      repair,
-      ...defined({
-        audio: sound.audio ?? undefined,
-        audioLanguage: sound.audioLanguage ?? undefined,
-      }),
-      // Said so the main process refuses it when a receiver took playback since this began.
-      ...defined({ preview: preview || undefined }),
-    });
+    session =
+      retained ??
+      (await call("playback.open", {
+        ...defined({ measurement: measurement ?? undefined }),
+        channel: ownedId(channel),
+        ...defined({
+          archive: recording ? { start: recording.at, end: recording.programme.stop } : undefined,
+        }),
+        decoders: [...decoders],
+        repair,
+        ...defined({
+          audio: sound.audio ?? undefined,
+          audioLanguage: sound.audioLanguage ?? undefined,
+        }),
+        // Said so the main process refuses it when a receiver took playback since this began.
+        ...defined({ preview: preview || undefined }),
+      }));
   } catch (cause) {
     if (mine === selection) {
       const error = appError(cause);
@@ -562,7 +614,9 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     return;
   }
 
-  observation.bind(session.sessionId);
+  retainedSession = session;
+
+  if (!retained) observation.bind(session.sessionId);
   // The provider's recording can start before the moment asked for, as Xtream's start on a whole
   // minute: what plays is counted from where it starts, and lasts to the window's end.
   const span = session.archive;
@@ -570,7 +624,15 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   const opened =
     recording && span ? { of: recording, from: span.start, length: span.end - span.start } : null;
 
-  let engine = createEngine(session.format, video, session.url, sound, opened?.length ?? null);
+  let engine = createEngine(
+    session.format,
+    video,
+    session.url,
+    sound,
+    opened?.length ?? null,
+    replay,
+  );
+
   current = { sessionId: session.sessionId, engine, archived: opened };
   engine.onPlayback?.((state) => {
     if (mine === selection) observation.note(state);
@@ -624,6 +686,18 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   }
 
   const playing = engine;
+
+  if (!session.archive) {
+    void call("playback.timeline", { sessionId: session.sessionId })
+      .then((timeline) => {
+        if (mine !== selection) return;
+        cursorOrigin = (timeline?.cursor ?? Date.now()) - video.currentTime * 1000;
+        cursorSettled = true;
+        store.setState({ timeline, paused: false });
+      })
+      .catch(() => {});
+  }
+
   recovery = { ...recovery, played: true };
   store.setState({ phase: { kind: "playing", engine: engine.name } });
   void loadStream(mine, session.sessionId);
@@ -636,10 +710,11 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     void loadTracks(mine, session.sessionId);
   }
 
-  void call("viewing.recordWatch", {
-    commandId: crypto.randomUUID(),
-    channel: ownedId(channel),
-  }).catch(() => {});
+  if (!retained)
+    void call("viewing.recordWatch", {
+      commandId: crypto.randomUUID(),
+      channel: ownedId(channel),
+    }).catch(() => {});
   playing.onWaiting((waiting) => {
     if (mine === selection) store.setState({ waiting });
   });
@@ -1398,6 +1473,99 @@ export const player = {
     }, ZAP_SETTLE_MS);
   },
 
+  /** Refreshes retained bounds; a failed read preserves the last observed window. */
+  async refreshTimeline(): Promise<void> {
+    const session = retainedSession;
+
+    if (!session || onReceiver) return;
+    const timeline = await call("playback.timeline", { sessionId: session.sessionId });
+
+    if (retainedSession !== session) return;
+    const cursor = liveCursor();
+    store.setState({
+      timeline: timeline ? { ...timeline, cursor, expired: cursor < timeline.start } : null,
+    });
+  },
+
+  /** Pauses the picture while the main process keeps this view's capture running. */
+  pause(): void {
+    const { timeline, paused } = store.getState();
+
+    if (!timeline || paused || onReceiver) return;
+    const cursor = liveCursor();
+    rewindSelection++;
+    selection++;
+    video.pause();
+
+    // The decoder can release its network and buffers while its last decoded picture stays visible.
+    if (video.videoWidth && video.videoHeight) {
+      const frame = document.createElement("canvas");
+      const scale = Math.min(1, 960 / video.videoWidth, 540 / video.videoHeight);
+      frame.width = Math.round(video.videoWidth * scale);
+      frame.height = Math.round(video.videoHeight * scale);
+      const context = frame.getContext("2d");
+
+      if (context) {
+        context.drawImage(video, 0, 0, frame.width, frame.height);
+        video.poster = frame.toDataURL("image/jpeg", 0.8);
+      }
+    }
+
+    current?.engine.destroy();
+    store.setState({ paused: true, waiting: false, timeline: { ...timeline, cursor } });
+  },
+
+  /** Reloads this session from retained history; null returns to the live edge. */
+  async seekLive(at: number | null): Promise<void> {
+    const session = retainedSession;
+    const channel = store.getState().channel;
+
+    if (!session || !channel || onReceiver) return;
+
+    const requested = ++rewindSelection;
+
+    try {
+      const timeline = await call("playback.seekLive", {
+        sessionId: session.sessionId,
+        at,
+        audio: store.getState().audioId,
+      });
+
+      if (retainedSession !== session || requested !== rewindSelection) return;
+
+      if (!timeline) throw new Error("Retained history is unavailable");
+      cursorSettled = false;
+      flashNote(null);
+      store.setState({ timeline, paused: false });
+      await start(channel, false, false, session, at !== null);
+    } catch (cause) {
+      if (retainedSession === session && requested === rewindSelection)
+        flashNote(`${t("Live rewind")}: ${describeError(appError(cause))}`, true);
+    }
+  },
+
+  goLive(): Promise<void> {
+    return player.seekLive(null);
+  },
+
+  /** Pauses a retained view, or plays it on from where it paused. */
+  togglePause(): void {
+    if (store.getState().paused) player.resume();
+    else player.pause();
+  },
+
+  /** Moves the retained cursor by `ms`; reaching the newest data goes live. */
+  skip(ms: number): Promise<void> {
+    const { timeline } = store.getState();
+
+    if (!timeline) return Promise.resolve();
+    const target = liveCursor() + ms;
+
+    return target >= timeline.end - LIVE_EDGE_MS
+      ? player.goLive()
+      : player.seekLive(Math.max(timeline.start, target));
+  },
+
   /** Returns to the channel that played before this one. */
   back(): void {
     const { previous } = store.getState();
@@ -1471,6 +1639,12 @@ export const player = {
    * keeps the stream it has, so nothing opens again.
    */
   resume(): void {
+    if (!onReceiver && store.getState().paused) {
+      void player.seekLive(liveCursor());
+
+      return;
+    }
+
     if (onReceiver?.load == null || receiverState(store.getState().phase) !== "paused") return;
     void call("output.command", { generation: onReceiver.load, command: "play" }).catch(() => {});
   },
@@ -1582,6 +1756,8 @@ export const player = {
     const own = current?.engine.tracks;
 
     if (own) own.setAudio(id);
+    else if (store.getState().timeline && !retainedSession?.convertedHls)
+      void player.seekLive(liveCursor());
     else void begin(channel);
   },
 

@@ -1590,4 +1590,13 @@ export const nl: Translation = {
     one: "{count} programma tot nu toe",
     other: "{count} programma's tot nu toe",
   },
+  "Live rewind": "Live terugspoelen",
+  Live: "Live",
+  "{time} behind live": "{time} achter op live",
+  "{time} kept": "{time} bewaard",
+  "Go live": "Naar live",
+  "Paused moment expired. Play resumes from {time}.":
+    "Het gepauzeerde moment is verlopen. Afspelen gaat verder vanaf {time}.",
+  "Rewind plays here only": "Terugspoelen werkt alleen hier",
+  "This stream can't rewind": "Deze stream kan niet terugspoelen",
 };

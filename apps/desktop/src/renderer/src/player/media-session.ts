@@ -4,9 +4,8 @@
 //
 // A movie or episode shows its name, its series and "S1 E3", and its TMDB artwork, and takes play,
 // pause, 10 s back and forward, seeking and, when there is one, the next episode. A channel shows
-// the programme, the channel and its logo, and takes only play and stop: a headphone's double tap
-// must never change channel. Pausing a channel stops it, and Chromium then has nothing playing to
-// offer the system, so Watch in the app starts it again. Artwork must be http or https, or a data
+// the programme, the channel and its logo. Local retained channels take pause/play and ten-second
+// skips; other channels stop on Pause. A headphone's double tap never changes channel. Artwork must be http or https, or a data
 // URL; Chromium refuses the app's own file:// pictures. Only Watch and a playing title present
 // anything, so the muted previews leave the system alone.
 //
@@ -275,14 +274,15 @@ function useCarried(remote: boolean, playing: boolean): void {
 /**
  * The channel in Watch in the system's controls: the programme on now, or the one it plays from
  * catch-up, the channel and its logo. Play starts a stopped channel, or has a receiver play on
- * with one it holds paused; pause and stop stop it.
+ * with one it holds paused. A local retained channel pauses in place; Stop ends it.
  */
 export function useLiveSession(channel: LiveChannel | null): void {
   const phase = usePlayer((state) => state.phase.kind);
   const live = phase !== "idle" && phase !== "failed";
-  // Only a receiver holds a channel that is on paused: the system shows what it said.
-  const held = usePlayer((state) => receiverState(state.phase) === "paused");
+  // A local retained pause and a receiver-confirmed pause both show Play.
+  const held = usePlayer((state) => receiverState(state.phase) === "paused" || state.paused);
   const playing = live && !held;
+  const retained = usePlayer((state) => state.timeline !== null);
 
   const archived = usePlayer((state) =>
     channel && sameOwned(state.channel, channel) ? (state.archive?.title ?? null) : null,
@@ -310,17 +310,36 @@ export function useLiveSession(channel: LiveChannel | null): void {
           // One a receiver holds paused plays on there. Any other is on its way already.
           else player.resume();
         },
-        pause: stop,
+        pause: () => {
+          if (player.state().timeline && !player.onReceiver()) player.pause();
+          else stop();
+        },
+        ...defined({
+          seekbackward: retained
+            ? () => {
+                if (!player.onReceiver()) void player.skip(-10_000);
+              }
+            : undefined,
+          seekforward: retained
+            ? () => {
+                if (!player.onReceiver()) void player.skip(10_000);
+              }
+            : undefined,
+        }),
         stop,
       },
     );
     // A channel has no position for the system to show.
     session?.setPositionState();
-  }, [view, channel, programme]);
+  }, [view, channel, programme, retained]);
 
   useEffect(() => showState(view, playing ? "playing" : "paused"), [view, playing]);
-  // On a receiver the channel makes no sound here. `stopped` tells its Stop from a preview's end.
+  // A retained pause destroys local audio too, so keep its OS carrier through pause/resume.
+  // On a receiver, `stopped` tells its Stop from a preview's end.
   const remote = useOutput((state) => state.status.output.kind === "receiver");
   const stopped = usePlayer((state) => state.stopped);
-  useCarried(remote && channel !== null && (live || stopped), playing);
+  useCarried(
+    channel !== null && ((remote && (live || stopped)) || (!remote && retained && live)),
+    playing,
+  );
 }

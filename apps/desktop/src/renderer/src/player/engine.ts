@@ -145,12 +145,13 @@ export function createEngine(
   url: string,
   sound: SoundChoice,
   ends: number | null = null,
+  replay = false,
 ): Engine {
   return loadingEngine(format, video, async () => {
     if (format === "mpegts") {
       const { default: mpegts } = await import("mpegts.js");
 
-      return () => mpegtsEngine(mpegts, video, url, ends);
+      return () => mpegtsEngine(mpegts, video, url, ends, replay);
     }
 
     try {
@@ -246,6 +247,7 @@ function mpegtsEngine(
   video: HTMLVideoElement,
   url: string,
   ends: number | null,
+  replay: boolean,
 ): Engine {
   if (!mpegts.getFeatureList().mseLivePlayback) {
     return failedEngine("mpegts.js", video, {
@@ -264,7 +266,7 @@ function mpegtsEngine(
       // picture behind live. Jump forward when that exceeds the maximum, keeping some buffer,
       // rather than play faster: a faster rate is audible and visible for half a minute. A
       // recording plays every second it has, however far ahead the data is.
-      liveBufferLatencyChasing: ends === null,
+      liveBufferLatencyChasing: ends === null && !replay,
       liveBufferLatencyMaxLatency: LIVE_MAX_LATENCY_S,
       liveBufferLatencyMinRemain: LIVE_KEEP_BUFFER_S,
     },

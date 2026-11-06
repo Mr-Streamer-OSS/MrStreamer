@@ -1664,4 +1664,13 @@ export const fr: Translation = {
     one: "{count} programme pour l'instant",
     other: "{count} programmes pour l'instant",
   },
+  "Live rewind": "Retour arrière du direct",
+  Live: "En direct",
+  "{time} behind live": "{time} de retard sur le direct",
+  "{time} kept": "{time} conservées",
+  "Go live": "Revenir au direct",
+  "Paused moment expired. Play resumes from {time}.":
+    "Le moment en pause a expiré. La lecture reprend à {time}.",
+  "Rewind plays here only": "Le retour en arrière ne fonctionne qu’ici",
+  "This stream can't rewind": "Ce flux ne peut pas revenir en arrière",
 };

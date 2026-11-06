@@ -1603,4 +1603,13 @@ export const de: Translation = {
   "Shown before": "Bereits gesendet",
   Premiere: "Premiere",
   "{count} programmes so far": { one: "Bisher {count} Sendung", other: "Bisher {count} Sendungen" },
+  "Live rewind": "Live-Zurückspulen",
+  Live: "Live",
+  "{time} behind live": "{time} hinter live",
+  "{time} kept": "{time} gespeichert",
+  "Go live": "Zu live",
+  "Paused moment expired. Play resumes from {time}.":
+    "Die pausierte Stelle ist abgelaufen. Die Wiedergabe geht ab {time} weiter.",
+  "Rewind plays here only": "Zurückspulen gibt es nur hier",
+  "This stream can't rewind": "Dieser Stream kann nicht zurückspulen",
 };
