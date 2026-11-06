@@ -668,6 +668,9 @@ function RetainedTimeline({ timeline, visible }: { timeline: LiveTimeline; visib
   const seek = (at: number) =>
     void (end - at < LIVE_EDGE_MS ? player.goLive() : player.seekLive(at));
 
+  const single = (value: number | readonly number[]) =>
+    Array.isArray(value) ? (value[0] ?? cursor) : value;
+
   const pauseLabel = paused ? t("Play") : t("Pause");
 
   return (
@@ -730,9 +733,9 @@ function RetainedTimeline({ timeline, visible }: { timeline: LiveTimeline; visib
           max={Math.max(end, start + 1)}
           step={SKIP_MS}
           largeStep={60_000}
-          onValueChange={(next) => setDragging(Array.isArray(next) ? (next[0] ?? cursor) : next)}
+          onValueChange={(next) => setDragging(single(next))}
           onValueCommitted={(next) => {
-            seek(Array.isArray(next) ? (next[0] ?? cursor) : next);
+            seek(single(next));
             setDragging(null);
           }}
           className="mx-1.5 min-w-24 flex-1"

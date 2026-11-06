@@ -63,36 +63,10 @@ afterEach(() => {
 });
 
 it("pauses locally and resumes, seeks and goes live on the retained session without closing it", async () => {
-  ipc.reset();
-
-  const channel = {
-    subscriptionId: SUBSCRIPTION,
-    id: "fixture",
-    name: "Fixture",
-    title: "Fixture",
-    tags: [],
-    number: null,
-    logoUrl: null,
-    categoryIds: [],
-    catchupDays: null,
-    variants: [{ id: "fixture", name: "Fixture", tags: [], quality: null }],
-  };
-
   const end = Date.now();
-  const window = { start: end - 60_000, end, cursor: end, expired: false };
-  ipc.always("playback.open", {
-    sessionId: "live",
-    channel,
-    url: "http://127.0.0.1/live.ts?retained=1",
-    format: "mpegts",
-  });
-  ipc.always("playback.timeline", window);
-  ipc.always("playback.seekLive", window);
-  ipc.always("playback.close", null);
-  ipc.always("playback.tracks", null);
-  ipc.always("playback.playing", null);
+  answer({ start: end - 60_000, end, cursor: end, expired: false });
   const pause = vi.spyOn(player.element, "pause");
-  player.play(channel);
+  player.play(watched);
   await vi.waitFor(() => expect(engines.opened).toBe(1));
   await player.refreshTimeline();
   player.pause();
@@ -107,7 +81,7 @@ it("pauses locally and resumes, seeks and goes live on the retained session with
   expect(ipc.argsOf("playback.close")).toHaveLength(0);
   expect(engines.destroyed).toBe(3);
   player.stop();
-  expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "live" }]);
+  expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "watched" }]);
 });
 
 it("Watch shows the retained window, pauses on K, explains expired history and goes live", async () => {
@@ -184,10 +158,8 @@ const watched: LiveChannel = {
   variants: [{ id: "watched", name: "Watched", tags: [], quality: null }],
 };
 
-/** Plays a channel in Watch whose main process answers `timeline` for its retained window. */
-async function watch(timeline: LiveTimeline | null) {
-  ipc.reset();
-  ipc.always("library.browse", browseResult([watched]));
+/** Answers `watched`'s open, and `timeline` for its retained window. */
+function answer(timeline: LiveTimeline | null) {
   ipc.always("playback.open", {
     sessionId: "watched",
     channel: watched,
@@ -199,6 +171,12 @@ async function watch(timeline: LiveTimeline | null) {
   ipc.always("playback.close", null);
   ipc.always("playback.tracks", null);
   ipc.always("playback.playing", null);
+}
+
+/** Plays `watched` in Watch, as `answer` serves it. */
+async function watch(timeline: LiveTimeline | null) {
+  ipc.always("library.browse", browseResult([watched]));
+  answer(timeline);
   const mounted = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   unmount = mounted.unmount;
   await act(async () => {

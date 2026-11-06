@@ -51,7 +51,7 @@ export interface HistoryBudget {
   /** Bytes the disk keeps free: below that, a piece stays in memory only. */
   readonly keepFree: number;
   /** Retention duration, bounded to one hour. Defaults to thirty minutes. */
-  readonly retentionMs?: number;
+  readonly retentionMs?: number | undefined;
 }
 
 /** The answer to a read: bytes from the offset, or that it is ahead of what arrived or evicted. */

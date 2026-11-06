@@ -703,12 +703,19 @@ export class Playback extends Context.Service<
     ): Effect.Effect<StreamFailure | null>;
     /** Arrival-time history available to this local MPEG-TS view; null on other routes. */
     timeline(sessionId: string): Effect.Effect<LiveTimeline | null>;
+    /**
+     * Moves the view's next read to `at`, or to live with null, with the sound track `audio`
+     * when given; null where the session can't rewind.
+     */
     seekLive(
       sessionId: string,
       at: number | null,
       audio?: number | null,
     ): Effect.Effect<LiveTimeline | null>;
-    /** A channel's tracks from its program table; null before inspection or for titles. */
+    /**
+     * A channel's sound and subtitle tracks, from its program table; null until its stream has
+     * started, and for movies and episodes.
+     */
     tracks(sessionId: string): Effect.Effect<ChannelTracks | null>;
     /** Fixed inspection/plan facts only, for the current session before engine teardown. */
     diagnostic(sessionId: string): Effect.Effect<PlaybackDiagnostic | null>;
@@ -1689,56 +1696,30 @@ function make(deps: PlaybackDeps) {
 
         // Keep the converted stream running while the local decoder is paused. History holds
         // output TS, so replay preserves the converter's stable PIDs and presentation clock.
-        if (captures && !session.archive && !session.receiver) {
-          const retained = await captures.viewRequest(
-            `hls-output:${session.id}`,
-            session.id,
-            async (captureSignal) => {
-              const chunks = convertedHls(
-                session,
-                input,
-                AbortSignal.any([captureSignal, session.closed.signal]),
-              );
+        const chunks =
+          captures && !session.archive && !session.receiver
+            ? (
+                await captures.viewRequest(
+                  `hls-output:${session.id}`,
+                  session.id,
+                  async (captureSignal) =>
+                    new Response(
+                      ReadableStream.from(
+                        convertedHls(
+                          session,
+                          input,
+                          AbortSignal.any([captureSignal, session.closed.signal]),
+                        ),
+                      ),
+                      { headers: { "Content-Type": "video/mp2t" } },
+                    ),
+                  signal,
+                )
+              ).body!
+            : convertedHls(session, input, signal);
 
-              return new Response(
-                new ReadableStream<Uint8Array>({
-                  async pull(controller) {
-                    try {
-                      const next = await chunks.next();
-
-                      if (next.done) controller.close();
-                      else controller.enqueue(next.value);
-                    } catch (cause) {
-                      controller.error(cause);
-                    }
-                  },
-                  async cancel() {
-                    await chunks.return(undefined);
-                  },
-                }),
-                { headers: { "Content-Type": "video/mp2t" } },
-              );
-            },
-            signal,
-          );
-
-          const reader = retained.body!.getReader();
-
-          try {
-            for (;;) {
-              const next = await reader.read();
-
-              if (next.done) break;
-
-              if (!response.write(next.value)) await drained(response);
-            }
-          } finally {
-            await reader.cancel().catch(() => {});
-          }
-        } else {
-          for await (const chunk of convertedHls(session, input, signal)) {
-            if (!response.write(chunk)) await drained(response);
-          }
+        for await (const chunk of chunks) {
+          if (!response.write(chunk)) await drained(response);
         }
 
         response.end();
@@ -3767,19 +3748,11 @@ function make(deps: PlaybackDeps) {
               ? await open(url, asking)
               : session.kind === "live" && session.format === "hls"
                 ? await captures.resource(shared, session.id, url, open, asking, session.joined)
-                : session.kind === "live" && !session.archive && !session.receiver
-                  ? await captures.viewRequest(
-                      shared,
-                      session.id,
-                      (opened) => open(url, opened),
-                      asking,
-                    )
-                  : await captures.request(
-                      shared,
-                      session.id,
-                      (opened) => open(url, opened),
-                      asking,
-                    );
+                : await (
+                    session.kind === "live" && !session.archive && !session.receiver
+                      ? captures.viewRequest
+                      : captures.request
+                  )(shared, session.id, (opened) => open(url, opened), asking);
         } catch (cause) {
           return {
             ok: false,

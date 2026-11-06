@@ -26,7 +26,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { DEFAULT_KEEP_FREE } from "@mrstreamer/contracts/recordings";
-import type { StreamFormat } from "@mrstreamer/contracts/playback";
+import type { LiveTimeline, StreamFormat } from "@mrstreamer/contracts/playback";
 import type { LiveStream } from "@mrstreamer/core/provider";
 import { PlaybackCoordination } from "../services/playback-coordination.ts";
 import { hlsShares } from "./hls-capture.ts";
@@ -148,23 +148,26 @@ export class LiveCaptures extends Context.Service<
      * answer that isn't a stream, as a refusal, comes back as it is and is shared with nobody.
      * `owner` names the play or recording that reads it, and `signal` ends its reading.
      */
-    /** A view keeps capture running across reader cancellation, until idle(owner). TS only. */
-    viewRequest(
-      key: string,
-      owner: string,
-      open: (signal: AbortSignal) => Promise<Response>,
-      signal: AbortSignal,
-    ): Promise<Response>;
-    timeline(
-      owner: string,
-    ): { start: number; end: number; cursor: number; expired: boolean } | null;
-    seek(owner: string, at: number | null): boolean;
     request(
       key: string,
       owner: string,
       open: (signal: AbortSignal) => Promise<Response>,
       signal: AbortSignal,
     ): Promise<Response>;
+    /**
+     * `request` for a view: its capture and history stay while its readers cancel and reload,
+     * until idle(owner). MPEG-TS only.
+     */
+    viewRequest(
+      key: string,
+      owner: string,
+      open: (signal: AbortSignal) => Promise<Response>,
+      signal: AbortSignal,
+    ): Promise<Response>;
+    /** The view's retained window and cursor; null without a view or before data arrives. */
+    timeline(owner: string): LiveTimeline | null;
+    /** Moves the view's next reader to `at`, or to live with null; false without a view. */
+    seek(owner: string, at: number | null): boolean;
     /**
      * Answers `address` of the HLS stream `key` names, the playlist or one of its segments: from
      * what the provider answered another reader of that stream, else through `open`, as
@@ -217,16 +220,18 @@ function make(options: LiveCapturesOptions) {
       bytes: options.bytes ?? TEMPORARY_BYTES,
       pieceBytes: options.pieceBytes ?? PIECE_BYTES,
       keepFree: options.keepFree ?? DEFAULT_KEEP_FREE,
-      retentionMs: options.retentionMs ?? 30 * 60_000,
+      retentionMs: options.retentionMs,
     });
 
     const entries = new Map<string, Entry>();
 
-    const views = new Map<
-      string,
-      { capture: Capture; pin: { cursor: number }; at: number | null }
-    >();
+    /**
+     * Each view's capture, the reader that holds its history while no decoder reads, and where
+     * its next reader starts, null at live. `viewOwners` asked through viewRequest.
+     */
+    type View = { capture: Capture; pin: { cursor: number }; at: number | null };
 
+    const views = new Map<string, View>();
     const viewOwners = new Set<string>();
 
     const timeline = (owner: string) => {
@@ -277,6 +282,13 @@ function make(options: LiveCapturesOptions) {
       return closing;
     };
 
+    /** Lets go of a view's hold on its capture, closing it when no reader is left. */
+    const unpin = (owner: string, view: View) => {
+      view.capture.readers.delete(view.pin);
+
+      if (view.capture.readers.size === 0) own(closings, owner, close(view.capture));
+    };
+
     /** Reads the provider's stream into the history until it ends or the last reader left. */
     const pump = async (capture: Capture, body: ReadableStream<Uint8Array>) => {
       const reader = body.getReader();
@@ -322,12 +334,7 @@ function make(options: LiveCapturesOptions) {
         const previous = views.get(owner);
 
         if (previous?.capture !== capture) {
-          if (previous) {
-            previous.capture.readers.delete(previous.pin);
-
-            if (previous.capture.readers.size === 0) own(closings, owner, close(previous.capture));
-          }
-
+          if (previous) unpin(owner, previous);
           const pin = { cursor: 0 };
           capture.readers.add(pin);
           views.set(owner, { capture, pin, at: null });
@@ -548,7 +555,7 @@ function make(options: LiveCapturesOptions) {
 
     return {
       request,
-      viewRequest: async (
+      viewRequest: (
         key: string,
         owner: string,
         open: (signal: AbortSignal) => Promise<Response>,
@@ -586,11 +593,7 @@ function make(options: LiveCapturesOptions) {
         const view = views.get(owner);
         views.delete(owner);
 
-        if (view) {
-          view.capture.readers.delete(view.pin);
-
-          if (view.capture.readers.size === 0) own(closings, owner, close(view.capture));
-        }
+        if (view) unpin(owner, view);
 
         // Requests opening when idle began have settled above.
         asking.delete(owner);

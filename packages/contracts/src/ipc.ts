@@ -843,9 +843,9 @@ export interface IpcOutputs {
   /** Why a session's upstream request failed, or null if it has not failed. */
   "playback.failure": StreamFailure | null;
   "playback.diagnostic": PlaybackDiagnostic | null;
-  /** A playing channel's sound and subtitle tracks; null until its stream has started. */
   "playback.timeline": LiveTimeline | null;
   "playback.seekLive": LiveTimeline | null;
+  /** A playing channel's sound and subtitle tracks; null until its stream has started. */
   "playback.tracks": ChannelTracks | null;
   /** Which of a channel's streams its session plays, and those that failed first. */
   "playback.playing": LivePlaying | null;
