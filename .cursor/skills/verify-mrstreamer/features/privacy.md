@@ -101,13 +101,16 @@ The existing failed-title-open step must retain exactly one `stream_error` and n
 
 ## iOS consent
 
-The desktop default above is unchanged. iOS requires a deliberate opt-in in Settings > Privacy >
-Share basic usage statistics. Add provider opens the form directly, with no statistics prompt.
+The desktop default above is unchanged. Builds containing the iOS default-on correction enable
+statistics on new installs and offer an opt-out in Settings > Privacy > Share basic usage statistics.
+Earlier onboarding-correction builds default to off. Add provider opens the form directly, with no statistics prompt.
 Back cancels an unfinished login. Privacy policy and the no-provider Downloads entry stay usable.
 Saved providers restore normally without a startup statistics prompt. Settings changes the
-existing statistics owner's choice; navigation alone must leave an undecided install off.
+existing statistics owner's setting. Verify a fresh install starts On, Settings Off survives a
+relaunch, saved On/Off choices stay authoritative and an existing undecided setting stays off.
+Corrupt or unreadable files must leave collection off without replacing saved data.
 
-Run `pnpm exec vitest run apps/ios/test/telemetry.test.ts apps/ios/test/connect-form.test.ts apps/ios/test/startup-root.test.ts apps/ios/test/interface-language.test.ts`
+Run `pnpm exec vitest run apps/ios/test/statistics-default.test.ts apps/ios/test/telemetry.test.ts apps/ios/test/connect-form.test.ts apps/ios/test/startup-root.test.ts apps/ios/test/interface-language.test.ts`
 for the loopback request/upgrade/storage contracts and public controls with native stand-ins.
 Deliberate beta On/Off stays; null-choice beta outbox, identity and unfinished work must disappear
 before recovery or delivery and must not return on opt-in or relaunch. Failed storage leaves

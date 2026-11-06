@@ -247,7 +247,7 @@ export default function Settings() {
       <Text style={styles.paragraph}>
         {[
           t("Counts app use, the screens you open, and whether playback works and for how long."),
-          t("No viewing history, searches or provider details. Off until you choose to share."),
+          t("No viewing history, searches or provider details. Turn off here at any time."),
           transportNote(statistics),
         ]
           .filter(Boolean)

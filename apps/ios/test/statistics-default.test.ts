@@ -47,6 +47,7 @@ beforeEach(() => {
 
 afterEach(() => {
   native.sync = null;
+  vi.restoreAllMocks();
   removeJson("analytics.json");
   vi.useRealTimers();
 });
@@ -122,5 +123,25 @@ it("saves the new default without creating events in an unconfigured build", () 
   app.setForeground(false);
   expect(app.settings.get()).toEqual({ enabled: true, transport: "unconfigured" });
   expect(readAnalyticsRecord()).toEqual(record("on"));
+  expect(sent).toEqual([]);
+});
+
+it("does not treat an inaccessible primary file as absent when exists reports false", () => {
+  writeJson("analytics.json", record("off"));
+  new File(Paths.document, "analytics.json.next").writeSync(JSON.stringify(record("on")));
+  vi.spyOn(File.prototype, "exists", "get").mockReturnValue(false);
+  native.sync = (operation, path) => {
+    if (operation === "text" && path.endsWith("/analytics.json")) throw new Error("unreadable");
+  };
+
+  expect(launch().settings.get()).toEqual({ enabled: false, transport: "unavailable" });
+  expect(sent).toEqual([]);
+});
+
+it("fails closed if the documents directory cannot be listed", () => {
+  vi.spyOn(Paths.document, "list").mockImplementation(() => {
+    throw new Error("unreadable");
+  });
+  expect(launch().settings.get()).toEqual({ enabled: false, transport: "unavailable" });
   expect(sent).toEqual([]);
 });

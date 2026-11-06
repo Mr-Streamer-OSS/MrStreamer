@@ -153,9 +153,9 @@ describe("Settings' legal rows", () => {
     expect(row.getAttribute("aria-label")).toBe("Privacy policy");
     expect(row.getAttribute("data-role")).toBe("link");
     const text = settings.textContent ?? "";
-    expect(text.indexOf("Off until you choose to share.")).toBeGreaterThan(-1);
+    expect(text.indexOf("Turn off here at any time.")).toBeGreaterThan(-1);
     expect(text.indexOf("Privacy policy")).toBeGreaterThan(
-      text.indexOf("Off until you choose to share."),
+      text.indexOf("Turn off here at any time."),
     );
     await settle();
     expect(scenario.opened).toEqual(["https://mrstreamer.app/privacy"]);
