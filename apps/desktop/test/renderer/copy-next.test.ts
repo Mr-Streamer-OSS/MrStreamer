@@ -516,9 +516,23 @@ it("saves an explicit seek to zero on close without resetting a never-started co
     duration: 2700,
   });
   const writes = ipc.argsOf("downloads.recordProgress").length;
-  const opening = ipc.hold("playback.openCopy");
-  await act(async () => watchOffline(pilot));
+  await watch(pilot, { progress: null });
+  expect(titlePlayer.state()).toMatchObject({ position: 0, duration: 2700 });
   await act(async () => titlePlayer.close());
-  await act(async () => opening.resolve(session(pilot)));
   expect(ipc.argsOf("downloads.recordProgress")).toHaveLength(writes);
+});
+
+it("stops retrying a refused close save when the download has been deleted", async () => {
+  ipc.always("downloads.list", listOf(pilot));
+  await watch(pilot, { progress: { position: 600, duration: 2700 } });
+  const refused = ipc.hold("downloads.recordProgress");
+  await act(async () => titlePlayer.close());
+  await act(async () => refused.reject(LOCKED));
+  const writes = ipc.argsOf("downloads.recordProgress").length;
+  ipc.always("downloads.list", listOf());
+  await wait(10_000);
+  expect(ipc.argsOf("downloads.recordProgress")).toHaveLength(writes);
+  const reads = ipc.argsOf("downloads.list").length;
+  await wait(10_000);
+  expect(ipc.argsOf("downloads.list")).toHaveLength(reads);
 });

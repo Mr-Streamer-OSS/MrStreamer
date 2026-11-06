@@ -621,7 +621,12 @@ function save(): void {
  * recording, Recordings, and answers whether main kept it: a save it refused, as while another
  * copy of the app holds the database, answers false. The next copy goes on only from one it kept.
  */
-function saveCopy(now: CopyNow, position: number, duration: number): Promise<boolean> {
+function saveCopy(
+  now: CopyNow,
+  position: number,
+  duration: number,
+  background = false,
+): Promise<boolean> {
   const progress = { id: now.copy, position: Math.min(position, duration), duration };
   const key = `${now.recording ? "recording" : "download"}:${now.copy}`;
   const previous = copySaves.get(key);
@@ -641,17 +646,38 @@ function saveCopy(now: CopyNow, position: number, duration: number): Promise<boo
       return true;
     },
     () => {
-      if (copySaves.get(key) === pending) {
-        pending.timer = setTimeout(() => {
-          if (copySaves.get(key) === pending) void saveCopy(now, position, duration);
-        }, 10_000);
+      // Main owns recording retries, including after this renderer closes.
+      if (now.recording) {
+        if (copySaves.get(key) === pending) copySaves.delete(key);
+      } else {
+        const retry = () => {
+          if (copySaves.get(key) !== pending) return;
+          pending.timer = setTimeout(() => {
+            if (copySaves.get(key) !== pending) return;
+            void call("downloads.list").then((list) => {
+              if (copySaves.get(key) !== pending) return;
+
+              if (
+                !list.items.some((copy) => copy.id === now.copy && copy.status.kind === "complete")
+              ) {
+                copySaves.delete(key);
+
+                return;
+              }
+
+              void saveCopy(now, position, duration, true);
+            }, retry);
+          }, 10_000);
+        };
+
+        retry();
       }
 
       return false;
     },
   );
 
-  saving = kept.then(() => {});
+  if (!background) saving = kept.then(() => {});
 
   return kept;
 }
