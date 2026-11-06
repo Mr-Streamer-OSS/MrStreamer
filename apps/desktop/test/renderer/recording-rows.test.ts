@@ -109,6 +109,39 @@ it("recovers an ordinary recording read through Retry", async () => {
   );
 });
 
+it("retries recordings while retaining restart guidance for unreadable rules", async () => {
+  ipc.reset();
+  ipc.always("recordings.schedules", []);
+  ipc.refuse("recordings.rules", {
+    kind: "unexpected",
+    detail: "Recording rules could not be read.",
+  });
+  ipc.refuse("recordings.list", { kind: "unexpected", detail: "Recordings could not be read." });
+  const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  onTestFinished(() => view.unmount());
+  await view.render(createElement(RecordingsPage));
+
+  const retry = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLButtonElement>("[role=alert] button:not([hidden])");
+    expect(document.querySelector("[role=alert]")?.textContent).toContain(
+      "Restart Mr. Streamer to reload recording rules.",
+    );
+
+    if (found?.textContent !== "Retry") throw new Error("No recording read Retry");
+
+    return found;
+  });
+
+  ipc.always("recordings.list", []);
+  await act(async () => retry.click());
+  await vi.waitFor(() => {
+    const alert = document.querySelector("[role=alert]");
+    expect(alert?.textContent).toContain("Recording rules could not be read.");
+    expect(alert?.textContent).toContain("Restart Mr. Streamer to reload recording rules.");
+    expect(alert?.querySelector("button:not([hidden])")).toBeNull();
+  });
+});
+
 it("counts a schedule saved partway through its programme late from when it was saved", async () => {
   const row = await rowOf({ schedule: "s1", from: at("12:00"), owed: at("12:20"), late: "busy" });
   expect(row.text).toContain("Started 5 min late. Every connection was in use.");

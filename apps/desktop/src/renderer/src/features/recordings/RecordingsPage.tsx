@@ -106,7 +106,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           <div role="alert" className="flex flex-wrap items-center gap-3 pt-2 text-sm">
             <span className="text-destructive">{describeError(appError(error))}</span>
             <Button
-              hidden={restartRequired}
+              hidden={restartRequired && !list.isError && !schedules.isError}
               size="sm"
               onClick={() => {
                 if (list.error) void list.refetch();
