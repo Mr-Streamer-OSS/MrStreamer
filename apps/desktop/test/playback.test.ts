@@ -11,6 +11,7 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { captionDecoder } from "@mrstreamer/core/subtitles/captions";
 import { pesReader } from "@mrstreamer/core/subtitles/transport";
+import { startFakeHls } from "./fake-hls.ts";
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture, type FakeProvider } from "./fake-provider.ts";
 import {
@@ -926,6 +927,88 @@ async function take(reader: ReadableStreamDefaultReader<Uint8Array>, bytes: numb
 }
 
 describe("live captures", () => {
+  it("releases consumed history while a continuing reader receives only a partial new piece", async () => {
+    const folder = await tempDir();
+    let needed = 0;
+
+    const history = historyStore({ folder, bytes: 4096, pieceBytes: 188 * 4, keepFree: 0 }).create(
+      () => needed,
+    );
+
+    try {
+      history.append(new Uint8Array(188 * 4));
+      await vi.waitFor(async () => expect(await bytesIn(folder)).toBe(188 * 4));
+      needed = 188 * 4;
+      history.append(new Uint8Array(188));
+      await vi.waitFor(async () => expect(await bytesIn(folder)).toBe(0));
+      expect(await history.read(0)).toBe("evicted");
+      expect(await history.read(needed)).toHaveLength(188);
+    } finally {
+      await history.close();
+    }
+  });
+  it("retains converted clear TS HLS across a cancelled decoder and replays decoded media", async () => {
+    const host = await startFakeHls({ live: { segmentMs: 6000 } });
+
+    const runtime = runtimeFor(
+      Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE }).pipe(
+        Layer.provideMerge(PlaybackCoordination.layer),
+        Layer.provideMerge(
+          LiveCaptures.layer({ folder: await tempDir(), keepFree: 0 }).pipe(
+            Layer.provide(PlaybackCoordination.layer),
+          ),
+        ),
+        Layer.provideMerge(
+          Subscriptions.layer({
+            dataDir: await tempDir(),
+            secrets: testSecrets,
+            providerOptions: { userAgent },
+          }),
+        ),
+      ),
+    );
+
+    try {
+      const sub = await (
+        await promised(runtime, Subscriptions)
+      ).add({ server: host.link, username: "", password: "" });
+
+      const playback = await promised(runtime, Playback);
+
+      const session = await playback.open({ subscriptionId: sub.id, id: "epochs.test" }, LINUX, {
+        repair: true,
+      });
+
+      const first = await firstBytes(session.url);
+      first.stop();
+      const before = await playback.timeline(session.sessionId);
+      expect(before).not.toBeNull();
+      await vi.waitFor(
+        async () => {
+          expect((await playback.timeline(session.sessionId))!.end).toBeGreaterThan(before!.end);
+        },
+        { timeout: 15_000 },
+      );
+      await playback.seekLive(session.sessionId, before!.start);
+      const response = await fetch(session.url);
+      const reader = response.body!.getReader();
+      const bytes = await take(reader, 256 * 1024);
+      await reader.cancel();
+
+      const decode = spawnSync(
+        FFMPEG,
+        ["-v", "error", "-i", "pipe:0", "-frames:v", "1", "-f", "null", "-"],
+        { input: bytes },
+      );
+
+      expect(decode.status, decode.stderr.toString()).toBe(0);
+      await playback.close(session.sessionId);
+      expect(await playback.timeline(session.sessionId)).toBeNull();
+    } finally {
+      await runtime.dispose();
+      await host.close();
+    }
+  }, 40_000);
   it("serves retained bytes through public Playback HTTP after its view reader closes", async () => {
     const { provider, playback } = await connectedPlayback({ rewind: true });
     const session = await playback.open(liveChannels(provider)[0]!, LINUX);

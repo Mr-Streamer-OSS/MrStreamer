@@ -1256,6 +1256,7 @@ function make(deps: PlaybackDeps) {
                 signal,
                 [],
                 variant.url,
+                keyOf(session, variant),
               );
 
               if (!answer.ok) throw new HlsInputFailure(answer.failure);
@@ -1686,8 +1687,58 @@ function make(deps: PlaybackDeps) {
         if (!input) throw hlsSubsetFailure();
         response.writeHead(200, { "Content-Type": "video/mp2t" });
 
-        for await (const chunk of convertedHls(session, input, signal)) {
-          if (!response.write(chunk)) await drained(response);
+        // Keep the converted stream running while the local decoder is paused. History holds
+        // output TS, so replay preserves the converter's stable PIDs and presentation clock.
+        if (captures && !session.archive && !session.receiver) {
+          const retained = await captures.viewRequest(
+            `hls-output:${session.id}`,
+            session.id,
+            async (captureSignal) => {
+              const chunks = convertedHls(
+                session,
+                input,
+                AbortSignal.any([captureSignal, session.closed.signal]),
+              );
+
+              return new Response(
+                new ReadableStream<Uint8Array>({
+                  async pull(controller) {
+                    try {
+                      const next = await chunks.next();
+
+                      if (next.done) controller.close();
+                      else controller.enqueue(next.value);
+                    } catch (cause) {
+                      controller.error(cause);
+                    }
+                  },
+                  async cancel() {
+                    await chunks.return(undefined);
+                  },
+                }),
+                { headers: { "Content-Type": "video/mp2t" } },
+              );
+            },
+            signal,
+          );
+
+          const reader = retained.body!.getReader();
+
+          try {
+            for (;;) {
+              const next = await reader.read();
+
+              if (next.done) break;
+
+              if (!response.write(next.value)) await drained(response);
+            }
+          } finally {
+            await reader.cancel().catch(() => {});
+          }
+        } else {
+          for await (const chunk of convertedHls(session, input, signal)) {
+            if (!response.write(chunk)) await drained(response);
+          }
         }
 
         response.end();

@@ -261,4 +261,4 @@ When you pause longer than the channel is kept, the moment you paused at is gone
 | End                         | Go live                                  |
 | Left, Right on the timeline | 10 seconds; Page Up, Page Down a minute  |
 
-HLS channels, catch-up programmes and a channel playing on a TV have no timeline. Their keys say **This stream can't rewind**, or **Rewind plays here only** on a TV. When the provider breaks off, the channel reconnects as before and its timeline starts again from then.
+An HLS channel has this timeline only after local codec repair converts clear muxed MPEG-TS segments to MPEG-TS output. Replay uses the picture and sound captured in that output. Direct HLS, including encrypted streams, separate audio renditions, fMP4, byte ranges and low-latency parts, has no retained timeline. Catch-up programmes and a channel playing on a TV also have no timeline. Their keys say **This stream can't rewind**, or **Rewind plays here only** on a TV. When the provider breaks off, the channel reconnects as before and its timeline starts again from then.

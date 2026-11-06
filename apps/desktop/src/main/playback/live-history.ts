@@ -296,6 +296,15 @@ class HistoryState {
     const expired = this.pieces.findLast((piece) => piece.at < this.latest - this.retentionMs());
 
     if (expired) void this.evictThrough(expired);
+
+    // Once the view leaves, a continuing recording need not keep consumed files until the
+    // next piece fills. Retain the partial writer piece and anything a reader still needs.
+    const consumed = this.pieces.findLast(
+      (piece) => piece.bytes >= this.pieceBytes && piece.offset + piece.bytes <= this.needed(),
+    );
+
+    if (consumed) void this.evictThrough(consumed);
+
     let rest = chunk;
 
     while (rest.length > 0) {
