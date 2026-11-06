@@ -1086,6 +1086,12 @@ function make(deps: DownloadsDeps) {
         settled: Promise.resolve(),
       };
 
+      let committed = false;
+
+      const check = () => {
+        if (work.cancelled || closing) throw moveError("Move cancelled; original copy kept");
+      };
+
       moving.set(id, work);
       work.settled = (async () => {
         deferCleanup(record);
@@ -1117,10 +1123,6 @@ function make(deps: DownloadsDeps) {
 
         if (within(source, destination)) throw moveError("Destination is inside this copy");
 
-        const check = () => {
-          if (work.cancelled || closing) throw moveError("Move cancelled; original copy kept");
-        };
-
         check();
 
         const parent = await stat(destination).catch(() => {
@@ -1151,7 +1153,6 @@ function make(deps: DownloadsDeps) {
           (latest) => ({ ...latest, moveTo: destination, moveId, moveDevice, moveToken: token }),
           true,
         );
-        let committed = false;
 
         try {
           await mkdir(target);
@@ -1235,7 +1236,11 @@ function make(deps: DownloadsDeps) {
             }
           }
         }
-      })();
+      })().catch((cause: unknown) => {
+        // A pending operation may refuse after cancellation; only an uncommitted move kept its original.
+        if (!committed) check();
+        throw cause;
+      });
       tell();
 
       try {
