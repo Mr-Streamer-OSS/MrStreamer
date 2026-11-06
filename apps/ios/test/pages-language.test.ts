@@ -4,6 +4,12 @@ import type { Locale } from "@mrstreamer/contracts/language";
 import * as React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
+/** The top bar options these screens set. */
+type ScreenOptions = {
+  title?: string;
+  unstable_headerRightItems?: () => { label: string; onPress?: () => void }[];
+};
+
 // Settings' own pages in the interface language: Diagnostics' title, Share and note follow it while
 // the text it shares stays as written, and a licence's labels follow it while its names, versions
 // and paths stay as the build gives them. A new language redraws the open page where it stands.
@@ -11,7 +17,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const scenario = vi.hoisted(() => ({
   /** The options a screen set on its top bar, newest last. */
-  options: [] as Record<string, unknown>[],
+  options: [] as ScreenOptions[],
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -23,7 +29,7 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => ({ id: "fflate@0.8.2" }),
   useNavigation: () => ({
-    setOptions: (options: Record<string, unknown>) => scenario.options.push(options),
+    setOptions: (options: ScreenOptions) => scenario.options.push(options),
   }),
 }));
 

@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // The viewer's channel lists through the built window, with two fake providers that number their
 // channels alike: made with New list by pointer and by keyboard, channels of both subscriptions
 // put in from rows' lists menus, the same channels in the list, the guide grid, Watch's channel
@@ -233,7 +234,7 @@ export async function customListsScenario(
     "document.activeElement?.textContent.trim() ?? ''",
   );
 
-  const listsAfterTaken = await d.evaluate<unknown>(
+  const listsAfterTaken = await d.evaluate<Json>(
     "(async()=>{const r=await window.mrStreamer.invoke('customLists.get');return r.ok?r.value.map(l=>l.name):null;})()",
   );
 
@@ -386,7 +387,7 @@ export async function customListsScenario(
   await d.quit();
   await d.launch();
   await d.wait(() => d.exists("document.querySelector('header')"));
-  d.observed["rememberedAfterRestart"] = await d.evaluate<unknown>(
+  d.observed["rememberedAfterRestart"] = await d.evaluate<Json>(
     "(async()=>{const r=await window.mrStreamer.invoke('liveBrowse.get');return r.ok?r.value:null;})()",
   );
   await d.click("Open Live TV after restart", named("header button", "Live TV"));
@@ -467,7 +468,7 @@ export async function customListsScenario(
     await d.click("Back to the New list field", LIST_FIELD);
   await d.key("Enter", 13);
   await d.wait(async () => (await d.evaluate<string | undefined>(HEADING)) === "News 24");
-  d.observed["afterRetry"] = await d.evaluate<unknown>(
+  d.observed["afterRetry"] = await d.evaluate<Json>(
     "(async()=>{const r=await window.mrStreamer.invoke('customLists.get');return r.ok?r.value.map(l=>[l.name,l.members.length]):null;})()",
   );
   check(
@@ -508,7 +509,7 @@ export async function customListsScenario(
   await d.wait(() =>
     d.evaluate<boolean>("document.querySelector('main')?.textContent.includes('No channels yet.')"),
   );
-  d.observed["sameNameAfterDelete"] = await d.evaluate<unknown>(
+  d.observed["sameNameAfterDelete"] = await d.evaluate<Json>(
     "(async()=>{const r=await window.mrStreamer.invoke('customLists.get');return r.ok?r.value.map(l=>[l.name,l.members.length]):null;})()",
   );
   await d.capture("same-name-empty");
@@ -522,7 +523,7 @@ export async function customListsScenario(
     );
 
   const favourites = () =>
-    d.evaluate<unknown>(
+    d.evaluate<Json>(
       "(async()=>{const r=await window.mrStreamer.invoke('viewing.get');return r.ok?r.value.favourites:null;})()",
     );
 

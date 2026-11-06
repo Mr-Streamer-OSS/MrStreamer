@@ -9,7 +9,7 @@ const answering = (body: Json) =>
     { userAgent: "fixture", fetch: async () => Response.json(body) },
   );
 
-const episode = (fields: { [key: string]: unknown }) => ({
+const episode = (fields: { [key: string]: Json | undefined }) => ({
   id: "1",
   episode_num: 1,
   season: 1,

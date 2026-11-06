@@ -18,16 +18,16 @@ export const cases: readonly ProofCase[] = [
         }
       })();
 
-      const scope = globalThis as Record<string, unknown>;
-      const crypto = scope["crypto"] as { randomUUID?: unknown; subtle?: unknown } | undefined;
+      const scope = globalThis;
+      const crypto = "crypto" in scope ? scope.crypto : undefined;
 
       return {
-        Buffer: scope["Buffer"] !== undefined,
-        TextEncoder: scope["TextEncoder"] !== undefined,
-        TextDecoder: scope["TextDecoder"] !== undefined,
-        ReadableStream: scope["ReadableStream"] !== undefined,
-        structuredClone: scope["structuredClone"] !== undefined,
-        setImmediate: scope["setImmediate"] !== undefined,
+        Buffer: "Buffer" in scope && scope.Buffer !== undefined,
+        TextEncoder: "TextEncoder" in scope && scope.TextEncoder !== undefined,
+        TextDecoder: "TextDecoder" in scope && scope.TextDecoder !== undefined,
+        ReadableStream: "ReadableStream" in scope && scope.ReadableStream !== undefined,
+        structuredClone: "structuredClone" in scope && scope.structuredClone !== undefined,
+        setImmediate: "setImmediate" in scope && scope.setImmediate !== undefined,
         cryptoRandomUUID: crypto?.randomUUID !== undefined,
         cryptoSubtle: crypto?.subtle !== undefined,
         AbortSignalTimeout: "timeout" in AbortSignal,

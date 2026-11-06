@@ -136,8 +136,28 @@ export class GuideFault extends Error {
 export function nativeGuide(): GuideNative {
   const raw = requireNativeModule<
     Omit<GuideNative, "prepare" | "query"> & {
-      prepareRequest(args: Readonly<Record<string, unknown>>): ReturnType<GuideNative["prepare"]>;
-      queryRequest(args: Readonly<Record<string, unknown>>): ReturnType<GuideNative["query"]>;
+      prepareRequest(args: {
+        lease: string;
+        job: string;
+        url: string;
+        headers: Readonly<Record<string, string>>;
+        login: readonly string[];
+        uncertain: readonly string[];
+        now: number;
+        from: number;
+        until: number;
+      }): ReturnType<GuideNative["prepare"]>;
+      queryRequest(args: {
+        lease: string;
+        generation: string;
+        job: string;
+        ids: readonly string[];
+        at: number;
+        mode: "listing" | "day" | "detail";
+        from: number;
+        until: number;
+        after: number;
+      }): ReturnType<GuideNative["query"]>;
     }
   >("Guide");
 

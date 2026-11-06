@@ -11,12 +11,32 @@ const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex
 /** Synthetic archive bytes at the same public manifest/data boundary as a packaged ASAR. */
 async function archive(
   sources: Record<string, string>,
-  change?: (files: Record<string, Record<string, unknown>>) => void,
+  change?: (
+    files: Record<
+      string,
+      {
+        unpacked?: boolean;
+        size: number;
+        offset: string;
+        integrity: { algorithm: string; hash: string };
+      }
+    >,
+  ) => void,
 ) {
   const root = await mkdtemp(join(tmpdir(), "owned worker scripts "));
   const resources = join(root, "Resources");
   await mkdir(resources);
-  const files: Record<string, Record<string, unknown>> = {};
+
+  const files: Record<
+    string,
+    {
+      unpacked?: boolean;
+      size: number;
+      offset: string;
+      integrity: { algorithm: string; hash: string };
+    }
+  > = {};
+
   const contents: Buffer[] = [];
   let offset = 0;
 

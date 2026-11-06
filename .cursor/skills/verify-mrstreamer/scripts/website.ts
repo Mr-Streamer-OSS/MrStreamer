@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // Real local-site navigation in an isolated browser, for environments without T3 preview.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -43,7 +44,7 @@ async function run() {
   const logs: string[] = [];
   const actions: { action: string; at: string }[] = [];
 
-  const observed: Record<string, unknown> = {
+  const observed: Record<string, Json | undefined> = {
     buildSha256: createHash("sha256").update(html).digest("hex"),
   };
 
@@ -138,7 +139,7 @@ app.on('window-all-closed', () => app.quit());
     page = await connect(browserPort);
     const livePage = page;
 
-    const send = async (method: string, params: Record<string, unknown> = {}) => {
+    const send = async (method: string, params: Record<string, Json | undefined> = {}) => {
       abort.signal.throwIfAborted();
       const reply = await livePage.send(method, params);
 

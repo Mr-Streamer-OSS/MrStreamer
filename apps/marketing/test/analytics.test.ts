@@ -1,3 +1,5 @@
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
@@ -13,7 +15,17 @@ import { ENTRY } from "../src/referrals.ts";
 // browser would send. web-vitals is replaced too: happy-dom measures no vitals, so tests report
 // metrics shaped as web-vitals reports them, attribution and all.
 
-type Report = (metric: Record<string, unknown>) => void;
+type Report = (metric: {
+  name: string;
+  value: number;
+  delta: number;
+  rating: string;
+  id: string;
+  navigationType: string;
+  navigationURL: string;
+  entries: { name: string }[];
+  attribution: { target: string; url: string };
+}) => void;
 
 const vitals = vi.hoisted(() => ({
   LCP: [] as Report[],
@@ -83,12 +95,12 @@ const sent = () =>
   fetchMock.mock.calls.map(([url, init]) => ({
     url,
     init,
-    body: JSON.parse(String(init.body)) as {
-      api_key: string;
-      event: string;
-      distinct_id: string;
-      properties: Record<string, unknown>;
-    },
+    body: arkType({
+      api_key: "string",
+      event: "string",
+      distinct_id: "string",
+      properties: arkType({ "[string]": JsonValue }),
+    }).assert(JSON.parse(String(init.body))),
   }));
 
 const events = () => sent().map(({ body }) => [body.event, body.properties]);

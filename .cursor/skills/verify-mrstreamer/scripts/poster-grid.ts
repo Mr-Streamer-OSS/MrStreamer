@@ -111,7 +111,7 @@ export async function posterGridScenario(
   d: Driver,
   counts: () => Record<string, number>,
 ): Promise<void> {
-  const steps: Record<string, unknown>[] = [];
+  const steps: Record<string, Json | undefined>[] = [];
   d.observed["posterGridSteps"] = steps;
   const state = () => d.evaluate<GridState>(STATE);
 
@@ -251,7 +251,7 @@ export async function posterGridScenario(
   expect(start.tabStops === 1, "The grid has more than one Tab stop before any key");
 
   // Tab enters on the selected poster, and the next Tab leaves the grid.
-  const tabs: Record<string, unknown>[] = [];
+  const tabs: Record<string, Json | undefined>[] = [];
 
   for (let press = 0; press < 40 && !(await state()).inGrid; press++) {
     await d.key("Tab", 9);

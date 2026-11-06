@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Execute archived public owners/loaders rather than maintaining a second schema fixture.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -71,7 +72,7 @@ async function until(check: () => boolean | Promise<boolean>) {
   throw new Error("Downgrade side effect did not settle.");
 }
 
-const results: Record<string, unknown> = {};
+const results: Record<string, Json | undefined> = {};
 
 try {
   const directory = join(evidence, "profile");
