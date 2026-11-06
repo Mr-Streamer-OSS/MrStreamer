@@ -1,3 +1,5 @@
+import { mkdir, rename, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { Guide } from "@mrstreamer/core/guide/service";
 import * as Effect from "effect/Effect";
@@ -71,6 +73,10 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
 
     return {
       own,
+      guideService: guide,
+      run,
+      dataDir,
+      owner,
       /** The guide's own answer, by each channel's `ownedKey`. */
       ask: (channels: readonly OwnedId[]) => run(guide.listings(channels)),
       refresh: () => run(guide.refresh(owner)),
@@ -331,6 +337,55 @@ describe("programme guide", () => {
     expect(
       Object.keys(await guide.searchChannels("journaal", [first, second], at("23:00"))),
     ).toEqual([first, second]);
+  });
+
+  it("reads bounded horizon pages through the Guide service", async () => {
+    const { guide, guided } = await connectedGuide();
+    await guide.refresh();
+    const input = { subscriptionId: guide.owner, query: "", channels: [guided], limit: 1 };
+    const first = await guide.run(guide.guideService.searchPage(input));
+    expect(first.matches).toHaveLength(1);
+    expect(first.next).not.toBeNull();
+    const next = await guide.run(guide.guideService.searchPage({ ...input, after: first.next! }));
+    expect(next.matches).toHaveLength(1);
+    expect(next.matches[0]?.programme.start).toBeGreaterThan(first.matches[0]!.programme.start);
+    expect(next.matches[0]?.channel.subscriptionId).toBe(guide.owner);
+  });
+
+  it("saves queries across restart and keeps the last save after a failed write", async () => {
+    const { guide, create } = await connectedGuide();
+    const queries = [{ name: "News", query: "news", channels: ["2000"] }];
+    expect(await guide.run(guide.guideService.setSavedQueries(guide.owner, queries))).toEqual(
+      queries,
+    );
+    const path = join(guide.dataDir, "guide-source.json");
+    const parked = `${path}.saved`;
+    await rename(path, parked);
+    await mkdir(path);
+
+    try {
+      await expect(
+        guide.run(
+          guide.guideService.setSavedQueries(guide.owner, [
+            { name: "Replacement", query: "other" },
+          ]),
+        ),
+      ).rejects.toThrow();
+      expect(await guide.run(guide.guideService.savedQueries(guide.owner))).toEqual(queries);
+    } finally {
+      await rm(path, { recursive: true });
+      await rename(parked, path);
+    }
+
+    await guide.close();
+    const restarted = await create();
+    expect(await restarted.run(restarted.guideService.savedQueries(restarted.owner))).toEqual(
+      queries,
+    );
+    expect(
+      await restarted.run(restarted.guideService.setSavedQueries(restarted.owner, [])),
+    ).toEqual([]);
+    expect(await restarted.run(restarted.guideService.savedQueries(restarted.owner))).toEqual([]);
   });
 
   it("keeps the guide across a restart without downloading it again", async () => {

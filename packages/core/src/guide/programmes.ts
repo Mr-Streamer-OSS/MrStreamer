@@ -12,6 +12,8 @@
 // A guide id means something only within its guide, so a guide channel is named by both, its
 // `guideRef`, wherever it leaves the main process to be handed back: a grid's slot, a mapping.
 import type {
+  GuideSearchPageInput,
+  GuideSearchPage,
   GuideChannel,
   GuideChannelPage,
   GuideChannelRef,
@@ -24,6 +26,7 @@ import type {
   ProgrammeMatch,
 } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { defined } from "../defined.ts";
 import { normalize, searchWords } from "../text.ts";
 import {
   eachMatch,
@@ -177,7 +180,11 @@ export function listingsAt(
     const shown = shownChannel(guides, channels, channelId, at);
     const listing = shown && shown.part.index.listing(shown.channel, at);
 
-    if (listing) result[channelId] = listing;
+    if (shown && listing)
+      result[channelId] = {
+        now: listing.now && scoped(listing.now, shown),
+        next: listing.next && scoped(listing.next, shown),
+      };
   }
 
   return result;
@@ -250,7 +257,11 @@ export function scheduleAt(
 ): readonly Programme[] {
   const shown = shownChannel(guides, channels, channelId, at);
 
-  return shown ? shown.part.index.schedule(shown.channel, at, from, until) : [];
+  return shown
+    ? shown.part.index
+        .schedule(shown.channel, at, from, until)
+        .map((programme) => scoped(programme, shown))
+    : [];
 }
 
 /**
@@ -311,9 +322,10 @@ export function programmeAt(
 ): Programme | null {
   const shown = shownChannel(guides, channels, channelId, at);
 
-  return shown && guideRef(shown.part.source, shown.channel.id) === ref
-    ? shown.part.index.programme(shown.channel, start)
-    : null;
+  if (!shown || guideRef(shown.part.source, shown.channel.id) !== ref) return null;
+  const programme = shown.part.index.programme(shown.channel, start);
+
+  return programme && scoped(programme, shown);
 }
 
 /**
@@ -331,9 +343,11 @@ export function startingAt(
 ): ProgrammeAt {
   if (!channels.channel(channelId)) return { kind: "unknown" };
   const shown = shownChannel(guides, channels, channelId, at);
-  const programme = shown?.part.index.programme(shown.channel, start) ?? null;
+  const programme = shown?.part.index.programme(shown.channel, start);
 
-  return programme ? { kind: "found", programme } : { kind: "none" };
+  return shown && programme
+    ? { kind: "found", programme: scoped(programme, shown) }
+    : { kind: "none" };
 }
 
 /** What `startingAt` answers, here and as `Guide.startingAt`. */
@@ -376,7 +390,11 @@ export async function searchAt(
     for (const { channel, programme } of found) {
       const shownOn = keys.get(channel);
 
-      if (shownOn) matches.push({ channel: shownOn, programme });
+      if (shownOn)
+        matches.push({
+          channel: shownOn,
+          programme: scoped(programme, { part, channel: part.index.channel(channel)! }),
+        });
     }
   }
 
@@ -396,23 +414,42 @@ function searchable(
   guides: Guides,
   channels: MappedChannels,
   at: number,
+  includePast = false,
 ): Promise<readonly ReadonlyMap<number, LiveChannel>[]> {
-  return remembered(shownBy, guides, channels, at, slicer(), async (slice) => {
-    const shown = guides.parts.map(() => new Map<number, LiveChannel>());
+  return remembered(
+    includePast ? shownWithPast : shownBy,
+    guides,
+    channels,
+    at,
+    slicer(),
+    async (slice) => {
+      const shown = guides.parts.map(() => new Map<number, LiveChannel>());
 
-    for (const channel of channels.all) {
-      const found = channel.adult ? undefined : shownChannel(guides, channels, channel.id, at);
-      const keys = found && shown[guides.parts.indexOf(found.part)];
+      for (const channel of channels.all) {
+        const found = channel.adult
+          ? undefined
+          : (shownChannel(guides, channels, channel.id, at) ??
+            (includePast
+              ? shownChannel(guides, channels, channel.id, Number.NEGATIVE_INFINITY)
+              : undefined));
 
-      if (found && keys && !keys.has(found.channel.key)) keys.set(found.channel.key, channel);
-      const rest = slice();
+        const keys = found && shown[guides.parts.indexOf(found.part)];
 
-      if (rest) await rest;
-    }
+        if (found && keys && !keys.has(found.channel.key)) keys.set(found.channel.key, channel);
+        const rest = slice();
 
-    return shown;
-  });
+        if (rest) await rest;
+      }
+
+      return shown;
+    },
+  );
 }
+
+const shownWithPast = new WeakMap<
+  Guides,
+  WeakMap<MappedChannels, Remembered<readonly ReadonlyMap<number, LiveChannel>[]>>
+>();
 
 const shownBy = new WeakMap<
   Guides,
@@ -763,4 +800,95 @@ export function slicer(): Slice {
       }),
     );
   };
+}
+
+/**
+ * A page of the programmes whose title has every word of `input.query` (any, without words), on
+ * every day the guides keep, ordered by start then catalogue channel id. `next` hands the last of
+ * them back as `after` for the page that follows.
+ */
+export async function searchPageAt(
+  guides: Guides,
+  channels: MappedChannels,
+  input: GuideSearchPageInput,
+  at: number,
+  search: GuideSearching,
+  signal: AbortSignal,
+): Promise<GuideSearchPage> {
+  const { channels: only, after, limit } = input;
+  const words = searchWords(input.query);
+
+  if (input.query.trim() !== "" && words.length === 0) return { matches: [], next: null };
+  const from = input.from ?? -8_000_000_000_000_000;
+
+  if (input.until !== undefined && input.until <= from) return { matches: [], next: null };
+
+  const selected = only
+    ? { ...channels, all: channels.all.filter((channel) => only.includes(channel.id)) }
+    : channels;
+
+  const shown = await searchable(guides, selected, at, true);
+  const matches: ProgrammeMatch[] = [];
+
+  for (const [place, part] of guides.parts.entries()) {
+    const keys = new Map([...(shown[place] ?? [])].sort(([, a], [, b]) => byId(a.id, b.id)));
+
+    if (!keys.size) continue;
+
+    // One more than a page tells whether another follows.
+    const found = await search.first(
+      {
+        path: part.path,
+        words,
+        at: Math.max(from, after?.start ?? from),
+        from,
+        channels: [...keys.keys()],
+        limit: limit + 1,
+        ...defined({
+          until: input.until,
+          after: after && {
+            start: after.start,
+            channels: [...keys].flatMap(([key, channel]) =>
+              channel.id > after.channel ? [key] : [],
+            ),
+          },
+        }),
+      },
+      signal,
+    );
+
+    for (const { channel, programme } of found) {
+      const shownOn = keys.get(channel);
+
+      if (shownOn)
+        matches.push({
+          channel: shownOn,
+          programme: scoped(programme, { part, channel: part.index.channel(channel)! }),
+        });
+    }
+  }
+
+  matches.sort((a, b) => a.programme.start - b.programme.start || byId(a.channel.id, b.channel.id));
+  const page = matches.slice(0, limit);
+  const last = page.at(-1);
+
+  return {
+    matches: page,
+    next:
+      matches.length > limit && last
+        ? { start: last.programme.start, channel: last.channel.id }
+        : null,
+  };
+}
+
+const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** The programme with its metadata qualified by the guide channel it was read from. */
+function scoped(programme: Programme, { part, channel }: Shown): Programme {
+  return programme.metadata
+    ? {
+        ...programme,
+        metadata: { ...programme.metadata, guide: guideRef(part.source, channel.id) },
+      }
+    : programme;
 }

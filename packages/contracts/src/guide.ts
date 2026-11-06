@@ -1,5 +1,6 @@
 // The programme guide as the UI sees it. Times are epoch milliseconds.
 import type { AppError } from "./errors.ts";
+import type { GuideSearchPageInput } from "./guide-query.ts";
 import type { LiveChannel } from "./library.ts";
 
 export interface Programme {
@@ -7,13 +8,14 @@ export interface Programme {
   readonly stop: number;
   readonly title: string;
   readonly description: string | null;
+  readonly metadata?: ProgrammeMetadata;
 }
 
 /**
  * A programme as a grid places it: without its description, which `guide.programme` reads with
  * the slot's `guide`.
  */
-export interface GuideSlot extends Omit<Programme, "description"> {
+export interface GuideSlot extends Pick<Programme, "start" | "stop" | "title"> {
   /**
    * The guide channel the slot is of, among those its channel's guide ids name: opaque, to hand
    * back to `guide.programme` as it is.
@@ -264,4 +266,24 @@ export interface GuideChannelPage {
   /** The channels the guides list in all, found or not. */
   readonly listed: number;
   readonly channels: readonly GuideChannel[];
+}
+
+/** Optional XMLTV facts. Identity is meaningful only with the selected source and channel. */
+export interface ProgrammeMetadata {
+  /** Qualified by the subscription used to read it; opaque selected guide/channel. */
+  readonly guide?: string;
+  readonly subtitle?: string;
+  readonly episodes?: readonly { readonly system: string; readonly value: string }[];
+  /** Valid zero-based xmltv_ns season and episode; part stays absent when unspecified. */
+  readonly episode?: { readonly season: number; readonly episode: number; readonly part?: number };
+  readonly repeat?: { readonly start?: string; readonly channel?: string };
+  readonly premiere?: string;
+}
+
+export type { GuideQuery, SavedGuideQuery, GuideSearchPageInput } from "./guide-query.ts";
+
+/** A page of `guide.searchPage`; `next` is the `after` of the page that follows, if one does. */
+export interface GuideSearchPage {
+  readonly matches: readonly ProgrammeMatch[];
+  readonly next: GuideSearchPageInput["after"] | null;
 }

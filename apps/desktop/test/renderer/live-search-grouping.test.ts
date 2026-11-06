@@ -339,7 +339,7 @@ async function page(
 
 /** The palette's programme results: its rows that aren't a channel's. */
 const programmeResults = () =>
-  [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].filter(
+  [...document.querySelectorAll<HTMLElement>('[role="treeitem"]:not([data-guide-search])')].filter(
     (row) => !row.querySelector("[data-group-row]"),
   );
 
@@ -1236,10 +1236,17 @@ describe("real search components with two subscriptions", () => {
 
     await act(async () => p.client.setQueryData(queries.search("news").queryKey, responses(names)));
     await expect.poll(() => p.rows().length).toBe(20);
-    const rows = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>('[role="treeitem"]:not([data-guide-search])'),
+    ];
+
     expect(rows).toHaveLength(21);
     expect(rows[20]!.textContent).toContain("Evening news");
     expect(p.scope().textContent).toContain("20 channels · 20 streams");
+
+    // Twenty Downs from the first row reach the programme, with the guide-search row after it.
+    for (let index = 0; index < 20; index++) await p.press("ArrowUp", p.field());
 
     for (let index = 0; index < 20; index++) await p.press("ArrowDown", p.field());
     expect(p.field().getAttribute("aria-activedescendant")).toBe(rows[20]!.id);
@@ -1309,7 +1316,8 @@ it("does not announce empty while titles or programmes are pending", async () =>
   expect(p.scope().textContent).not.toContain("No matches");
   programmes.resolve([]);
   await settled();
-  expect(p.scope().textContent).toContain("No matches");
+  expect(p.scope().textContent).not.toContain("No matches");
+  expect(p.scope().querySelector("[data-guide-search]")).not.toBeNull();
 });
 
 it("keeps a selected programme when channel results arrive before it", async () => {
@@ -1359,7 +1367,8 @@ it("blocks old palette rows immediately within the input event, and respects IME
   await settled(150);
   await settled();
   expect(p.rows()).toHaveLength(0);
-  expect(p.scope().textContent).toContain("No matches");
+  expect(p.scope().textContent).not.toContain("No matches");
+  expect(p.scope().querySelector("[data-guide-search]")).not.toBeNull();
 });
 
 it("blocks old Live rows in the raw debounce window and keeps names usable on guide failure", async () => {

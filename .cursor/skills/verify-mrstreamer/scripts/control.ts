@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import { guideSearchScenario, searchGuide } from "./guide-search.ts";
 import type { Observations } from "./language.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
@@ -91,6 +92,7 @@ const scenarios = [
   "hls-compatibility-catchup",
   "live-categories",
   "guide-grid",
+  "guide-search",
   "guide-grid-cells",
   "guide-grid-scroll",
   "reminders",
@@ -128,6 +130,8 @@ const gridded = (channel: FakeChannel): FakeChannel =>
 /** What a scenario's fake provider serves beyond its channel and title counts. */
 function scenarioProvider(scenario: Scenario): FakeProviderOptions {
   switch (scenario) {
+    case "guide-search":
+      return { channelOf: guided };
     case "guide-grid":
       return { guideHours: { past: 6, ahead: 24 }, channelOf: gridded };
     case "guide-grid-cells":
@@ -322,12 +326,30 @@ async function run(scenario: Scenario, prior?: string) {
     const stage = scenario === "home-stage" || scenario === "home-stage-live-only";
     provider = await startFakeProvider({
       channels:
-        scenario === "live-categories" ? 64000 : scenario === "guide-grid-scroll" ? 20000 : 60,
+        scenario === "live-categories"
+          ? 64000
+          : scenario === "guide-grid-scroll"
+            ? 20000
+            : scenario === "guide-search"
+              ? 2000
+              : 60,
       // Poster grids read 120 titles a page; poster-grid crosses several.
       titles: scenario === "poster-grid" ? 400 : 30,
       live: true,
       ...scenarioProvider(scenario),
     });
+
+    if (scenario === "guide-search") {
+      provider.serveGuide(searchGuide());
+      other = await startFakeProvider({
+        channels: 60,
+        titles: 10,
+        live: true,
+        second: true,
+        channelOf: (channel) => backupChannel(guided(channel)),
+      });
+      other.serveGuide(searchGuide().replaceAll("Weekly", "BackupWeekly"));
+    }
 
     if (scenario === "next-episode") provider.replaceEpisodeFile(81000, "title-h264-aac.mp4");
 
@@ -1161,6 +1183,7 @@ async function run(scenario: Scenario, prior?: string) {
         playlist!,
       );
     } else if (
+      scenario === "guide-search" ||
       scenario === "guide-grid" ||
       scenario === "guide-grid-cells" ||
       scenario === "guide-grid-scroll"
@@ -1180,7 +1203,8 @@ async function run(scenario: Scenario, prior?: string) {
         quit,
       };
 
-      if (scenario === "guide-grid")
+      if (scenario === "guide-search") await guideSearchScenario(driver, other!.url);
+      else if (scenario === "guide-grid")
         await guideGridScenario(driver, {
           streams: () => ({
             requests: provider!.streamRequests(),

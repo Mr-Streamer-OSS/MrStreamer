@@ -117,6 +117,18 @@ _⌘K or Ctrl K searches channels, programmes, movies and series in every subscr
 
 ⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today, in every subscription. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something). Channel name results use the same safe groups and **Show copies**. Right expands and Left collapses while the search field keeps focus. Programme results keep their own rows after movies and series.
 
+### Every guide day
+
+From 0.0.24, which isn't in Stable yet, **Search the guide**, the calendar beside the reminders bell in Live TV, searches programme titles on every day your guide keeps: days that passed as far back as it keeps them, and days to come as far as it reaches. It opens with what the list's field searched for, and the last row of ⌘K's results, **Search every guide day for …**, opens it for what you typed there.
+
+Each match shows its day, start time, channel and title, then what the guide says of the episode: S2 E4 when the guide gives valid season and episode numbers, otherwise the number as the guide writes it for the screen, with the episode title, **Shown before** for a repeat and **Premiere** when the guide says so. A guide that gives no episode number, or one that can't be read, still shows the programme, without a number. Mr. Streamer never calls an episode new because the guide marks it as a new show, leaves out a repeat mark or calls it a premiere.
+
+**Days** narrows the search to any day, before today, today, tomorrow or the next 7 days, and **Channels** to all channels or the list you were looking at, up to 100 channels. With several subscriptions saved, **Subscription** picks whose guide is searched: each subscription's channels, guide mappings and saved searches are its own. Results come 50 at a time in order of start; **Show more** adds the next ones. Changing the words or a filter starts again from the first.
+
+**Save search** keeps the words and filters under the words' name, up to 20 per subscription; saving the same words and name replaces its filters. Distinct words with the same shortened name get a numbered name. Today, Tomorrow, Before today and Next 7 days stay relative to the day you apply the saved search. Click a saved search to search it again, and the cross beside it to remove it. If a save fails, the saved searches stay as they were and Mr. Streamer says so, with **Retry**. If the saved searches can't be read, Mr. Streamer says so and saves nothing over them.
+
+Down or Enter in the field moves to the matches. Up and Down move between them, Home and End jump, and Enter opens one: its description, **Watch** while it's on and **Remind me** before it starts. Escape goes back to the field, clears it, and then closes guide search, returning focus to its opener. When opened with the header calendar, focus returns to that calendar.
+
 ## Reminders
 
 _Remind me on a programme to come, and Mr. Streamer tells you when it starts._

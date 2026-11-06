@@ -29,12 +29,9 @@ export function listen<E extends IpcEvent>(
 }
 
 /** TanStack owns the signal: a shared query is cancelled only after its last observer leaves. */
-export async function searchCall<M extends "guide.search" | "guide.searchList">(
-  method: M,
-  input: IpcInput<M>,
-  signal: AbortSignal,
-  view: string,
-): Promise<IpcOutput<M>> {
+export async function searchCall<
+  M extends "guide.search" | "guide.searchList" | "guide.searchPage",
+>(method: M, input: IpcInput<M>, signal: AbortSignal, view: string): Promise<IpcOutput<M>> {
   if (signal.aborted) throw new DOMException("Search cancelled", "AbortError");
   const request = { view, id: crypto.randomUUID() };
 

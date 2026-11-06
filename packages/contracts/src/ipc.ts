@@ -3,6 +3,7 @@
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
+import { GuideSearchPageInput, SavedGuideQuery } from "./guide-query.ts";
 import {
   analyticsFeatures,
   analyticsFailures,
@@ -24,6 +25,7 @@ import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
 import type { CopySession, Download, DownloadList } from "./downloads.ts";
 import {
+  type GuideSearchPage,
   GUIDE_DAY_MS,
   GUIDE_RANGE,
   MAP_FILTERS,
@@ -206,6 +208,11 @@ export const ipcInputs = {
     }).narrow(({ from, to }) => to > from && to - from <= GUIDE_RANGE.hours * 60 * 60 * 1000),
   /** One programme of a channel, by a slot's `guide` and `start`: what the slot leaves out. */
   "guide.programme": () => type({ channel: owned(), guide: "string", start: "number" }),
+  /** Like `guide.search`, a named `request` can be cancelled with `guide.cancelSearch`. */
+  "guide.searchPage": () => GuideSearchPageInput().merge({ "request?": searchRequest() }),
+  "guide.savedQueries": () => type({ subscriptionId: "string > 0" }),
+  "guide.setSavedQueries": () =>
+    type({ subscriptionId: "string > 0", queries: SavedGuideQuery().array().atMostLength(20) }),
   "guide.search": () => type({ query: "string", "request?": searchRequest() }),
   /** Cancels only this sender frame's named guide-search invocation. */
   "guide.cancelSearch": searchRequest,
@@ -691,6 +698,12 @@ export interface IpcOutputs {
   "guide.programme": Programme | null;
   /** Programmes on now or later whose title matches, on now first. */
   "guide.search": readonly ProgrammeMatch[];
+  /** Retained-horizon matches, ordered by start then channel id; dates overlap [from, until). */
+  "guide.searchPage": GuideSearchPage;
+  /** Saved queries for one subscription, kept beside its guide mappings. */
+  "guide.savedQueries": readonly SavedGuideQuery[];
+  /** Replaces the subscription's saved queries only after the write succeeds. */
+  "guide.setSavedQueries": readonly SavedGuideQuery[];
   "guide.cancelSearch": null;
   /**
    * Per channel of the list, by its `ownedKey`, whether the programme on now matches and the first

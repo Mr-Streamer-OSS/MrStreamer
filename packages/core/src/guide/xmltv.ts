@@ -13,6 +13,8 @@
 // It reads the text and nothing else. A DOCTYPE is passed over and the only references it knows
 // are the five XML defines and numbered characters, so a document can't make it fetch or read
 // anything.
+import { defined } from "../defined.ts";
+import type { ProgrammeMetadata } from "@mrstreamer/contracts/guide";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 
 /** A programme as the document lists it. */
@@ -25,6 +27,7 @@ export interface XmltvProgramme {
   readonly stop: number | null;
   readonly title: string;
   readonly description: string | null;
+  readonly metadata?: ProgrammeMetadata;
 }
 
 /** A channel as the document lists it. */
@@ -341,7 +344,16 @@ function programmeOf(attributes: string, body: string): XmltvProgramme | null {
 
   if (!channel || start === null || !title || (stop !== null && stop <= start)) return null;
 
-  return { channel, start, stop, title, description: text(DESCRIPTION.exec(body)?.[1]) };
+  const metadata = metadataOf(body);
+
+  return {
+    channel,
+    start,
+    stop,
+    title,
+    description: text(DESCRIPTION.exec(body)?.[1]),
+    ...defined({ metadata }),
+  };
 }
 
 function channelOf(attributes: string, body: string | null): XmltvChannel | null {
@@ -414,4 +426,131 @@ function time(value: string | undefined): number | null {
     : 0;
 
   return Date.UTC(y, mo - 1, d, h, mi, s) - offset * 60_000;
+}
+
+/** Direct programme children only: comments, processing instructions and CDATA never supply markup. */
+function metadataChildren(body: string): { name: string; attrs: string; value: string }[] {
+  const children: { name: string; attrs: string; value: string }[] = [];
+
+  const tokens =
+    /<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?([\w-]+)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/g;
+
+  let depth = 0;
+  let child: { name: string; attrs: string; from: number } | undefined;
+
+  for (const token of body.matchAll(tokens)) {
+    if (!token[1]) continue;
+    const closing = token[0].startsWith("</");
+    const empty = token[0].endsWith("/>");
+
+    if (closing) {
+      depth--;
+
+      if (depth === 0 && child) {
+        children.push({
+          name: child.name,
+          attrs: child.attrs,
+          value: body.slice(child.from, token.index),
+        });
+        child = undefined;
+      }
+    } else if (depth === 0 && empty) {
+      children.push({ name: token[1], attrs: token[2] ?? "", value: "" });
+    } else {
+      if (depth === 0)
+        child = { name: token[1], attrs: token[2] ?? "", from: token.index + token[0].length };
+
+      if (!empty) depth++;
+    }
+  }
+
+  return children;
+}
+
+/** Optional fields never make an otherwise readable programme fail. */
+function metadataOf(body: string): ProgrammeMetadata | undefined {
+  const children = metadataChildren(body);
+
+  const bounded = (tag: string, max: number) => {
+    const child = children.find((each) => each.name === tag);
+
+    if (!child) return undefined;
+    const value = text(child.value) ?? "";
+
+    return value.length <= max ? value : undefined;
+  };
+
+  const subtitle = bounded("sub-title", 512);
+  const premiere = bounded("premiere", 512);
+  const episodes: { system: string; value: string }[] = [];
+  let episode: ProgrammeMetadata["episode"];
+  let invalid = false;
+
+  for (const child of children.filter((each) => each.name === "episode-num")) {
+    const system = [...child.attrs.matchAll(ATTRIBUTE)].find((m) => m[1] === "system");
+    const scheme = decode(system?.[2] ?? system?.[3] ?? "onscreen").trim();
+    const value = text(child.value);
+
+    if (!scheme || scheme.length > 64 || !value || value.length > 256) {
+      if (scheme === "xmltv_ns") invalid = true;
+      continue;
+    }
+
+    if (episodes.length < 8) episodes.push({ system: scheme, value });
+
+    if (scheme !== "xmltv_ns") continue;
+
+    // Whitespace around separators is permitted; whitespace inside a number is not.
+    const tuple =
+      /^(\d+)(?:\s*\/\s*(\d+))?\s*\.\s*(\d+)(?:\s*\/\s*(\d+))?\s*\.\s*(?:(\d+)(?:\s*\/\s*(\d+))?)?$/.exec(
+        value.trim(),
+      );
+
+    if (!tuple) {
+      invalid = true;
+      continue;
+    }
+
+    const parts = [1, 3, 5].map((i) => (tuple[i] === undefined ? undefined : Number(tuple[i])));
+
+    if (
+      parts.some(
+        (n, i) =>
+          n !== undefined &&
+          (!Number.isSafeInteger(n) ||
+            (tuple[2 * i + 2] !== undefined &&
+              (!Number.isSafeInteger(Number(tuple[2 * i + 2])) || n >= Number(tuple[2 * i + 2])))),
+      )
+    ) {
+      invalid = true;
+      continue;
+    }
+
+    const parsed = { season: parts[0]!, episode: parts[1]!, ...defined({ part: parts[2] }) };
+
+    if (episode && JSON.stringify(episode) !== JSON.stringify(parsed)) invalid = true;
+    episode = parsed;
+  }
+
+  const repeatTag = children.find((each) => each.name === "previously-shown");
+  const repeat: { start?: string; channel?: string } = {};
+
+  if (repeatTag)
+    for (const m of repeatTag.attrs.matchAll(ATTRIBUTE)) {
+      const value = decode(m[2] ?? m[3] ?? "");
+
+      if (m[1] === "start" && value.length <= 64) repeat.start = value;
+
+      if (m[1] === "channel" && value.length <= 256) repeat.channel = value;
+    }
+
+  const result = defined({
+    subtitle,
+    premiere,
+    episodes: episodes.length ? episodes : undefined,
+    episode: invalid ? undefined : episode,
+    repeat: repeatTag ? repeat : undefined,
+  });
+
+  return Object.keys(result).length ? result : undefined;
 }

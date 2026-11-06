@@ -22,6 +22,9 @@ import { useSearchUsage } from "../../app/analytics.ts";
 //   Reorder, beside the field of Favourites or of one of the viewer's lists, or R, puts it in
 // another order: see ./reorder.ts for its keys, which replace these until the order is saved or
 // cancelled.
+//   Search the guide, the calendar beside the bell, searches programme titles on every day the
+// guide keeps, with days, channels and saved searches, in place of the channels: see
+// ./GuideSearch.tsx. It has the keys while it shows, and Escape closes it.
 //   The bell beside the field lists the programme reminders, set from a future programme's
 // details in the grid, the rest of a day or Search (../reminders/).
 //   The viewer's lists are made with New list at the end of them in the lists, and a channel goes
@@ -35,7 +38,7 @@ import { useSearchUsage } from "../../app/analytics.ts";
 //   The lists hold every saved subscription's channels. One that can't be reached keeps the
 // channels it loaded, and a line under the title says so, with Retry.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, Volume2, VolumeX, X } from "lucide-react";
+import { CalendarSearch, Play, Volume2, VolumeX, X } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -84,6 +87,7 @@ import { rowPlays, searchChannelRows } from "./search-rows.ts";
 import { BrowseFilters } from "./BrowseFilters.tsx";
 import { ChannelTable } from "./ChannelTable.tsx";
 import { GuideGrid, type GridKeys } from "./GuideGrid.tsx";
+import { closeGuideSearch, openGuideSearch, GuideSearch, useGuideSearch } from "./GuideSearch.tsx";
 import { ListPicker, listKey } from "./ListPicker.tsx";
 import {
   resolveDiscovery,
@@ -144,6 +148,8 @@ export function GuidePage({ active }: { active: boolean }) {
   const { channels: listed, error, data: browse } = useListChannels(list);
   const channels = listed ?? NO_CHANNELS;
   const playingKey = usePlayer((state) => (state.channel ? ownedKey(state.channel) : null));
+  const playingSubscription = usePlayer((state) => state.channel?.subscriptionId);
+  const guideSearch = useGuideSearch((state) => state.open);
   const favourites = useFavouriteKeys();
   const subscriptions = useSubscriptions();
   const toggleFavourite = useToggleFavourite();
@@ -536,6 +542,16 @@ export function GuidePage({ active }: { active: boolean }) {
         ui.view !== "live"
       )
         return;
+
+      // Guide search has the keys while it shows: only Escape, from outside it, is the page's.
+      if (useGuideSearch.getState().open) {
+        if (event.key !== "Escape") return;
+        closeGuideSearch();
+        event.preventDefault();
+
+        return;
+      }
+
       const now = state.current;
 
       if (!now.canUseSearch() && ["Enter", " ", "ArrowRight", "ArrowLeft", "f"].includes(event.key))
@@ -820,273 +836,314 @@ export function GuidePage({ active }: { active: boolean }) {
           />
           <main className="flex min-w-0 flex-1 flex-col">
             {/* The switch sits beside Watch, or at the end of the title while nothing plays. */}
-            <NowStrip active={active} viewSwitch={viewSwitch} />
-            <div className="flex h-14 flex-none items-center gap-3 px-9 pt-2 pb-3">
-              {/* Rename puts the name's field in its place. */}
-              {!(customList && editing?.kind === "rename" && !draft) && (
-                <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">{title}</h1>
-              )}
-              {draft ? (
-                <>
-                  <span
-                    className={cn(
-                      "min-w-0 truncate text-[0.8125rem]",
-                      draft.status === "failed" || changed
-                        ? "text-foreground"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    {draft.status === "failed"
-                      ? t("Couldn't save the order.")
-                      : changed
-                        ? list.kind === "custom"
-                          ? t("This list changed.")
-                          : t("Your favourites changed.")
-                        : isMac
-                          ? t("Option with Up or Down moves the selected row")
-                          : t("Alt with Up or Down moves the selected row")}
-                  </span>
-                  <div className="ml-auto flex flex-none items-center gap-2">
-                    <Button onClick={order.cancel} disabled={waiting}>
-                      {t("Cancel")}
-                    </Button>
-                    <Button variant="primary" onClick={order.confirm} disabled={waiting}>
-                      {draft.status === "failed" ? t("Retry") : changed ? t("Reload") : t("Save")}
-                    </Button>
-                  </div>
-                  <span role="status" className="sr-only">
-                    {draft.said}
-                  </span>
-                </>
-              ) : customList && editing?.kind === "rename" ? (
-                <RenameList list={customList} onDone={() => finish(editing)} />
-              ) : (
-                <>
-                  {searching && listed && (
-                    <span role="status" className="flex-none text-sm text-white tabular-nums">
-                      {t("{count} channels", { count: search.groups?.length ?? 0 })} ·{" "}
-                      {t("{count} streams", {
-                        count: search.groups?.reduce((sum, group) => sum + group.streams, 0) ?? 0,
-                      })}
-                    </span>
-                  )}
-                  <div className="ml-auto flex flex-none items-center gap-2">
-                    {playingKey === null && viewSwitch}
-                    <RemindersMenu />
-                    {order.available && liveView === "list" && (
-                      <Button
-                        ref={reorderButton}
-                        variant="ghost"
-                        size="sm"
-                        title={t("Reorder (R)")}
-                        onClick={reorder}
-                      >
-                        {t("Reorder")}
-                      </Button>
-                    )}
-                    {customList && (
-                      <ListOptions
-                        list={customList}
-                        first={position === 0}
-                        last={position === lists.length - 1}
-                        onRename={() => setEditing({ id: customList.id, kind: "rename" })}
-                        onMove={moveList}
-                        onDelete={() => setEditing({ id: customList.id, kind: "delete" })}
-                      />
-                    )}
-                    {(channels.length > 0 || searching) && (
-                      <ListSearch
-                        field={field}
-                        list={title}
-                        value={text}
-                        onChange={setText}
-                        onLeave={() => {
-                          setFocus("channels");
-                          showSelection();
-                          setSearchFocus((asked) => asked + 1);
-                        }}
-                      />
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            {customList && editing?.kind === "delete" && (
-              <DeleteList
-                list={customList}
-                onDone={() => finish(editing)}
-                onDeleted={() => {
-                  finish(editing);
-                  // Only the list still on screen gives way to All channels.
-                  const gone = { kind: "custom", id: customList.id } as const;
-
-                  if (sameList(useUi.getState().list, gone)) showList({ kind: "all" });
-                }}
+            <NowStrip active={active} viewSwitch={viewSwitch} hidden={guideSearch} />
+            {guideSearch ? (
+              <GuideSearch
+                list={title}
+                channels={listed}
+                everything={
+                  list.kind === "all" &&
+                  filters.countries.length === 0 &&
+                  filters.languages.length === 0 &&
+                  filters.subscriptions.length === 0
+                }
+                filtered={filters.subscriptions}
+                playing={playingSubscription}
+                onWatch={watchLive}
               />
-            )}
-            <BrowseFilters list={list} result={browse} onOpenChange={setFilterOpen} />
-            {customList && <AwayNote count={customList.away} />}
-            <ChangeNotice
-              state={listChange.state}
-              onRetry={listChange.retry}
-              onDismiss={listChange.dismiss}
-            />
-            <SourceNotices />
-            {refused && (
-              <p className="px-9 pb-2.5 text-sm text-muted-foreground">
-                {t("Clear the search to reorder.")}
-                {/* The field's own button clears a search too, and leaves it at that. */}
-                <button
-                  aria-label={t("Clear search and reorder")}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    setText("");
-                    begin();
-                  }}
-                  className="ml-3 text-white underline underline-offset-4"
-                >
-                  {t("Clear search")}
-                </button>
-              </p>
-            )}
-            {searching && (search.pending || search.failed) && (
-              <p role="status" className="px-9 text-xs text-muted-foreground">
-                {search.failed ? `${t("Guide")}: ${t("Service unavailable")}` : t("Searching")}
-              </p>
-            )}
-            <div
-              className="flex min-h-0 flex-1 flex-col"
-              inert={!search.actionable}
-              onClickCapture={(event) => {
-                if (canUseSearch()) return;
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-            >
-              {listed && listed.length === 0 && (unlisted.length === 0 || liveView === "grid") ? (
-                <p className="px-9 text-sm text-muted-foreground">
-                  {list.kind === "favourites"
-                    ? t("No favourites yet.")
-                    : customList?.members.length === 0
-                      ? t("No channels yet.")
-                      : t("No channels.")}
-                </p>
-              ) : listed && searching && rows.length === 0 ? (
-                search.pending || search.failed ? null : (
-                  <NothingFound
-                    list={title}
-                    query={search.query}
-                    onSearchAll={
-                      list.kind === "all"
-                        ? null
-                        : () => {
-                            // The search moves to every channel with what it holds.
-                            setTyped({ key: listKey({ kind: "all" }), text });
-                            showList({ kind: "all" });
-                          }
-                    }
+            ) : (
+              <>
+                <div className="flex h-14 flex-none items-center gap-3 px-9 pt-2 pb-3">
+                  {/* Rename puts the name's field in its place. */}
+                  {!(customList && editing?.kind === "rename" && !draft) && (
+                    <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
+                      {title}
+                    </h1>
+                  )}
+                  {draft ? (
+                    <>
+                      <span
+                        className={cn(
+                          "min-w-0 truncate text-[0.8125rem]",
+                          draft.status === "failed" || changed
+                            ? "text-foreground"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {draft.status === "failed"
+                          ? t("Couldn't save the order.")
+                          : changed
+                            ? list.kind === "custom"
+                              ? t("This list changed.")
+                              : t("Your favourites changed.")
+                            : isMac
+                              ? t("Option with Up or Down moves the selected row")
+                              : t("Alt with Up or Down moves the selected row")}
+                      </span>
+                      <div className="ml-auto flex flex-none items-center gap-2">
+                        <Button onClick={order.cancel} disabled={waiting}>
+                          {t("Cancel")}
+                        </Button>
+                        <Button variant="primary" onClick={order.confirm} disabled={waiting}>
+                          {draft.status === "failed"
+                            ? t("Retry")
+                            : changed
+                              ? t("Reload")
+                              : t("Save")}
+                        </Button>
+                      </div>
+                      <span role="status" className="sr-only">
+                        {draft.said}
+                      </span>
+                    </>
+                  ) : customList && editing?.kind === "rename" ? (
+                    <RenameList list={customList} onDone={() => finish(editing)} />
+                  ) : (
+                    <>
+                      {searching && listed && (
+                        <span role="status" className="flex-none text-sm text-white tabular-nums">
+                          {t("{count} channels", { count: search.groups?.length ?? 0 })} ·{" "}
+                          {t("{count} streams", {
+                            count:
+                              search.groups?.reduce((sum, group) => sum + group.streams, 0) ?? 0,
+                          })}
+                        </span>
+                      )}
+                      <div className="ml-auto flex flex-none items-center gap-2">
+                        {playingKey === null && viewSwitch}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t("Search the guide")}
+                          title={t("Search the guide")}
+                          data-guide-search-opener
+                          onClick={(event) => {
+                            event.currentTarget.focus();
+                            openGuideSearch(text.trim());
+                          }}
+                        >
+                          <CalendarSearch />
+                        </Button>
+                        <RemindersMenu />
+                        {order.available && liveView === "list" && (
+                          <Button
+                            ref={reorderButton}
+                            variant="ghost"
+                            size="sm"
+                            title={t("Reorder (R)")}
+                            onClick={reorder}
+                          >
+                            {t("Reorder")}
+                          </Button>
+                        )}
+                        {customList && (
+                          <ListOptions
+                            list={customList}
+                            first={position === 0}
+                            last={position === lists.length - 1}
+                            onRename={() => setEditing({ id: customList.id, kind: "rename" })}
+                            onMove={moveList}
+                            onDelete={() => setEditing({ id: customList.id, kind: "delete" })}
+                          />
+                        )}
+                        {(channels.length > 0 || searching) && (
+                          <ListSearch
+                            field={field}
+                            list={title}
+                            value={text}
+                            onChange={setText}
+                            onLeave={() => {
+                              setFocus("channels");
+                              showSelection();
+                              setSearchFocus((asked) => asked + 1);
+                            }}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+                {customList && editing?.kind === "delete" && (
+                  <DeleteList
+                    list={customList}
+                    onDone={() => finish(editing)}
+                    onDeleted={() => {
+                      finish(editing);
+                      // Only the list still on screen gives way to All channels.
+                      const gone = { kind: "custom", id: customList.id } as const;
+
+                      if (sameList(useUi.getState().list, gone)) showList({ kind: "all" });
+                    }}
                   />
-                )
-              ) : liveView === "grid" ? (
-                <GuideGrid
-                  key={`${key}\n${search.query}`}
-                  ref={grid}
-                  channels={gridRows}
-                  playingKey={playingKey}
-                  showCursor={keyboard && focus === "channels"}
-                  onWatch={(channel) => {
-                    if (canUseSearch()) watchLive(channel);
-                  }}
-                  onKeys={() => setFocus("channels")}
-                  onPlayArchive={(channel, programme) => {
-                    if (!canUseSearch()) return;
-                    player.playArchive(channel, programme);
-                    openWatch();
-                  }}
+                )}
+                <BrowseFilters list={list} result={browse} onOpenChange={setFilterOpen} />
+                {customList && <AwayNote count={customList.away} />}
+                <ChangeNotice
+                  state={listChange.state}
+                  onRetry={listChange.retry}
+                  onDismiss={listChange.dismiss}
                 />
-              ) : (
-                <ChannelTable
-                  categories={categoryMap}
-                  key={`${key}\n${search.query}`}
-                  channels={rows}
-                  searchRows={searchRows}
-                  searchFocus={searchFocus}
-                  expandedCopies={expandedCopies}
-                  onToggleCopies={toggleCopies}
-                  onSelectSearch={(index) =>
-                    setChosen({
-                      index,
-                      channel: rows[index] ?? null,
-                      searchKey: searchRows?.[index]?.key,
-                    })
-                  }
-                  selected={draft || (keyboard && focus === "channels") ? selected : null}
-                  covered={covered || filterOpen}
-                  playingKey={playingKey}
-                  expandedKey={expandedKey}
-                  favourites={favourites}
-                  words={search.words}
-                  matches={search.matches}
-                  order={
-                    draft && {
-                      label:
-                        list.kind === "custom"
-                          ? t("{list}, in the order to save", { list: title })
-                          : t("Favourites, in the order to save"),
-                      saved: draft.listed,
-                      focus: draft.focus,
-                      locked: waiting || changed,
-                      onSelect: order.select,
-                      onFocused: order.focused,
-                      onMove: order.move,
-                    }
-                  }
-                  lists={
-                    draft
-                      ? null
-                      : {
-                          lists,
-                          onSet: (to, channel, member) =>
-                            void listChange.run(() =>
-                              call("customLists.setMember", {
-                                list: to.id,
-                                channel: ownedId(channel),
-                                member,
-                              }),
-                            ),
-                          // The rail goes back to New list for its field, out of a Find or a
-                          // provider's categories; the list on screen stays.
-                          onNew: (channel) => {
-                            picker.showNew();
-                            setFocus("lists");
-                            creating.start(ownedId(channel));
-                          },
+                <SourceNotices />
+                {refused && (
+                  <p className="px-9 pb-2.5 text-sm text-muted-foreground">
+                    {t("Clear the search to reorder.")}
+                    {/* The field's own button clears a search too, and leaves it at that. */}
+                    <button
+                      aria-label={t("Clear search and reorder")}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setText("");
+                        begin();
+                      }}
+                      className="ml-3 text-white underline underline-offset-4"
+                    >
+                      {t("Clear search")}
+                    </button>
+                  </p>
+                )}
+                {searching && (search.pending || search.failed) && (
+                  <p role="status" className="px-9 text-xs text-muted-foreground">
+                    {search.failed ? `${t("Guide")}: ${t("Service unavailable")}` : t("Searching")}
+                  </p>
+                )}
+                <div
+                  className="flex min-h-0 flex-1 flex-col"
+                  inert={!search.actionable}
+                  onClickCapture={(event) => {
+                    if (canUseSearch()) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
+                  {listed &&
+                  listed.length === 0 &&
+                  (unlisted.length === 0 || liveView === "grid") ? (
+                    <p className="px-9 text-sm text-muted-foreground">
+                      {list.kind === "favourites"
+                        ? t("No favourites yet.")
+                        : customList?.members.length === 0
+                          ? t("No channels yet.")
+                          : t("No channels.")}
+                    </p>
+                  ) : listed && searching && rows.length === 0 ? (
+                    search.pending || search.failed ? null : (
+                      <NothingFound
+                        list={title}
+                        query={search.query}
+                        onSearchAll={
+                          list.kind === "all"
+                            ? null
+                            : () => {
+                                // The search moves to every channel with what it holds.
+                                setTyped({ key: listKey({ kind: "all" }), text });
+                                showList({ kind: "all" });
+                              }
                         }
-                  }
-                  unlisted={draft ? [] : unlisted}
-                  onRemoveUnlisted={(member) => {
-                    if (customList)
-                      void listChange.run(() =>
-                        call("customLists.removeMember", { list: customList.id, member }),
-                      );
-                  }}
-                  onWatch={(channel, index) => {
-                    setChosen({ index, channel, searchKey: searchRows?.[index]?.key });
-                    playRow(index);
-                  }}
-                  onWatchArchive={(channel, index, programme) => {
-                    if (!canUseSearch()) return;
-                    setChosen({ index, channel, searchKey: searchRows?.[index]?.key });
-                    player.playArchive(channel, programme);
-                    openWatch();
-                  }}
-                  onToggleSchedule={(key) => {
-                    if (canUseSearch()) setExpandedKey((current) => (current === key ? null : key));
-                  }}
-                  onToggleFavourite={toggleFavourite}
-                />
-              )}
-            </div>
+                      />
+                    )
+                  ) : liveView === "grid" ? (
+                    <GuideGrid
+                      key={`${key}\n${search.query}`}
+                      ref={grid}
+                      channels={gridRows}
+                      playingKey={playingKey}
+                      showCursor={keyboard && focus === "channels"}
+                      onWatch={(channel) => {
+                        if (canUseSearch()) watchLive(channel);
+                      }}
+                      onKeys={() => setFocus("channels")}
+                      onPlayArchive={(channel, programme) => {
+                        if (!canUseSearch()) return;
+                        player.playArchive(channel, programme);
+                        openWatch();
+                      }}
+                    />
+                  ) : (
+                    <ChannelTable
+                      categories={categoryMap}
+                      key={`${key}\n${search.query}`}
+                      channels={rows}
+                      searchRows={searchRows}
+                      searchFocus={searchFocus}
+                      expandedCopies={expandedCopies}
+                      onToggleCopies={toggleCopies}
+                      onSelectSearch={(index) =>
+                        setChosen({
+                          index,
+                          channel: rows[index] ?? null,
+                          searchKey: searchRows?.[index]?.key,
+                        })
+                      }
+                      selected={draft || (keyboard && focus === "channels") ? selected : null}
+                      covered={covered || filterOpen}
+                      playingKey={playingKey}
+                      expandedKey={expandedKey}
+                      favourites={favourites}
+                      words={search.words}
+                      matches={search.matches}
+                      order={
+                        draft && {
+                          label:
+                            list.kind === "custom"
+                              ? t("{list}, in the order to save", { list: title })
+                              : t("Favourites, in the order to save"),
+                          saved: draft.listed,
+                          focus: draft.focus,
+                          locked: waiting || changed,
+                          onSelect: order.select,
+                          onFocused: order.focused,
+                          onMove: order.move,
+                        }
+                      }
+                      lists={
+                        draft
+                          ? null
+                          : {
+                              lists,
+                              onSet: (to, channel, member) =>
+                                void listChange.run(() =>
+                                  call("customLists.setMember", {
+                                    list: to.id,
+                                    channel: ownedId(channel),
+                                    member,
+                                  }),
+                                ),
+                              // The rail goes back to New list for its field, out of a Find or a
+                              // provider's categories; the list on screen stays.
+                              onNew: (channel) => {
+                                picker.showNew();
+                                setFocus("lists");
+                                creating.start(ownedId(channel));
+                              },
+                            }
+                      }
+                      unlisted={draft ? [] : unlisted}
+                      onRemoveUnlisted={(member) => {
+                        if (customList)
+                          void listChange.run(() =>
+                            call("customLists.removeMember", { list: customList.id, member }),
+                          );
+                      }}
+                      onWatch={(channel, index) => {
+                        setChosen({ index, channel, searchKey: searchRows?.[index]?.key });
+                        playRow(index);
+                      }}
+                      onWatchArchive={(channel, index, programme) => {
+                        if (!canUseSearch()) return;
+                        setChosen({ index, channel, searchKey: searchRows?.[index]?.key });
+                        player.playArchive(channel, programme);
+                        openWatch();
+                      }}
+                      onToggleSchedule={(key) => {
+                        if (canUseSearch())
+                          setExpandedKey((current) => (current === key ? null : key));
+                      }}
+                      onToggleFavourite={toggleFavourite}
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </main>
         </div>
       )}
@@ -1247,7 +1304,15 @@ function NothingFound({
  * archive says when it aired, as Watch does. While a receiver on the network is connected, the channel stands still and a line
  * says why.
  */
-function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNode }) {
+function NowStrip({
+  active,
+  viewSwitch,
+  hidden,
+}: {
+  active: boolean;
+  viewSwitch: ReactNode;
+  hidden: boolean;
+}) {
   const channel = usePlayer((state) => state.channel);
   const archive = usePlayer((state) => state.archive);
   const audible = usePlayer((state) => state.audible && !state.muted);
@@ -1263,7 +1328,7 @@ function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNo
   const current = archive ? null : (listing?.now ?? null);
 
   return (
-    <section className="flex items-end gap-6 px-9 pt-5 pb-4">
+    <section className={cn("flex items-end gap-6 px-9 pt-5 pb-4", hidden && "hidden")}>
       <div className="relative aspect-video w-[18rem] flex-none overflow-hidden rounded-xl bg-white/5">
         <div className="absolute inset-0 grid place-items-center">
           <ChannelLogo channel={channel} className="h-12 w-20" />

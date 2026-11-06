@@ -17,6 +17,10 @@ export function guideHandlers({
     "guide.range": ({ channels, from, to }) => guide.range(channels, from, to),
     "guide.programme": ({ channel, guide: guideId, start }) =>
       guide.programme(channel, guideId, start),
+    "guide.searchPage": (input) => guide.searchPage(input),
+    "guide.savedQueries": ({ subscriptionId }) => guide.savedQueries(subscriptionId),
+    "guide.setSavedQueries": ({ subscriptionId, queries }) =>
+      guide.setSavedQueries(subscriptionId, queries),
     "guide.search": ({ query }) => guide.search(query),
     // The transport owns cancellation and validates sender/frame ownership.
     "guide.cancelSearch": () => Effect.succeed(null),

@@ -29,6 +29,7 @@ import {
   type GuideSlot,
   type Listing,
   type Programme,
+  type ProgrammeMetadata,
 } from "@mrstreamer/contracts/guide";
 import { normalize } from "../text.ts";
 import { xmltvDocument } from "./document.ts";
@@ -36,10 +37,10 @@ import { GUIDE_KEPT, GUIDE_LIMITS, type GuideLimits } from "./limits.ts";
 import { xmltvReader } from "./xmltv.ts";
 
 /**
- * The layout of the files this release writes. A file of another is read as no guide. 2: rows
- * within `GUIDE_KEPT`.
+ * The layout of the files this release writes. Versions 2 and 3 remain readable. 2: rows
+ * within `GUIDE_KEPT`. 3: bounded optional XMLTV metadata.
  */
-const VERSION = 2;
+const VERSION = 3;
 
 /** Programmes written per transaction while a document is read, or text of this many bytes. */
 const BATCH = { programmes: 5_000, bytes: 8 * 1024 * 1024 };
@@ -137,6 +138,7 @@ export async function buildGuideIndex(
         stop integer,
         title integer not null,
         description text,
+        metadata text,
         primary key (channel, start)
       ) without rowid;
       create table meta (programmes integer not null, until integer);
@@ -200,7 +202,7 @@ export async function buildGuideIndex(
     // Duplicates of a start time count once: the first the document lists, also when it has no
     // end and a later one does, so it runs until the next start. Releases before 0.0.13 kept the
     // later one then, as they dropped an entry whose end the next start would make empty.
-    const insertProgramme = db.prepare("insert or ignore into programme values (?, ?, ?, ?, ?)");
+    const insertProgramme = db.prepare("insert or ignore into programme values (?, ?, ?, ?, ?, ?)");
     // Each programme is written as it is read, so nothing of it stays in memory; a transaction
     // ends every so many programmes or bytes.
     let pending = { programmes: 0, bytes: 0 };
@@ -237,9 +239,19 @@ export async function buildGuideIndex(
 
           // Counted as it comes, so a guide past the limit stops here rather than at its end.
           const channel = listed(entry.channel, null);
-          insertProgramme.run(channel, entry.start, entry.stop, titleKey(title), description);
+          const metadata = entry.metadata ? JSON.stringify(entry.metadata) : null;
+
+          insertProgramme.run(
+            channel,
+            entry.start,
+            entry.stop,
+            titleKey(title),
+            description,
+            metadata,
+          );
           pending.programmes++;
-          pending.bytes += 2 * (title.length + (description?.length ?? 0));
+          pending.bytes +=
+            2 * (title.length + (description?.length ?? 0) + (metadata?.length ?? 0));
 
           if (pending.programmes >= BATCH.programmes || pending.bytes >= BATCH.bytes) commit();
         },
@@ -339,7 +351,9 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
   db.prepare("attach database ? as old").run(`${pathToFileURL(previous).href}?mode=ro`);
 
   try {
-    if (db.prepare("pragma old.user_version").get()?.["user_version"] !== VERSION) return;
+    const version = db.prepare("pragma old.user_version").get()?.["user_version"];
+
+    if (version !== 2 && version !== VERSION) return;
     db.exec(`
       begin;
       create temp table opening as
@@ -356,9 +370,9 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
     ).run(cutoff);
     db.prepare(
       `
-      insert or ignore into programme (channel, start, stop, title, description)
+      insert or ignore into programme (channel, start, stop, title, description, metadata)
       select opening.key, programme.start, min(programme.stop, opening.start), title.key,
-        programme.description
+        programme.description, ${version === 2 ? "null" : "programme.metadata"}
       from temp.opening as opening
       join old.channel as was on was.id = opening.id
       join old.programme as programme on programme.channel = was.key
@@ -488,7 +502,9 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
   }
 
   try {
-    if (db.prepare("pragma user_version").get()?.["user_version"] !== VERSION) {
+    const version = db.prepare("pragma user_version").get()?.["user_version"];
+
+    if (version !== 2 && version !== VERSION) {
       db.close();
 
       return null;
@@ -559,7 +575,7 @@ function reader(
         -9007199254740991
       )`;
 
-  const described = `select ${columns}, programme.description ${from}`;
+  const described = `select ${columns}, programme.description, ${metadataColumn(db)} as metadata ${from}`;
   // Every read is bounded in SQL, before a row is made: the one that may have ended comes first.
   // A row is a few kilobytes at most and a minute of time at least (`GUIDE_KEPT`).
   const listing = db.prepare(`${described} order by programme.start limit 3`);
@@ -569,7 +585,7 @@ function reader(
   );
 
   const selected = `
-    select ${columns}, programme.description
+    select ${columns}, programme.description, ${metadataColumn(db)} as metadata
     from programme join title on title.key = programme.title
     where programme.channel = :channel`;
 
@@ -589,7 +605,7 @@ function reader(
   );
 
   const detail = db.prepare(`
-    select ${columns}, programme.description
+    select ${columns}, programme.description, ${metadataColumn(db)} as metadata
     from programme join title on title.key = programme.title
     where programme.channel = ? and programme.start = ?`);
 
@@ -670,6 +686,9 @@ interface Search {
 
 /** A search for the first `limit` programmes it finds: on now first, then by start. */
 export interface FirstSearch extends Search {
+  readonly from?: number;
+  readonly until?: number;
+  readonly after?: { readonly start: number; readonly channels: readonly number[] };
   readonly limit: number;
 }
 
@@ -738,10 +757,14 @@ export interface GuideSearching {
 export function searchFirst(search: FirstSearch): FirstFound {
   const { at, limit } = search;
   const best: FoundProgramme[] = [];
-  const rank = (found: FoundProgramme) => (found.start <= at ? 0 : 1);
+  const paged = search.from !== undefined;
+  const rank = (found: FoundProgramme) => (paged ? 0 : found.start <= at ? 0 : 1);
+  const order = new Map(search.channels.map((key, i) => [key, i]));
 
   const before = (a: FoundProgramme, b: FoundProgramme) =>
-    rank(a) - rank(b) || a.start - b.start || a.channel - b.channel;
+    rank(a) - rank(b) ||
+    a.start - b.start ||
+    (paged ? (order.get(a.channel) ?? 0) - (order.get(b.channel) ?? 0) : a.channel - b.channel);
 
   return reading(search.path, (db) => {
     matching(
@@ -749,8 +772,20 @@ export function searchFirst(search: FirstSearch): FirstFound {
       search,
       // Once `limit` are in, only one that starts by the last of them can take its place: earlier,
       // or as early on a channel the file keys first. Starts are whole milliseconds.
-      () => (best.at(limit - 1)?.start ?? Number.POSITIVE_INFINITY) + 1,
+      () =>
+        Math.min(
+          search.until ?? Number.POSITIVE_INFINITY,
+          (best.at(limit - 1)?.start ?? Number.POSITIVE_INFINITY) + 1,
+        ),
       (found) => {
+        if (search.from !== undefined && found.stop <= search.from) return;
+
+        if (
+          search.after &&
+          (found.start < search.after.start ||
+            (found.start === search.after.start && !search.after.channels.includes(found.channel)))
+        )
+          return;
         let place = best.length;
 
         while (place > 0 && before(found, best[place - 1]!) < 0) place--;
@@ -763,11 +798,12 @@ export function searchFirst(search: FirstSearch): FirstFound {
     );
 
     const described = db.prepare(
-      "select description from programme where channel = ? and start = ?",
+      `select description, ${metadataColumn(db)} as metadata from programme where channel = ? and start = ?`,
     );
 
     return best.map(({ channel, start, stop, title }) => {
-      const description = described.get(channel, start)?.["description"];
+      const row = described.get(channel, start);
+      const description = row?.["description"];
 
       return {
         channel,
@@ -776,6 +812,7 @@ export function searchFirst(search: FirstSearch): FirstFound {
           stop,
           title,
           description: description === String(description) ? String(description) : null,
+          ...metadataOf(row?.["metadata"]),
         },
       };
     });
@@ -863,7 +900,7 @@ function matching(
   before: () => number,
   visit: (found: FoundProgramme) => void,
 ) {
-  if (words.length === 0 || keys.length === 0) return;
+  if (keys.length === 0) return;
   const channels = new Set(keys);
 
   const listing = Number(
@@ -885,7 +922,7 @@ function matching(
 
   // The titles that match, a page of title keys at a time.
   const titles = db.prepare(
-    `select key from title where key > ? and key <= ? and ${words.map(() => "instr(folded, ?) > 0").join(" and ")}`,
+    `select key from title where key > ? and key <= ? and ${words.length ? words.map(() => "instr(folded, ?) > 0").join(" and ") : "1"}`,
   );
 
   // The programmes of a page of titles in a stretch of time.
@@ -898,7 +935,11 @@ function matching(
 
   // In stretches of time, from what can still be on at `at`: a search that found enough in the
   // first reads no later one. A search bounded from the start reads its one stretch.
-  const ahead = Number.isFinite(before()) ? [] : STRETCHES.map((each) => at + each);
+  const ahead =
+    Number.isFinite(before()) || at <= -8_000_000_000_000_000
+      ? []
+      : STRETCHES.map((each) => at + each);
+
   const edges = [at - LONG_MS, ...ahead];
 
   for (const [step, from] of edges.entries()) {
@@ -932,7 +973,7 @@ function matching(
     select programme.channel, programme.start, programme.stop, title.text
     from programme indexed by programme_long join title on title.key = programme.title
     where programme.stop - programme.start > ${LONG_MS} and programme.stop > ? and programme.start < ?
-      and ${words.map(() => "instr(title.folded, ?) > 0").join(" and ")}`);
+      and ${words.length ? words.map(() => "instr(title.folded, ?) > 0").join(" and ") : "1"}`);
 
   for (const row of long.iterate(at, Math.min(before(), Number.MAX_SAFE_INTEGER), ...words)) {
     const programme = found(row);
@@ -948,7 +989,98 @@ function slotOf(row: Record<string, SQLOutputValue>): Omit<GuideSlot, "guide"> {
 function programmeOf(row: Record<string, SQLOutputValue>): Programme {
   return {
     ...slotOf(row),
+    ...metadataOf(row["metadata"]),
     description:
       row["description"] === String(row["description"]) ? String(row["description"]) : null,
   };
 }
+
+/** Version 2 has the same programme layout without optional metadata. */
+function metadataColumn(db: DatabaseSync): string {
+  return db.prepare("pragma user_version").get()?.["user_version"] === 2
+    ? "null"
+    : "programme.metadata";
+}
+
+// Decode the on-disk JSON here without loading a schema runtime into the small-heap search
+// worker. Keep these bounds aligned with the optional facts retained by the XMLTV reader.
+/* oxlint-disable anti-slop/no-runtime-typeof -- This is the untrusted stored-metadata boundary. */
+function metadataText(value: unknown, most: number): value is string {
+  return typeof value === "string" && value.length <= most;
+}
+
+function metadataOrdinal(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function validMetadata(value: unknown): value is ProgrammeMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+
+  if ("guide" in value && !metadataText(value.guide, 1024)) return false;
+
+  if ("subtitle" in value && !metadataText(value.subtitle, 512)) return false;
+
+  if ("premiere" in value && !metadataText(value.premiere, 512)) return false;
+
+  if ("episodes" in value) {
+    if (!Array.isArray(value.episodes) || value.episodes.length > 8) return false;
+
+    if (
+      !value.episodes.every(
+        (episode: unknown): episode is NonNullable<ProgrammeMetadata["episodes"]>[number] =>
+          typeof episode === "object" &&
+          episode !== null &&
+          !Array.isArray(episode) &&
+          "system" in episode &&
+          metadataText(episode.system, 64) &&
+          "value" in episode &&
+          metadataText(episode.value, 256),
+      )
+    )
+      return false;
+  }
+
+  if ("episode" in value) {
+    const episode = value.episode;
+
+    if (
+      typeof episode !== "object" ||
+      episode === null ||
+      Array.isArray(episode) ||
+      !("season" in episode) ||
+      !metadataOrdinal(episode.season) ||
+      !("episode" in episode) ||
+      !metadataOrdinal(episode.episode) ||
+      ("part" in episode && !metadataOrdinal(episode.part))
+    )
+      return false;
+  }
+
+  if ("repeat" in value) {
+    const repeat = value.repeat;
+
+    if (
+      typeof repeat !== "object" ||
+      repeat === null ||
+      Array.isArray(repeat) ||
+      ("start" in repeat && !metadataText(repeat.start, 64)) ||
+      ("channel" in repeat && !metadataText(repeat.channel, 256))
+    )
+      return false;
+  }
+
+  return true;
+}
+
+function metadataOf(value: SQLOutputValue | undefined): Pick<Programme, "metadata"> {
+  if (typeof value !== "string") return {};
+
+  try {
+    const metadata: unknown = JSON.parse(value);
+
+    return validMetadata(metadata) ? { metadata } : {};
+  } catch {
+    return {};
+  }
+}
+/* oxlint-enable anti-slop/no-runtime-typeof */
