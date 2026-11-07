@@ -11,6 +11,8 @@ export const Preferences = lazy(() =>
   type({
     /** Stable Home row IDs. Unknown IDs survive an older release; absent uses defaults. */
     "homeRows?": type({ id: "string > 0", visible: "boolean" }).array(),
+    /** Desktop command overrides. Missing commands use defaults; unknown IDs survive upgrades. */
+    "keyboardShortcuts?": "Record<string, string[]>",
     volume: "0 <= number <= 1",
     muted: "boolean",
     /**
