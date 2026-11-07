@@ -80,12 +80,7 @@ export async function call<M extends IpcMethod>(
 
   const result = await window.mrStreamer.invoke(method, ...transport);
 
-  if (
-    method !== "profiles.active" &&
-    method !== "profiles.switch" &&
-    !method.startsWith("analytics.") &&
-    (!currentProfile(owner) || generation !== profileGeneration)
-  )
+  if (ownedByProfile(method) && (!currentProfile(owner) || generation !== profileGeneration))
     throw profileChanged();
 
   if (!result.ok) throw new AppFailure(result.error);

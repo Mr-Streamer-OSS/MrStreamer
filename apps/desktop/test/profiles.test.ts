@@ -2141,7 +2141,12 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     }
 
     expect((await profiles.list()).find(({ id }) => id === b.id)?.deleting).toBe(true);
-    await expect(roster.remove(source.id, true)).rejects.toBeDefined();
+    await expect(roster.remove(source.id, true)).rejects.toMatchObject({
+      error: {
+        kind: "unexpected",
+        detail: "Finish deleting the pending profile before erasing a source.",
+      },
+    });
     const current = await profiles.admit();
     expect(
       (await runtime.runPromise(current.run(current.services.viewing.state))).favourites,

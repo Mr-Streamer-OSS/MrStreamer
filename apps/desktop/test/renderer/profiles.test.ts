@@ -736,3 +736,15 @@ it("defers Quit background reads until the restored profile admission is ready",
     expect(ipc.argsOf("downloads.list")).toHaveLength(1);
   });
 });
+
+it.each(["downloads.pause", "recordings.stop", "window.quit"] as const)(
+  "keeps a successful %s reply when the viewer switches during the household action",
+  async (method) => {
+    selectProfileOwner(A);
+    const held = ipc.hold(method);
+    const reply = method === "window.quit" ? call(method) : call(method, { id: "kept" });
+    selectProfileOwner(B);
+    held.resolve(null);
+    await expect(reply).resolves.toBeNull();
+  },
+);
