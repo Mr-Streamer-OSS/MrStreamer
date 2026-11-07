@@ -1480,6 +1480,17 @@ export const es: Translation = {
   "Delete {name}?": "¿Eliminar {name}?",
   Lists: "Listas",
   "Lists for {name}": "Listas para {name}",
+  Collections: "Colecciones",
+  "New collection": "Nueva colección",
+  "Collection name": "Nombre de la colección",
+  "Delete collection": "Eliminar colección",
+  "Add to collection": "Añadir a una colección",
+  "Collections for {name}": "Colecciones para {name}",
+  "In {count} collections": {
+    one: "En {count} colección",
+    many: "En {count} de colecciones",
+    other: "En {count} colecciones",
+  },
   "Not listed now": "Ya no figuran",
   "Not listed by {name} now": "{name} ya no lo ofrece",
   "{count} channels are from a subscription that isn't saved.": {

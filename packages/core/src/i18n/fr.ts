@@ -1474,6 +1474,17 @@ export const fr: Translation = {
   "Delete {name}?": "Supprimer {name} ?",
   Lists: "Listes",
   "Lists for {name}": "Listes pour {name}",
+  Collections: "Collections",
+  "New collection": "Nouvelle collection",
+  "Collection name": "Nom de la collection",
+  "Delete collection": "Supprimer la collection",
+  "Add to collection": "Ajouter à une collection",
+  "Collections for {name}": "Collections pour {name}",
+  "In {count} collections": {
+    one: "Dans {count} collection",
+    many: "Dans {count} de collections",
+    other: "Dans {count} collections",
+  },
   "Not listed now": "Plus proposées pour l'instant",
   "Not listed by {name} now": "Plus proposée par {name} pour l'instant",
   "{count} channels are from a subscription that isn't saved.": {

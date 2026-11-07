@@ -1376,6 +1376,13 @@ export const en = {
   "Delete {name}?": "Delete {name}?",
   Lists: "Lists",
   "Lists for {name}": "Lists for {name}",
+  Collections: "Collections",
+  "New collection": "New collection",
+  "Collection name": "Collection name",
+  "Delete collection": "Delete collection",
+  "Add to collection": "Add to collection",
+  "Collections for {name}": "Collections for {name}",
+  "In {count} collections": { one: "In {count} collection", other: "In {count} collections" },
   "Not listed now": "Not listed now",
   "Not listed by {name} now": "Not listed by {name} now",
   "{count} channels are from a subscription that isn't saved.": {

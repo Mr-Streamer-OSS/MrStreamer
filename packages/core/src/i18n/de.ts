@@ -1419,6 +1419,13 @@ export const de: Translation = {
   "Delete {name}?": "{name} löschen?",
   Lists: "Listen",
   "Lists for {name}": "Listen für {name}",
+  Collections: "Sammlungen",
+  "New collection": "Neue Sammlung",
+  "Collection name": "Name der Sammlung",
+  "Delete collection": "Sammlung löschen",
+  "Add to collection": "Zur Sammlung hinzufügen",
+  "Collections for {name}": "Sammlungen für {name}",
+  "In {count} collections": { one: "In {count} Sammlung", other: "In {count} Sammlungen" },
   "Not listed now": "Derzeit nicht gelistet",
   "Not listed by {name} now": "Derzeit nicht bei {name} gelistet",
   "{count} channels are from a subscription that isn't saved.": {

@@ -1406,6 +1406,13 @@ export const nl: Translation = {
   "Delete {name}?": "{name} verwijderen?",
   Lists: "Lijsten",
   "Lists for {name}": "Lijsten voor {name}",
+  Collections: "Collecties",
+  "New collection": "Nieuwe collectie",
+  "Collection name": "Naam van de collectie",
+  "Delete collection": "Collectie verwijderen",
+  "Add to collection": "Aan collectie toevoegen",
+  "Collections for {name}": "Collecties voor {name}",
+  "In {count} collections": { one: "In {count} collectie", other: "In {count} collecties" },
   "Not listed now": "Nu niet vermeld",
   "Not listed by {name} now": "Nu niet vermeld door {name}",
   "{count} channels are from a subscription that isn't saved.": {
