@@ -5,7 +5,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Failed } from "@mrstreamer/core/failure";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -68,10 +68,7 @@ export function transaction<A>(db: DatabaseSync, run: () => A): A {
 export function attempt<A>(run: () => A): Effect.Effect<A, Failed> {
   return Effect.try({
     try: run,
-    catch: (cause) =>
-      cause instanceof Failed
-        ? cause
-        : new Failed({ error: { kind: "unexpected", detail: String(cause) } }),
+    catch: failedWith,
   });
 }
 
