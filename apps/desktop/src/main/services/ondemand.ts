@@ -241,6 +241,10 @@ export class OnDemand extends Context.Service<
     season(series: OwnedId, season: number): Effect.Effect<readonly EpisodeDetails[], Failed>;
     /** Titles by any of their versions, from the lists alone. */
     titles(kind: TitleKind, versions: readonly OwnedId[]): Effect.Effect<readonly Title[], Failed>;
+    /** Trusted loaded catalogue currency; current is synchronous, including inside a transaction. */
+    catalogueSnapshot(
+      subscriptionIds: readonly string[],
+    ): Effect.Effect<{ readonly current: Effect.Effect<void, Failed> }, Failed>;
     /** A tab's rows; For you starts with titles like `like`, a version of one watched lately. */
     rows(
       kind: TitleKind,
@@ -342,6 +346,24 @@ function make(deps: OnDemandDeps) {
       fetching: false,
     };
 
+    // Acceptance and worker lifetime own currency, independently of wall-clock timestamps.
+    let incarnation = {};
+    let workerAvailable = false;
+
+    const catalogues = new Map<
+      string,
+      {
+        readonly pending: boolean;
+        readonly stamp?: string;
+        readonly loaded: boolean;
+      }
+    >();
+
+    const invalidateWorker = () => {
+      incarnation = {};
+      catalogues.clear();
+    };
+
     const worker = yield* Effect.acquireRelease(
       Effect.sync(() =>
         workerClient(
@@ -362,6 +384,11 @@ function make(deps: OnDemandDeps) {
             // New content has the UI refetch what it shows, with the lists' status. Without, the
             // UI only takes TMDB's progress, and reads nothing again.
             Effect.runFork(event.content ? publishStatus : publishProgress);
+          },
+          (running) => {
+            workerAvailable = running;
+
+            if (!running) invalidateWorker();
           },
         ),
       ),
@@ -426,6 +453,12 @@ function make(deps: OnDemandDeps) {
         if (forgotten.has(sourceKey(source)) || !(yield* subscriptions.stands(source)))
           return yield* switched;
         const previous = currentSources.get(source.id);
+
+        if (
+          previous &&
+          (!sameSource(source, previous) || previous.importRevision !== source.importRevision)
+        )
+          catalogues.delete(source.id);
 
         if (previous && !sameSource(source, previous)) {
           currentSources.set(source.id, source);
@@ -614,6 +647,78 @@ function make(deps: OnDemandDeps) {
           : undefined;
       });
 
+    const catalogueSnapshot = (subscriptionIds: readonly string[]) =>
+      Effect.gen(function* () {
+        const sources = yield* Effect.forEach([...new Set(subscriptionIds)], (id) =>
+          Effect.gen(function* () {
+            const source = yield* subscriptions.sourceOf(id);
+            yield* useSource(source);
+
+            return source;
+          }),
+        );
+
+        const lifetime = incarnation;
+
+        const tokens = sources.map((source) => {
+          let token = catalogues.get(source.id);
+
+          if (!token) {
+            token = { pending: false, loaded: false };
+            catalogues.set(source.id, token);
+          }
+
+          return token;
+        });
+
+        const valid = () =>
+          incarnation === lifetime &&
+          sources.every(
+            (source, index) =>
+              subscriptions.standsNow(source) &&
+              !forgotten.has(sourceKey(source)) &&
+              catalogues.get(source.id) === tokens[index] &&
+              !tokens[index]?.pending,
+          );
+
+        if (!valid()) return yield* switched;
+        // Status loads retained disk data too. A failed refresh before acceptance leaves it valid.
+        const adults = (yield* preferences).adultTitles ?? false;
+        const statuses = yield* call("status", { owners: sources.map(ownerOf), adults });
+
+        if (!valid()) return yield* switched;
+
+        for (const [index, source] of sources.entries()) {
+          const status = statuses[index];
+          const token = tokens[index]!;
+
+          if (
+            !status ||
+            status.fetchedAt === null ||
+            status.importRevision !== source.importRevision ||
+            (token.loaded && token.stamp !== status.catalogueStamp)
+          )
+            return yield* switched;
+
+          // Unstamped legacy data is still bound to this source token and worker incarnation.
+          if (!token.loaded) {
+            const loaded = {
+              pending: false,
+              loaded: true,
+              ...defined({ stamp: status.catalogueStamp }),
+            };
+
+            catalogues.set(source.id, loaded);
+            tokens[index] = loaded;
+          }
+        }
+
+        const current = Effect.suspend(() => (valid() && workerAvailable ? Effect.void : switched));
+        yield* current;
+
+        return { current };
+      });
+
     const status = Effect.gen(function* () {
       const policy = yield* Effect.serviceOption(AdmittedKids);
 
@@ -675,9 +780,27 @@ function make(deps: OnDemandDeps) {
 
           yield* call("refresh", { ...owner, account, ...defined({ catalogue }) });
           const keep = yield* stillSaved;
+          // Invalidate BEFORE dispatch: the worker can accept while its reply is still held.
+          const acceptance = { pending: true, loaded: false };
+          const lifetime = incarnation;
+
+          if (keep) catalogues.set(source.id, acceptance);
           const finished = yield* call("finishRefresh", { ...owner, keep });
 
           if (!keep) return yield* switched;
+
+          if (
+            incarnation === lifetime &&
+            catalogues.get(source.id) === acceptance &&
+            subscriptions.standsNow(source) &&
+            finished.fetchedAt !== null &&
+            finished.importRevision === source.importRevision
+          )
+            catalogues.set(source.id, {
+              pending: false,
+              loaded: true,
+              ...defined({ stamp: finished.catalogueStamp }),
+            });
 
           return finished.markedForAdults === true;
         });
@@ -1317,6 +1440,7 @@ function make(deps: OnDemandDeps) {
 
     return {
       status,
+      catalogueSnapshot,
 
       refresh: (subscriptionId: string, playlist?: PlaylistRefresh) =>
         Effect.gen(function* () {
@@ -1664,6 +1788,7 @@ function make(deps: OnDemandDeps) {
       forget: (subscription: SavedSubscription) =>
         Effect.gen(function* () {
           const { id } = subscription;
+          catalogues.delete(id);
           forgotten.add(sourceKey(subscription));
           currentSources.delete(id);
           failures.delete(id);
@@ -1687,6 +1812,7 @@ function make(deps: OnDemandDeps) {
         const next = keyOf(yield* preferences);
 
         if (next === tmdbKey) return;
+        invalidateWorker();
         tmdbKey = next;
         generation++;
 
@@ -1760,9 +1886,14 @@ function named(season: Season, answers: readonly (readonly EpisodeAbout[])[]): b
  * Calls into the catalogue worker. The worker starts on the first call, and again after it
  * stops unexpectedly; calls in flight when it stops fail.
  */
-function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void) {
+function workerClient(
+  start: () => Worker,
+  onEvent: (event: WorkerEvent) => void,
+  lifecycle: (running: boolean) => void,
+) {
   let worker: Worker | null = null;
   let nextId = 1;
+  let startedBefore = false;
 
   const pending = new Map<
     number,
@@ -1780,6 +1911,9 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
 
   const running = (): Worker => {
     if (worker) return worker;
+
+    if (startedBefore) lifecycle(false);
+    startedBefore = true;
     const started = start();
     started.on("message", (reply: WorkerReply | WorkerEvent) => {
       if ("event" in reply) return onEvent(reply);
@@ -1791,12 +1925,24 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
       if (reply.ok) entry.resolve(reply);
       else entry.reject(new Failed({ error: reply.error }));
     });
-    started.on("error", (cause) => failAll(started, cause));
+    started.on("error", (cause) => {
+      if (worker === started) {
+        lifecycle(false);
+        worker = null;
+      }
+
+      failAll(started, cause);
+    });
     started.on("exit", () => {
-      if (worker === started) worker = null;
+      if (worker === started) {
+        lifecycle(false);
+        worker = null;
+      }
+
       failAll(started, new Error("The catalogue worker stopped."));
     });
     worker = started;
+    lifecycle(true);
 
     return started;
   };
@@ -1843,6 +1989,8 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
     call,
     async stop(): Promise<void> {
       const current = worker;
+
+      lifecycle(false);
 
       if (!current) return;
       // The worker writes what it still holds, each subscription's lists and TMDB's metadata, so

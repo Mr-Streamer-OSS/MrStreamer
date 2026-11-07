@@ -275,8 +275,11 @@ export class Collections extends Context.Service<
           const approved = kids.value.approved;
           const sources = yield* subscriptions.saved;
 
+          let catalogueCurrent: Effect.Effect<void, Failed> = Effect.void;
+
           const stands = () =>
             current() &&
+            Exit.isSuccess(Effect.runSyncExit(catalogueCurrent)) &&
             // The admitted policy read is synchronous. Recheck it inside the SQLite write
             // transaction too, under the existing profile permit, after suspended catalogue work.
             Exit.isSuccess(Effect.runSyncExit(policy.value.check)) &&
@@ -310,8 +313,14 @@ export class Collections extends Context.Service<
 
           const adult = approved === null && ((yield* settings.get).adultTitles ?? false);
           const catalogue: (CollectionTitle & { readonly title: Title })[] = [];
+
           // Resolve each exact saved version separately. The existing catalogue admission filters
           // before grouping and artwork; a sibling version must never become this member's primary.
+          const snapshot = yield* onDemand.catalogueSnapshot(
+            permitted.map((identity) => identity.sourceId),
+          );
+
+          catalogueCurrent = snapshot.current;
           const statuses = yield* onDemand.status;
 
           for (const identity of new Map(

@@ -1792,6 +1792,308 @@ it("filters retained exact kids facts after adult reclassification and a failed 
   ).toMatchObject({ ok: false });
 });
 
+it.each(["reply", "commit"] as const)(
+  "refuses a collection %s overtaken by accepted adult facts",
+  async (operation) => {
+    const f = await fixture({
+      titlesOf: (built) => {
+        const base = built.movies.find((movie) => !movie.adult)!;
+
+        return {
+          ...built,
+          movies: [
+            { ...base, id: 90201, name: "Previously safe", tmdb: "90201" },
+            { ...base, id: 90202, name: "Still safe", tmdb: "90202" },
+          ],
+        };
+      },
+    });
+
+    await f.app.runPromise(
+      f.sessions.setPolicy({
+        current: f.adult,
+        newPin: "1234",
+        profiles: [
+          {
+            id: f.kid.id,
+            approved: ["90201", "90202"].map((id) => ({
+              kind: "movie",
+              subscriptionId: f.source.id,
+              id,
+            })),
+          },
+        ],
+      }),
+    );
+    const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+    const title = (titleId: string) => ({
+      sourceId: f.source.id,
+      kind: "movie" as const,
+      titleId,
+      name: "Forged",
+      year: null,
+      adult: false,
+    });
+
+    expect(
+      await f.call(kid, "collections.change", { kind: "create", id: "currency", name: "Currency" }),
+    ).toMatchObject({ ok: true });
+
+    for (const titleId of ["90201", "90202"])
+      expect(
+        await f.call(kid, "collections.change", {
+          kind: "member",
+          id: "currency",
+          title: title(titleId),
+          present: true,
+        }),
+      ).toMatchObject({ ok: true });
+    const original = f.onDemand.titles;
+    const arrived = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    onTestFinished(() => {
+      release.resolve();
+      f.onDemand.titles = original;
+    });
+    let held = false;
+    f.onDemand.titles = (...args) =>
+      Effect.gen(function* () {
+        const answer = yield* original(...args);
+
+        if (!held) {
+          held = true;
+          arrived.resolve();
+          yield* Effect.promise(() => release.promise);
+        }
+
+        return answer;
+      });
+
+    const pending =
+      operation === "reply"
+        ? f.call(kid, "collections.page", { id: "currency", offset: 0, limit: 48 })
+        : f.call(kid, "collections.change", {
+            kind: "member",
+            id: "currency",
+            title: title("90201"),
+            present: true,
+          });
+
+    await arrived.promise;
+    const promoted = f.provider.titles.movies.find((movie) => movie.id === 90201)!;
+    Object.assign(promoted, { adult: true, categoryId: "505" });
+    await f.app.runPromise(f.onDemand.refresh(f.source.id));
+    release.resolve();
+    expect(await pending).toMatchObject({ ok: false });
+    f.onDemand.titles = original;
+    const page = await f.call(kid, "collections.page", { id: "currency", offset: 0, limit: 48 });
+    expect(page).toMatchObject({
+      ok: true,
+      value: { total: 1, members: [{ titleId: "90202", name: "Still safe" }] },
+    });
+    expect(JSON.stringify(page)).not.toContain("Previously safe");
+  },
+);
+
+it("binds public catalogue checkpoints to acceptance, retained data and worker lifetime", async () => {
+  const { Worker } = await import("node:worker_threads");
+  const { pathToFileURL } = await import("node:url");
+  const { inject } = await import("vitest");
+  const { gzipSync, gunzipSync } = await import("node:zlib");
+  const { writeFile } = await import("node:fs/promises");
+  const dataDir = await tempDir();
+  const provider = await fakeProvider();
+  const workers: import("node:worker_threads").Worker[] = [];
+
+  const entry =
+    inject("catalogueWorker") ??
+    new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url);
+
+  const url = type("string").allows(entry) ? pathToFileURL(entry).href : entry.href;
+
+  const start = async () => {
+    const app = runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        catalogueWorker: (setup) => {
+          const worker = new Worker(
+            `Date.now = () => 1900000000000; import(${JSON.stringify(url)});`,
+            { eval: true, workerData: setup },
+          );
+
+          workers.push(worker);
+
+          return worker;
+        },
+      }),
+    );
+
+    return {
+      app,
+      onDemand: await app.runPromise(OnDemand),
+      roster: await app.runPromise(Roster),
+      settings: await app.runPromise(Settings),
+      subscriptions: await app.runPromise(Subscriptions),
+    };
+  };
+
+  let f = await start();
+  const added = await f.app.runPromise(f.roster.add(demoLogin(provider)));
+  const source = await f.app.runPromise(f.subscriptions.sourceOf(added.id));
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  const checkpoint = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(checkpoint.current)._tag).toBe("Success");
+  const before = await f.app.runPromise(f.onDemand.status);
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  expect((await f.app.runPromise(f.onDemand.status)).lists[0]?.fetchedAt).toBe(
+    before.lists[0]?.fetchedAt,
+  );
+  expect(Effect.runSyncExit(checkpoint.current)._tag).toBe("Failure");
+  const retained = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  provider.failTitles(503);
+  await f.app.runPromiseExit(f.onDemand.refresh(source.id));
+  expect(Effect.runSyncExit(retained.current)._tag).toBe("Success");
+  expect((await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]))).current).toBeDefined();
+  provider.failTitles(null);
+  await f.app.dispose();
+  expect(Effect.runSyncExit(retained.current)._tag).toBe("Failure");
+  // Remove only the optional revision stamp from a real persisted catalogue.
+  const cache = join(source.dir, "ondemand.json.gz");
+
+  const disk = type({ catalogueStamp: "string", "[string]": "unknown" }).assert(
+    JSON.parse(gunzipSync(await readFile(cache)).toString()),
+  );
+
+  const { catalogueStamp: _, ...legacy } = disk;
+  await writeFile(cache, gzipSync(JSON.stringify(legacy)));
+  f = await start();
+  const loaded = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(loaded.current)._tag).toBe("Success");
+  expect(
+    (
+      await f.app.runPromise(
+        f.onDemand.titles("movie", [
+          { subscriptionId: source.id, id: String(provider.titles.movies[0]!.id) },
+        ]),
+      )
+    ).length,
+  ).toBe(1);
+  await workers.at(-1)!.terminate();
+  expect(Effect.runSyncExit(loaded.current)._tag).toBe("Failure");
+  // Starting another worker cannot bless an acquisition that crossed the restart.
+  expect((await f.app.runPromiseExit(f.onDemand.catalogueSnapshot([source.id])))._tag).toBe(
+    "Failure",
+  );
+  const restarted = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(restarted.current)._tag).toBe("Success");
+  await f.app.runPromise(f.settings.update({ tmdbKey: "changed-test-key" }));
+  await f.app.runPromise(f.onDemand.reconfigure);
+  expect(Effect.runSyncExit(restarted.current)._tag).toBe("Failure");
+  const configured = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(configured.current)._tag).toBe("Success");
+  await f.app.runPromise(f.subscriptions.add(demoLogin(provider)));
+  expect(Effect.runSyncExit(configured.current)._tag).toBe("Failure");
+  const replaced = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  await f.app.runPromise(
+    f.onDemand.forget(await f.app.runPromise(f.subscriptions.sourceOf(source.id))),
+  );
+  expect(Effect.runSyncExit(replaced.current)._tag).toBe("Failure");
+  const absent = await fakeProvider();
+  absent.failTitles(503);
+  const missing = await f.app.runPromise(f.roster.add(demoLogin(absent)));
+  expect((await f.app.runPromiseExit(f.onDemand.catalogueSnapshot([missing.id])))._tag).toBe(
+    "Failure",
+  );
+  await f.app.runPromiseExit(f.onDemand.refresh(missing.id));
+  expect((await f.app.runPromiseExit(f.onDemand.catalogueSnapshot([missing.id])))._tag).toBe(
+    "Failure",
+  );
+});
+
+it("refuses checkpoints during acceptance and acquisitions crossed by acceptance", async () => {
+  const { Worker } = await import("node:worker_threads");
+  const { inject } = await import("vitest");
+  const dataDir = await tempDir();
+  const provider = await fakeProvider();
+
+  let gate: {
+    method: "finishRefresh" | "status";
+    arrived: ReturnType<typeof Promise.withResolvers<void>>;
+    release: ReturnType<typeof Promise.withResolvers<void>>;
+  } | null = null;
+
+  const releases: (() => void)[] = [];
+  onTestFinished(() => releases.forEach((release) => release()));
+
+  const hold = (method: "finishRefresh" | "status") => {
+    const next = {
+      method,
+      arrived: Promise.withResolvers<void>(),
+      release: Promise.withResolvers<void>(),
+    };
+
+    releases.push(next.release.resolve);
+    gate = next;
+
+    return next;
+  };
+
+  const app = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      catalogueWorker: (setup) => {
+        const worker = new Worker(
+          inject("catalogueWorker") ??
+            new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url),
+          { workerData: setup },
+        );
+
+        const send = worker.postMessage.bind(worker);
+        // The injected worker transport holds a dispatch; production acceptance must invalidate first.
+        worker.postMessage = (
+          value: import("../src/main/ondemand/protocol.ts").WorkerRequest,
+          transfers,
+        ) => {
+          if (gate && value.method === gate.method) {
+            const held = gate;
+            gate = null;
+            held.arrived.resolve();
+            void held.release.promise.then(() => send(value, transfers));
+          } else send(value, transfers);
+        };
+
+        return worker;
+      },
+    }),
+  );
+
+  const onDemand = await app.runPromise(OnDemand);
+  const roster = await app.runPromise(Roster);
+  const source = await app.runPromise(roster.add(demoLogin(provider)));
+  await app.runPromise(onDemand.refresh(source.id));
+  const before = await app.runPromise(onDemand.catalogueSnapshot([source.id]));
+  const accepting = hold("finishRefresh");
+  const refresh = app.runPromise(onDemand.refresh(source.id));
+  await accepting.arrived.promise;
+  expect(Effect.runSyncExit(before.current)._tag).toBe("Failure");
+  expect((await app.runPromiseExit(onDemand.catalogueSnapshot([source.id])))._tag).toBe("Failure");
+  accepting.release.resolve();
+  await refresh;
+  const accepted = await app.runPromise(onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(accepted.current)._tag).toBe("Success");
+  const reading = hold("status");
+  const snapshot = app.runPromiseExit(onDemand.catalogueSnapshot([source.id]));
+  await reading.arrived.promise;
+  await app.runPromise(onDemand.refresh(source.id));
+  reading.release.resolve();
+  expect((await snapshot)._tag).toBe("Failure");
+  expect(
+    Effect.runSyncExit((await app.runPromise(onDemand.catalogueSnapshot([source.id]))).current)
+      ._tag,
+  ).toBe("Success");
+});
+
 it("keeps configured metadata available without exposing household progress to kids", async () => {
   const tmdb = await startFakeTmdb();
   onTestFinished(() => tmdb.close());
