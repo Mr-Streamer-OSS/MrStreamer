@@ -1568,19 +1568,61 @@ function make(deps: RecordingsDeps) {
         return planRule(plan, matches, Date.now(), limited);
       });
 
+    /** Preview and reconciliation must retain the same airing identity after guide shifts. */
+    const existingAiring = (
+      occurrences: KeptRule["occurrences"],
+      preview: RecordingRulePreview,
+      match: RecordingRulePreview["matches"][number],
+    ) => {
+      const shifted = occurrences.filter((each) => {
+        const interval = each.observed ?? each.plan;
+
+        return (
+          ownedKey(each.plan.channel) === ownedKey(match.plan.channel) &&
+          (each.settled ||
+            recordingOf(each.id) ||
+            startsOf.has(each.id) ||
+            !preview.matches.some((candidate) => candidate.identity === each.identity)) &&
+          interval.start < match.plan.stop &&
+          match.plan.start < interval.stop &&
+          (!each.episodeIdentity ||
+            !match.episodeIdentity ||
+            each.episodeIdentity === match.episodeIdentity ||
+            each.settled ||
+            recordingOf(each.id) ||
+            startsOf.has(each.id))
+        );
+      });
+
+      return (
+        occurrences.find((each) => each.identity === match.identity) ??
+        (shifted.length === 1 ? shifted[0] : shifted.length > 0 ? null : undefined)
+      );
+    };
+
     const previewRule = (plan: RecordingRulePlan, status: readonly GuideStatus[], id?: string) =>
       Effect.gen(function* () {
         const preview = yield* findRuleMatches(plan, status);
         const now = Date.now();
 
-        const candidates = preview.matches.map((match, i) => ({
-          id: `preview:${i}`,
-          plan: match.plan,
-          channelName: match.channelName,
-          created: now,
-          through: now,
-          priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT,
-        }));
+        const candidates = preview.matches.map((match, i) => {
+          const occurrence = existingAiring(
+            rules?.find((rule) => rule.id === id)?.occurrences ?? [],
+            preview,
+            match,
+          );
+
+          const saved = occurrence && schedules.get(occurrence.id);
+
+          return {
+            id: saved?.id ?? `preview:${i}`,
+            plan: match.plan,
+            channelName: match.channelName,
+            created: saved?.created ?? now,
+            through: saved?.through ?? now,
+            priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT,
+          };
+        });
 
         const kept = [...schedules.values()].filter(
           (each) =>
@@ -1595,7 +1637,7 @@ function make(deps: RecordingsDeps) {
         return {
           ...preview,
           matches: preview.matches.map((match, i) => {
-            const forecast = capacity.get(`preview:${i}`);
+            const forecast = capacity.get(candidates[i]!.id);
 
             return { ...match, ...(forecast && { capacity: forecast }) };
           }),
@@ -1670,29 +1712,7 @@ function make(deps: RecordingsDeps) {
           // Retain overlapping observations separately from the immutable capture plan.
           // The guide can carry clipped old slots alongside a replacement; settled/active
           // intervals keep their union so those old slots cannot erase suppression history.
-          const shifted = occurrences.filter((each) => {
-            const interval = each.observed ?? each.plan;
-
-            return (
-              ownedKey(each.plan.channel) === ownedKey(match.plan.channel) &&
-              (each.settled ||
-                recordingOf(each.id) ||
-                startsOf.has(each.id) ||
-                !preview.matches.some((candidate) => candidate.identity === each.identity)) &&
-              interval.start < match.plan.stop &&
-              match.plan.start < interval.stop &&
-              (!each.episodeIdentity ||
-                !match.episodeIdentity ||
-                each.episodeIdentity === match.episodeIdentity ||
-                each.settled ||
-                recordingOf(each.id) ||
-                startsOf.has(each.id))
-            );
-          });
-
-          const was =
-            occurrences.find((each) => each.identity === match.identity) ??
-            (shifted.length === 1 ? shifted[0] : undefined);
+          const was = existingAiring(occurrences, preview, match);
 
           if (was) {
             was.identity = match.identity;
@@ -1709,7 +1729,7 @@ function make(deps: RecordingsDeps) {
               was.plan = match.plan;
               was.channelName = match.channelName;
             }
-          } else if (shifted.length > 0) {
+          } else if (was === null) {
             // Ambiguous overlap cannot safely revive a settled or active airing.
             continue;
           } else if (
@@ -1866,6 +1886,15 @@ function make(deps: RecordingsDeps) {
       created: schedule.created,
     });
 
+    /** Shares the displayed next unsettled occurrence with the forecast horizon. */
+    const nextPending = (schedule: KeptSchedule, now: number) => {
+      const on = nextOccurrence(schedule.plan, now);
+
+      return on && (recordOf(schedule.id, on) || on.stop <= schedule.through)
+        ? nextOccurrence(schedule.plan, on.stop)
+        : on;
+    };
+
     /** Keep current owners protected; only unstarted occurrences enter the priority queue. */
     const capacityOf = (
       kept: readonly (KeptSchedule & { readonly priority?: number })[],
@@ -1881,7 +1910,7 @@ function make(deps: RecordingsDeps) {
 
           const horizon = Math.max(
             now + 1,
-            ...own.map((each) => nextOccurrence(each.plan, now)?.stop ?? now),
+            ...own.map((each) => nextPending(each, now)?.stop ?? now),
           );
 
           const pending = own.flatMap((each) => {
@@ -1897,72 +1926,85 @@ function make(deps: RecordingsDeps) {
               }));
           });
 
-          const protectedUses: Holding[] = recordingHoldings(subscriptionId);
+          const watching = yield* coordination.watching(subscriptionId);
+
+          const protectedUses: Holding[] = recordingHoldings(subscriptionId).map((holding) =>
+            watching.has(holding.channel)
+              ? { ...holding, until: Infinity, holder: { kind: "watch" } }
+              : holding,
+          );
 
           const uses = yield* coordination.uses(subscriptionId);
           // Match current source keys, not just channel IDs: a replaced login or a different
           // variant must not promise sharing with a capture of the old source.
-          const shared = new Set<string>();
           const selected = new Map<string, string>();
 
           if (uses.includes("watch") || protectedUses.length > 0) {
-            const source = yield* subscriptions.sourceOf(subscriptionId);
+            yield* Effect.gen(function* () {
+              const source = yield* subscriptions.sourceOf(subscriptionId);
 
-            const lookup = yield* library.lookup(subscriptionId);
+              const lookup = yield* library.lookup(subscriptionId);
 
-            const preferences = {
-              ...(yield* settings.get),
-              ...(yield* settings.ofSubscription(subscriptionId)),
-            };
+              const preferences = {
+                ...(yield* settings.get),
+                ...(yield* settings.ofSubscription(subscriptionId)),
+              };
 
-            for (const schedule of own) {
-              const listed = lookup(schedule.plan.channel.id);
+              for (const schedule of own) {
+                const listed = lookup(schedule.plan.channel.id);
 
-              if (!listed) continue;
+                if (!listed) continue;
 
-              for (const variant of streamsToPlay(listed, preferences, undefined)) {
-                const stream = yield* Effect.tryPromise({
-                  try: () => source.provider.liveStream(variant.id),
-                  catch: (cause) =>
-                    cause instanceof Failed
-                      ? cause
-                      : new Failed({
-                          error: {
-                            kind: "stream",
-                            failure: { kind: "network", detail: String(cause) },
-                          },
-                        }),
-                });
+                for (const variant of streamsToPlay(listed, preferences, undefined)) {
+                  const stream = yield* Effect.tryPromise({
+                    try: () => source.provider.liveStream(variant.id),
+                    catch: (cause) =>
+                      cause instanceof Failed
+                        ? cause
+                        : new Failed({
+                            error: {
+                              kind: "stream",
+                              failure: { kind: "network", detail: String(cause) },
+                            },
+                          }),
+                  });
 
-                const key = streamKey(
-                  subscriptionId,
-                  source.revision,
-                  listed.id,
-                  variant.id,
-                  stream,
-                );
+                  const key = streamKey(
+                    subscriptionId,
+                    source.revision,
+                    listed.id,
+                    variant.id,
+                    stream,
+                  );
 
-                const channel = ownedKey(schedule.plan.channel);
+                  const channel = ownedKey(schedule.plan.channel);
 
-                if (key !== null) {
-                  if (!selected.has(channel) || captures.reading(key)) selected.set(channel, key);
-
-                  if (captures.reading(key)) shared.add(key);
+                  if (key !== null) {
+                    if (!selected.has(channel) || captures.reading(key)) selected.set(channel, key);
+                  }
                 }
               }
-            }
+            }).pipe(
+              Effect.catch(() =>
+                Effect.sync(() => {
+                  // Failed source reads retain current owners and promise no sharing.
+                  selected.clear();
+                }),
+              ),
+            );
           }
 
-          for (const use of protectedUses) shared.delete(use.channel);
-          let watchers = 0;
+          for (const connection of watching) {
+            if (protectedUses.some((use) => use.channel === connection)) continue;
 
-          for (const use of uses) {
-            if (use === "recording") continue;
-            const channel = use === "watch" ? [...shared][watchers++] : undefined;
+            protectedUses.push({ channel: connection, until: Infinity, holder: { kind: "watch" } });
+          }
+
+          if (uses.includes("download")) {
             protectedUses.push({
-              channel: channel ?? `occupied:${protectedUses.length}`,
+              channel: "occupied:download",
               until: Infinity,
-              holder: { kind: use },
+              holder: { kind: "download" },
             });
           }
 
@@ -2036,10 +2078,7 @@ function make(deps: RecordingsDeps) {
 
         // A time on now that it recorded, stopped or cut short, or a change settled, records no
         // more: the one after it is next.
-        const next =
-          on && (recordOf(schedule.id, on) || on.stop <= schedule.through)
-            ? nextOccurrence(plan, on.stop)
-            : on;
+        const next = nextPending(schedule, now);
 
         if (hold) return as(hold, next);
 

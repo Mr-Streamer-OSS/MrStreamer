@@ -3253,6 +3253,178 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     },
   );
 
+  it("keeps next-day conflicts after both current repeat recordings were stopped", async () => {
+    const { recordings, listing, channel } = await scheduling();
+    const { now } = await listing();
+    const at = new Date(now.start);
+
+    const plan = {
+      kind: "slot" as const,
+      channel: channel(GUIDED),
+      title: "Repeat",
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      padding: { before: 0, after: 0 },
+    };
+
+    for (const source of [GUIDED, TRACKS]) {
+      await recordings.schedule({ ...plan, channel: channel(source) });
+
+      const recording = await until(recordings.list, (list) =>
+        list.some((each) => each.status.kind === "recording"),
+      );
+
+      const active = recording.find((each) => each.status.kind === "recording");
+
+      if (!active) throw new Error("No active repeat");
+      await recordings.stop(active.id);
+    }
+
+    await recordings.check();
+    const rows = await recordings.schedules();
+
+    expect(rows.every((row) => row.next!.start > now.stop)).toBe(true);
+    expect(rows.map((row) => row.status.kind).sort()).toEqual(["conflict", "planned"]);
+  });
+
+  it("lists schedules when an active playlist no longer resolves a pending channel", async () => {
+    const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
+
+    const entry = (name: string) => {
+      const channel = provider.catalogue.channels.find((each) => each.name === name)!;
+
+      return `#EXTINF:-1,${name}\n${provider.url}/live/demo/demo/${channel.streamId}.ts\n`;
+    };
+
+    let playlist = `#EXTM3U\n${entry(TRACKS)}${entry(GUIDED)}`;
+
+    const host = createServer((_request, response) =>
+      response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist),
+    );
+
+    await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+    onTestFinished(() => {
+      host.closeAllConnections();
+      host.close();
+    });
+    const address = host.address();
+
+    if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No address");
+    const dataDir = await tempDir();
+    const before = await app(dataDir);
+
+    const { id: subscriptionId } = await before.subscriptions.add({
+      server: `http://127.0.0.1:${address.port}/playlist.m3u`,
+      username: "",
+      password: "",
+    });
+
+    await before.library.refresh(subscriptionId);
+
+    const channels = await until(
+      () => before.library.channels({}),
+      (all) => all.length === 2,
+    );
+
+    const channel = (name: string) => ({
+      subscriptionId,
+      id: channels.find((each) => each.id === name)!.id,
+    });
+
+    const saved = await before.recordings.schedule({
+      kind: "programme",
+      channel: channel(GUIDED),
+      title: "Pending",
+      start: Date.now() + MINUTE,
+      stop: Date.now() + 10 * MINUTE,
+      padding: { before: 0, after: 0 },
+    });
+
+    await before.quit();
+    playlist = `#EXTM3U\n${entry(TRACKS)}`;
+    const after = await app(dataDir);
+
+    onTestFinished(after.quit);
+    await after.library.channels({});
+    await after.playback.open(channel(TRACKS), ["h264", "aac"]);
+    expect((await after.recordings.schedules()).map((row) => row.id)).toContain(saved.id);
+  });
+
+  it("an older saved rule retains tie order in edit preview", async () => {
+    const { recordings, listing, channel } = await scheduling();
+    const { next } = await listing();
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      priority: 90,
+      padding: { before: 0, after: 0 },
+    };
+
+    const rule = await recordings.saveRule(plan);
+    await recordings.check();
+    vi.setSystemTime(Date.now() + 2000);
+    await recordings.schedule({
+      kind: "programme",
+      channel: channel(TRACKS),
+      title: "Later manual",
+      start: next.start,
+      stop: next.stop,
+      padding: plan.padding,
+    });
+    const lowered = { ...plan, priority: 0 };
+    const preview = await recordings.previewRule(lowered, rule.id);
+    await recordings.saveRule(lowered, rule.id);
+    const saved = (await recordings.schedules()).find((each) => each.rule === rule.id);
+    expect(preview.matches[0]?.capacity?.kind).toBe("available");
+    expect(saved?.status.kind).toBe("planned");
+  });
+  it("Watch continues holding shared capture after recording end", async () => {
+    const { recordings, listing, channel, playback } = await scheduling();
+    const { next } = await listing();
+    const active = await recordings.start(channel(TRACKS), next.start - 60000, {});
+    expect(active.kind).toBe("started");
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      priority: 100,
+      padding: { before: 0, after: 0 },
+    };
+
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+
+    const preview = await recordings.previewRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      priority: 100,
+      padding: { before: 0, after: 0 },
+    });
+
+    if (active.kind !== "started") throw new Error("No recording");
+    await recordings.stop(active.recording.id);
+
+    const after = await recordings.previewRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      priority: 100,
+      padding: { before: 0, after: 0 },
+    });
+
+    expect(preview.matches[0]?.capacity?.kind).toBe("missed");
+    expect(after.matches[0]?.capacity?.kind).toBe("missed");
+    expect(await recordings.connections(channel(TRACKS).subscriptionId)).toMatchObject({
+      limit: 1,
+      uses: ["watch"],
+    });
+    expect((await recordings.start(channel(GUIDED), next.stop, {})).kind).toBe("busy");
+    await playback.close(watching.sessionId);
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
+    expect((await recordings.start(channel(GUIDED), next.stop, {})).kind).toBe("started");
+  });
+
   it("previews a saved rule at its proposed priority without excluding other work", async () => {
     const { recordings, listing, channel, clockTo } = await scheduling();
     const { next } = await listing();

@@ -31,6 +31,16 @@ const recordingsQuery = () =>
  */
 export function syncRecordings(client: QueryClient): () => void {
   const stopRecordings = listen("recordings.changed", (list) => {
+    const before = client.getQueryData(recordingsQuery().queryKey)?.filter(isLive);
+    const live = list.filter(isLive);
+
+    if (
+      !before ||
+      before.length !== live.length ||
+      live.some((each) => !before.some((old) => old.id === each.id))
+    )
+      void client.invalidateQueries({ queryKey: ["rules", "preview"] });
+
     // A read still under way holds an older list than this: it must not land after it.
     void client.cancelQueries({ queryKey: recordingsQuery().queryKey, exact: true });
     client.setQueryData(recordingsQuery().queryKey, list);
@@ -43,9 +53,15 @@ export function syncRecordings(client: QueryClient): () => void {
     client.setQueryData(queryKey, list);
     void client.invalidateQueries({ queryKey: [...queryKey, "plan"] });
     void client.invalidateQueries({ queryKey: rulesQuery().queryKey, exact: true });
+    void client.invalidateQueries({ queryKey: ["rules", "preview"] });
+  });
+
+  const stopOutput = listen("output.changed", () => {
+    void client.invalidateQueries({ queryKey: ["rules", "preview"] });
   });
 
   return () => {
+    stopOutput();
     stopRecordings();
     stopSchedules();
   };

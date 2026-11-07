@@ -91,6 +91,9 @@ export class PlaybackCoordination extends Context.Service<
     >;
     /** What of this app holds the subscription's connections now. */
     uses(subscriptionId: string): Effect.Effect<readonly ConnectionUse[]>;
+    /** Current viewer-owned source identities, including sources shared with recordings.
+     * Observation only: admission and `uses` still count each connection once. */
+    watching(subscriptionId: string): Effect.Effect<ReadonlySet<string>>;
     /** Subscriptions whose downloads wait: something plays or records from them. */
     readonly busy: Effect.Effect<ReadonlySet<string>>;
     readonly busyChanged: Stream.Stream<void>;
@@ -284,6 +287,15 @@ export class PlaybackCoordination extends Context.Service<
 
               return admit();
             }),
+          ),
+        watching: (subscriptionId: string) =>
+          Effect.sync(
+            () =>
+              new Set(
+                [...sessions.values()].flatMap((each) =>
+                  each.subscriptionId === subscriptionId ? [each.connection] : [],
+                ),
+              ),
           ),
         uses: (subscriptionId: string) => Effect.sync(() => usesOf(subscriptionId)),
         busy: Effect.sync(

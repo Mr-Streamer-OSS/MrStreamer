@@ -913,7 +913,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * Where a rule at `priority` stands among the `others` saved: "2 of 3, after Kids Club", naming
- * any at the same priority, whose airings go by their padded start and then the rule saved first.
+ * any at the same priority, whose airings go by their padded start and then pending schedule creation time.
+ * Generated rule schedules receive a new creation time after restart.
  */
 function rankText(priority: number, others: readonly RecordingRule[]): string {
   if (others.length === 0) return t("The only rule");
