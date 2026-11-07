@@ -3253,6 +3253,54 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     },
   );
 
+  it("previews a saved rule at its proposed priority without excluding other work", async () => {
+    const { recordings, listing, channel, clockTo } = await scheduling();
+    const { next } = await listing();
+    const at = new Date(next.start);
+
+    const other = await recordings.schedule({
+      kind: "slot",
+      channel: channel(TRACKS),
+      title: "Other",
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: (next.stop - next.start) / MINUTE,
+      padding: { before: 0, after: 0 },
+    });
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      priority: 90,
+      padding: { before: 0, after: 0 },
+    };
+
+    vi.setSystemTime(Date.now() + 1000);
+    const rule = await recordings.saveRule(plan);
+    await recordings.check();
+    const lowered = { ...plan, priority: 0 };
+
+    expect((await recordings.previewRule(lowered, rule.id)).matches[0]?.capacity?.kind).toBe(
+      "missed",
+    );
+    // A new rule still sees the saved high-priority airing and shares its source.
+    expect((await recordings.previewRule(lowered)).matches[0]?.capacity?.kind).toBe("available");
+    await recordings.saveRule(lowered, rule.id);
+    expect((await recordings.schedules()).find((each) => each.rule === rule.id)?.status.kind).toBe(
+      "conflict",
+    );
+    await recordings.cancel(other.id);
+    const active = await recordings.start(channel(TRACKS), next.stop, {});
+    expect(active.kind).toBe("started");
+    expect((await recordings.previewRule(lowered, rule.id)).matches[0]?.capacity?.kind).toBe(
+      "missed",
+    );
+    await clockTo(next.start);
+    expect(
+      (await recordings.list()).filter((each) => each.status.kind === "recording"),
+    ).toHaveLength(1);
+  });
+
   it("forecasts padded rule conflicts and starts higher priority pending work without duplicates", async () => {
     const {
       recordings,

@@ -279,7 +279,7 @@ export class Recordings extends Context.Service<
     readonly changes: Stream.Stream<readonly Recording[]>;
     /** Lists saved rules; a refused startup inventory stays refused until the next start. */
     readonly rules: Effect.Effect<readonly RecordingRule[], Failed>;
-    previewRule(plan: RecordingRulePlan): Effect.Effect<RecordingRulePreview, Failed>;
+    previewRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRulePreview, Failed>;
     saveRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRule, Failed>;
     cancelRule(id: string): Effect.Effect<void, Failed>;
     /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
@@ -1568,7 +1568,7 @@ function make(deps: RecordingsDeps) {
         return planRule(plan, matches, Date.now(), limited);
       });
 
-    const previewRule = (plan: RecordingRulePlan, status: readonly GuideStatus[]) =>
+    const previewRule = (plan: RecordingRulePlan, status: readonly GuideStatus[], id?: string) =>
       Effect.gen(function* () {
         const preview = yield* findRuleMatches(plan, status);
         const now = Date.now();
@@ -1582,7 +1582,15 @@ function make(deps: RecordingsDeps) {
           priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT,
         }));
 
-        const capacity = yield* capacityOf([...schedules.values(), ...candidates], now);
+        const kept = [...schedules.values()].filter(
+          (each) =>
+            id === undefined ||
+            ruleOf(each.id) !== id ||
+            recordingOf(each.id) ||
+            startsOf.has(each.id),
+        );
+
+        const capacity = yield* capacityOf([...kept, ...candidates], now);
 
         return {
           ...preview,
@@ -3100,8 +3108,8 @@ function make(deps: RecordingsDeps) {
           ),
         ),
       ),
-      previewRule: (plan: RecordingRulePlan) =>
-        scheduling(Effect.flatMap(guide.status, (status) => previewRule(plan, status))),
+      previewRule: (plan: RecordingRulePlan, id?: string) =>
+        scheduling(Effect.flatMap(guide.status, (status) => previewRule(plan, status, id))),
       saveRule: (plan: RecordingRulePlan, id?: string) =>
         Effect.tap(
           scheduling(

@@ -629,9 +629,9 @@ function RuleFields({
 
   const unranked: RecordingRulePlan = { title, channels, mode, padding };
   const plan: RecordingRulePlan = { ...unranked, priority };
-  const preview = useQuery({ ...rulePreviewQuery(plan), placeholderData: keepPreviousData });
+  const preview = useQuery({ ...rulePreviewQuery(plan, id), placeholderData: keepPreviousData });
   // Whether the guide marks any premiere doesn't depend on priority: one read for every priority.
-  const premieres = useQuery(rulePreviewQuery({ ...unranked, mode: "new-only" })).data;
+  const premieres = useQuery(rulePreviewQuery({ ...unranked, mode: "new-only" }, id)).data;
 
   // No airing found is marked as a new episode: there is nothing New episodes only could record.
   const unmarked =

@@ -77,7 +77,7 @@ export function recordingHandlers({
     "recordings.stop": ({ id }) => Effect.as(recordings.stop(id), null),
     "recordings.remove": ({ id }) => Effect.as(recordings.remove(id), null),
     "recordings.rules": () => recordings.rules,
-    "recordings.previewRule": ({ plan }) => recordings.previewRule(plan),
+    "recordings.previewRule": ({ plan, id }) => recordings.previewRule(plan, id),
     "recordings.saveRule": ({ plan, id }) => recordings.saveRule(plan, id),
     "recordings.cancelRule": ({ id }) => Effect.as(recordings.cancelRule(id), null),
     "recordings.schedules": () => recordings.schedules,

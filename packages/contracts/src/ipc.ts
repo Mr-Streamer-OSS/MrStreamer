@@ -337,7 +337,7 @@ export const ipcInputs = {
   /** Deletes a recording that has ended, with its file. */
   "recordings.remove": () => type({ id: "string > 0" }),
   "recordings.rules": none,
-  "recordings.previewRule": () => type({ plan: RecordingRulePlanSchema() }),
+  "recordings.previewRule": () => type({ plan: RecordingRulePlanSchema(), "id?": "string > 0" }),
   "recordings.saveRule": () => type({ plan: RecordingRulePlanSchema(), "id?": "string > 0" }),
   "recordings.cancelRule": () => type({ id: "string > 0" }),
   "recordings.schedules": none,
