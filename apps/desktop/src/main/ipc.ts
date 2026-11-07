@@ -4,6 +4,7 @@ import { t } from "@mrstreamer/core/i18n";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
+import { changedTitles } from "@mrstreamer/contracts/collections";
 import {
   ActiveProfileSchema,
   sameProfile,
@@ -375,20 +376,12 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
       online(input.kind, { subscriptionId: input.sourceId, id: input.titleId })
         ? handlers["collections.memberships"](input, frame)
         : denied(),
-    "collections.change": (input, frame) => {
-      const identities =
-        input.kind === "member"
-          ? [input.title]
-          : input.kind === "order-members"
-            ? input.titles
-            : [];
-
-      return identities.every((title) =>
+    "collections.change": (input, frame) =>
+      changedTitles(input).every((title) =>
         online(title.kind, { subscriptionId: title.sourceId, id: title.titleId }),
       )
         ? handlers["collections.change"](input, frame)
-        : denied();
-    },
+        : denied(),
     "subscription.list": handlers["subscription.list"],
     "preferences.get": handlers["preferences.get"],
     "preferences.update": handlers["preferences.update"],

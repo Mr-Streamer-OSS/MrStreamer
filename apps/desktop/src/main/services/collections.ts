@@ -1,28 +1,28 @@
-import { defined } from "@mrstreamer/core/defined";
-import * as Exit from "effect/Exit";
 import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import { defined } from "@mrstreamer/core/defined";
 import { ViewingErasure } from "@mrstreamer/core/viewing/service";
-import { CollectionsStore } from "../platform/collections-store.ts";
-import { AdmittedSettings, Settings } from "./preferences.ts";
-import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
-import { Subscriptions } from "./subscription.ts";
-import { OnDemand } from "./ondemand.ts";
 import type { Title } from "@mrstreamer/contracts/ondemand";
-import * as Effect from "effect/Effect";
 import { Failed } from "@mrstreamer/core/failure";
 import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import {
+  changedTitles,
   collectionKey,
   type CollectionChange,
   type CollectionIdentity,
   type CollectionPage,
+  type CollectionSummary,
   type CollectionTitle,
 } from "@mrstreamer/contracts/collections";
-import type { SavedSubscription } from "./subscription.ts";
-import type { StoredTitle } from "../platform/collections-store.ts";
+import { CollectionsStore, type StoredTitle } from "../platform/collections-store.ts";
+import { OnDemand } from "./ondemand.ts";
+import { AdmittedSettings, Settings } from "./preferences.ts";
+import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
+import { Subscriptions, type SavedSubscription } from "./subscription.ts";
 
 /** Main-process captured policy only. An empty approval list denies every member. */
 export interface CollectionVisibility {
@@ -42,7 +42,7 @@ export interface CollectionVisibility {
  * Bind once to an admitted profile store and lifecycle guard. Each request supplies its captured
  * visibility; neither this module nor a suspended operation resolves the active owner again.
  * The guard must invalidate on profile/policy revision, source erasure and deletion.
- * No IPC or event publication is installed here: those require the integrated kids admission.
+ * `Collections` below supplies that visibility from the admitted context and publishes changes.
  */
 export function makeCollections(
   store: CollectionsStore["Service"],
@@ -227,10 +227,7 @@ export class CollectionCurrent extends Context.Service<
 export class Collections extends Context.Service<
   Collections,
   {
-    readonly list: Effect.Effect<
-      readonly { readonly id: string; readonly name: string; readonly total: number }[],
-      Failed
-    >;
+    readonly list: Effect.Effect<readonly CollectionSummary[], Failed>;
     readonly page: (
       id: string,
       offset: number,
@@ -410,16 +407,9 @@ export class Collections extends Context.Service<
           }),
         change: (input) =>
           Effect.gen(function* () {
+            // Copied before the first await, like the module's other caller-owned input.
             const change = structuredClone(input);
-
-            const extra =
-              change.kind === "member"
-                ? [change.title]
-                : change.kind === "order-members"
-                  ? change.titles
-                  : [];
-
-            const { module, visibility, owner } = yield* request(extra);
+            const { module, visibility, owner } = yield* request(changedTitles(change));
             yield* module.change(visibility, change);
             yield* PubSub.publish(changes, owner);
           }),

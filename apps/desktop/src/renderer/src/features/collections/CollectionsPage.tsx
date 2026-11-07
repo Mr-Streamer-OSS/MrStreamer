@@ -14,6 +14,7 @@ import {
   collectionKey,
   type CollectionChange,
   type CollectionMember,
+  type CollectionSummary,
 } from "@mrstreamer/contracts/collections";
 import { t } from "@mrstreamer/core/i18n";
 import { openDetails } from "../../app/ui-store.ts";
@@ -25,12 +26,7 @@ import { useSourceOf } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { kindLabel } from "../../lib/watchlist.ts";
 import { Grid, PAGE, usePages, type GridTile } from "../titles/CollectionGrid.tsx";
-import {
-  CollectionNav,
-  problemOf,
-  type CollectionProblem,
-  type CollectionSummary,
-} from "./CollectionControls.tsx";
+import { CollectionNav, problemOf, type CollectionProblem } from "./CollectionControls.tsx";
 import { collectionQueries, useCollectionUpdates, useCommitCollection } from "./collections.ts";
 
 /** The collection last opened, kept while the viewer goes elsewhere and between both tabs. */

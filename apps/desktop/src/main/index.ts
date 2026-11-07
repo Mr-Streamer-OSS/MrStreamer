@@ -1,9 +1,6 @@
 // Composition root: creates the window and wires the services to IPC.
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
-import { collectionsHandlers } from "./handlers/collections.ts";
-import { Collections } from "./services/collections.ts";
-
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import {
@@ -63,6 +60,7 @@ import { subtitleHandlers } from "./handlers/subtitles.ts";
 import { outputHandlers } from "./handlers/output.ts";
 import { viewingHandlers } from "./handlers/viewing.ts";
 import { customListHandlers } from "./handlers/custom-lists.ts";
+import { collectionsHandlers } from "./handlers/collections.ts";
 import { downloadHandlers } from "./handlers/downloads.ts";
 import { recordingHandlers } from "./handlers/recordings.ts";
 import { profileHandlers } from "./handlers/profiles.ts";
@@ -113,6 +111,7 @@ import { Subscriptions } from "./services/subscription.ts";
 import { DEFAULT_SCHEDULE, Updates, type UpdatesConfig } from "./services/updates.ts";
 import { Watchlist } from "./services/watchlist.ts";
 import { CustomLists } from "./services/custom-lists.ts";
+import { Collections } from "./services/collections.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.

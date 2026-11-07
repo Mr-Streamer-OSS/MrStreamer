@@ -9,7 +9,6 @@ import {
   type CollectionChange,
   type CollectionIdentity,
 } from "@mrstreamer/contracts/collections";
-import type { IpcInput } from "@mrstreamer/contracts/ipc";
 import { call, callForProfile, currentProfile, listen, profileOwner } from "../../lib/ipc.ts";
 
 export const collectionQueries = {
@@ -49,25 +48,13 @@ export function useCommitCollection(): (
     async (changes: CollectionChange | readonly CollectionChange[]) => {
       try {
         for (const change of "kind" in changes ? [changes] : changes)
-          await callForProfile(owner, "collections.change", input(change));
+          await callForProfile(owner, "collections.change", change);
       } finally {
         if (currentProfile(owner)) await client.invalidateQueries({ queryKey: ["collections"] });
       }
     },
     [client, owner],
   );
-}
-
-/**
- * The change as the IPC schema takes it. Its inferred input has mutable arrays where
- * `CollectionChange` has readonly ones, so orders are copied rather than cast.
- */
-function input(change: CollectionChange): IpcInput<"collections.change"> {
-  if (change.kind === "reorder") return { ...change, ids: [...change.ids] };
-
-  if (change.kind === "order-members") return { ...change, titles: [...change.titles] };
-
-  return change;
 }
 
 /**

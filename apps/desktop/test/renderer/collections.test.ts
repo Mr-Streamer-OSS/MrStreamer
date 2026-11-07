@@ -13,6 +13,7 @@ import {
   collectionKey,
   type CollectionChange,
   type CollectionMember,
+  type CollectionSummary,
   type CollectionTitle,
 } from "@mrstreamer/contracts/collections";
 import type { Title } from "@mrstreamer/contracts/ondemand";
@@ -23,7 +24,6 @@ import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import {
   CollectionMembership,
   CollectionNav,
-  type CollectionSummary,
 } from "../../src/renderer/src/features/collections/CollectionControls.tsx";
 
 let unmount = () => {};

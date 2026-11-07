@@ -1,11 +1,10 @@
-import { Collections } from "./collections.ts";
-import { CollectionsStore, collectionsStoreLayer } from "../platform/collections-store.ts";
 import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import { t } from "@mrstreamer/core/i18n";
 import { Library } from "./library.ts";
 import { OnDemand } from "./ondemand.ts";
 import { Watchlist } from "./watchlist.ts";
 import { CustomLists } from "./custom-lists.ts";
+import { Collections } from "./collections.ts";
 import { type } from "arktype";
 import {
   KidsProfilePolicySchema,
@@ -44,6 +43,7 @@ import * as Semaphore from "effect/Semaphore";
 import { profileDirectory, profileStorage } from "../platform/profile-store.ts";
 import { WatchlistStore, watchlistStoreLayer } from "../platform/watchlist-store.ts";
 import { CustomListStore, customListStoreLayer } from "../platform/custom-lists-store.ts";
+import { CollectionsStore, collectionsStoreLayer } from "../platform/collections-store.ts";
 import {
   Settings,
   AdmittedSettings,

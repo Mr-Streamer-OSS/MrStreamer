@@ -126,6 +126,27 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
     db.prepare("insert into collection_accounts values (?, ?)").run(account, sequence);
   };
 
+  // Securely deletes these accounts' members and anchors, then runs `then` in the same transaction.
+  const forget = (accounts: readonly string[], then = () => {}) => {
+    if (accounts.length) db.exec("pragma secure_delete = on");
+
+    try {
+      transaction(db, () => {
+        for (const account of accounts) {
+          db.prepare("delete from collection_members where account = ?").run(account);
+          db.prepare("delete from collection_accounts where account = ?").run(account);
+        }
+
+        then();
+      });
+    } finally {
+      if (accounts.length) db.exec("pragma secure_delete = off");
+    }
+
+    if (accounts.length) db.exec("pragma wal_checkpoint(truncate)");
+  };
+
+  // Forgets accounts whose anchor the viewing record no longer holds, then anchors the rest.
   const reconcile = () => {
     if (!hasEvents()) return;
 
@@ -135,24 +156,13 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
       )
       .all();
 
-    if (erased.length) db.exec("pragma secure_delete = on");
-
-    try {
-      transaction(db, () => {
-        for (const row of erased) {
-          const account = type("string").assert(row.account);
-          db.prepare("delete from collection_members where account = ?").run(account);
-          db.prepare("delete from collection_accounts where account = ?").run(account);
-        }
-
+    forget(
+      erased.map((row) => type("string").assert(row.account)),
+      () => {
         for (const row of db.prepare("select distinct account from collection_members").all())
           anchor(type("string").assert(row.account));
-      });
-    } finally {
-      if (erased.length) db.exec("pragma secure_delete = off");
-    }
-
-    if (erased.length) db.exec("pragma wal_checkpoint(truncate)");
+      },
+    );
   };
 
   reconcile();
@@ -183,21 +193,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
 
       return read();
     }),
-    erase: (account) =>
-      attempt(() => {
-        db.exec("pragma secure_delete = on");
-
-        try {
-          transaction(db, () => {
-            db.prepare("delete from collection_members where account = ?").run(account);
-            db.prepare("delete from collection_accounts where account = ?").run(account);
-          });
-        } finally {
-          db.exec("pragma secure_delete = off");
-        }
-
-        db.exec("pragma wal_checkpoint(truncate)");
-      }),
+    erase: (account) => attempt(() => forget([account])),
     change: (change, current) =>
       attempt(() =>
         transaction(db, () => {

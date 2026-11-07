@@ -1,12 +1,9 @@
-import type {
-  CollectionPage as PersonalCollectionPage,
-  PersonalCollection,
-} from "./collections.ts";
 // The typed contract between the UI and the main process.
 //
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
+import type { CollectionPage as PersonalCollectionPage, CollectionSummary } from "./collections.ts";
 import { GuideSearchPageInput, SavedGuideQuery } from "./guide-query.ts";
 import {
   analyticsFeatures,
@@ -633,14 +630,14 @@ export const ipcInputs = {
 
     return type({ kind: "'create' | 'rename'", id: listId(), name: "string" })
       .or({ kind: "'delete'", id: listId() })
-      .or({ kind: "'reorder'", ids: listId().array() })
+      .or({ kind: "'reorder'", ids: listId().array().readonly() })
       .or({
         kind: "'member'",
         id: listId(),
         title: identity.and({ name: "string", year: "number | null", "adult?": "boolean" }),
         present: "boolean",
       })
-      .or({ kind: "'order-members'", id: listId(), titles: identity.array() });
+      .or({ kind: "'order-members'", id: listId(), titles: identity.array().readonly() });
   },
   "customLists.get": none,
   /**
@@ -1030,11 +1027,13 @@ export interface IpcOutputs {
    * any more. One already gone changes nothing.
    */
   "watchlist.remove": null;
-  /** The viewer's channel lists, in their order, as the viewer may see them now. */
-  "collections.list": readonly (PersonalCollection & { readonly total: number })[];
+  /** The viewer's collections, in their order, each with how many members the viewer may see. */
+  "collections.list": readonly CollectionSummary[];
   "collections.page": PersonalCollectionPage;
+  /** Ids of the viewer's collections holding this exact source version. */
   "collections.memberships": readonly string[];
   "collections.change": null;
+  /** The viewer's channel lists, in their order, as the viewer may see them now. */
   "customLists.get": readonly CustomList[];
   /**
    * Answers the lists once the new one is stored. Fails with `list-name-taken` when another is
@@ -1184,8 +1183,9 @@ export interface IpcEvents {
   "viewing.changed": { readonly sequence: number };
   /** A title was saved to the watchlist or taken out of it. */
   "watchlist.changed": null;
-  /** A channel list was made, renamed, moved or deleted, or its channels changed. */
+  /** This owner's collections or their members changed. Carries no names, titles or counts. */
   "collections.changed": { readonly owner: ActiveProfile };
+  /** A channel list was made, renamed, moved or deleted, or its channels changed. */
   "customLists.changed": null;
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;

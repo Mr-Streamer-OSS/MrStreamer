@@ -1,4 +1,3 @@
-import { Collections } from "./services/collections.ts";
 import { join } from "node:path";
 import type { UsageObservers } from "./analytics/observers.ts";
 // The main process's services, assembled once from Layers. The app makes one runtime from
@@ -39,6 +38,7 @@ import { personalStoresLayer, ProfileSessions } from "./services/profiles.ts";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { xmltvFetch } from "./providers/xmltv.ts";
 import { CustomLists } from "./services/custom-lists.ts";
+import { Collections } from "./services/collections.ts";
 import { Downloads, type DownloadsDeps } from "./services/downloads.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";

@@ -23,6 +23,11 @@ export interface PersonalCollection {
   readonly name: string;
 }
 
+/** A collection as the viewer may see it, with how many of its members they may see. */
+export interface CollectionSummary extends PersonalCollection {
+  readonly total: number;
+}
+
 export interface CollectionMember extends CollectionTitle {
   readonly available: boolean;
   /** Admitted exact version, with artwork selected only from permitted identities. */
@@ -51,6 +56,13 @@ export type CollectionChange =
       readonly id: string;
       readonly titles: readonly CollectionIdentity[];
     };
+
+/** The exact versions a change adds, removes or orders; admission checks each before storing. */
+export function changedTitles(change: CollectionChange): readonly CollectionIdentity[] {
+  if (change.kind === "member") return [change.title];
+
+  return change.kind === "order-members" ? change.titles : [];
+}
 
 /** Collision-free qualified identity, including ids containing separators. */
 export function collectionKey(title: CollectionIdentity): string {

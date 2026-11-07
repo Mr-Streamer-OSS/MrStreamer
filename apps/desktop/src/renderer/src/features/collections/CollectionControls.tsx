@@ -10,8 +10,8 @@ import { useId, useRef, useState, type SyntheticEvent } from "react";
 import {
   COLLECTION_NAME_MAX,
   type CollectionChange,
+  type CollectionSummary,
   type CollectionTitle,
-  type PersonalCollection,
 } from "@mrstreamer/contracts/collections";
 import { failedWith } from "@mrstreamer/core/failure";
 import { t } from "@mrstreamer/core/i18n";
@@ -20,11 +20,6 @@ import { Input } from "../../components/ui/input.tsx";
 import { menuItem, menuSurface } from "../../components/ui/menu.ts";
 import { cn } from "../../lib/utils.ts";
 import { describeError } from "../../lib/errors.ts";
-
-/** A collection as the viewer may see it, with how many of its members they may see. */
-export interface CollectionSummary extends PersonalCollection {
-  readonly total: number;
-}
 
 /** Sends one change; resolves once it is stored, rejects when it was not. */
 export type CommitCollection = (change: CollectionChange) => Promise<void>;
