@@ -3097,6 +3097,246 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     ]);
   });
 
+  it("rechecks capacity without duplicating pending work or preempting active captures", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(TEN_PAST);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const provider = await fakeProvider({ live: true, maxConnections: 2, slotReleaseMs: 0 });
+    let limit = 1;
+
+    const host = createServer(async (request, response) => {
+      const url = new URL(request.url ?? "/", provider.url);
+
+      if (url.pathname !== "/player_api.php" || url.searchParams.has("action")) {
+        response.writeHead(307, { Location: url.href }).end();
+
+        return;
+      }
+
+      const answer = (await (await fetch(url)).json()) as { user_info: object };
+      response.writeHead(200, { "Content-Type": "application/json" }).end(
+        JSON.stringify({
+          ...answer,
+          user_info: { ...answer.user_info, max_connections: String(limit) },
+        }),
+      );
+    });
+
+    await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+    onTestFinished(() => {
+      host.closeAllConnections();
+      host.close();
+    });
+    const address = host.address();
+
+    if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No address");
+    const dataDir = await tempDir();
+    const { recordings, subscriptions, library, guide, quit } = await app(dataDir);
+
+    const { id: subscriptionId } = await subscriptions.add({
+      ...demoLogin(provider),
+      server: `http://127.0.0.1:${address.port}`,
+    });
+
+    await library.refresh(subscriptionId);
+    await guide.refresh(subscriptionId);
+
+    const channel = (name: string) => ({
+      subscriptionId,
+      id: String(provider.catalogue.channels.find((each) => each.name === name)!.streamId),
+    });
+
+    const own = channel(GUIDED);
+    const next = (await guide.listings([own]))[`${subscriptionId}:${own.id}`]?.next;
+
+    if (!next) throw new Error("No guide");
+
+    const plan = {
+      title: next.title,
+      channels: [own],
+      priority: 90,
+      padding: { before: 0, after: 0 },
+    };
+
+    const rule = await recordings.saveRule(plan);
+    await recordings.check();
+    const generated = (await recordings.schedules()).find((each) => each.rule === rule.id);
+    await recordings.saveRule({ ...plan, priority: 95 }, rule.id);
+    await recordings.check();
+    expect((await recordings.schedules()).find((each) => each.rule === rule.id)?.id).toBe(
+      generated?.id,
+    );
+
+    const at = new Date(next.start);
+
+    const other = await recordings.schedule({
+      kind: "slot",
+      channel: channel(TRACKS),
+      title: "Other",
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: (next.stop - next.start) / MINUTE,
+      padding: plan.padding,
+    });
+
+    expect((await recordings.schedules()).find((each) => each.id === other.id)?.status.kind).toBe(
+      "conflict",
+    );
+    limit = 2;
+    await subscriptions.recheck(subscriptionId);
+    await recordings.check();
+    expect((await recordings.schedules()).find((each) => each.id === other.id)?.status.kind).toBe(
+      "planned",
+    );
+    vi.setSystemTime(next.start);
+    await recordings.check();
+
+    const captured = await until(
+      recordings.list,
+      (list) => list.filter((each) => each.status.kind === "recording").length === 2,
+    );
+
+    expect(captured).toHaveLength(2);
+    limit = 1;
+    await subscriptions.recheck(subscriptionId);
+    await recordings.check();
+    await guide.refresh(subscriptionId);
+    await recordings.check();
+    expect((await recordings.list()).map((each) => each.id).sort()).toEqual(
+      captured.map((each) => each.id).sort(),
+    );
+    expect((await recordings.list()).every((each) => each.status.kind === "recording")).toBe(true);
+    await quit();
+    const restarted = await app(dataDir);
+    expect(
+      (await restarted.recordings.rules()).find((each) => each.id === rule.id)?.plan.priority,
+    ).toBe(95);
+    await restarted.quit();
+  });
+
+  it.each([1, 2])(
+    "forecasts padding against %i provider connections and shares same-channel schedules",
+    async (limit) => {
+      const { recordings, listing, programmePlan, channel } = await scheduling({
+        maxConnections: limit,
+      });
+
+      const { next } = await listing();
+      const before = new Date(next.start - 5 * MINUTE);
+
+      const other = await recordings.schedule({
+        kind: "slot",
+        channel: channel(TRACKS),
+        days: EVERY_DAY,
+        at: before.getHours() * 60 + before.getMinutes(),
+        minutes: 6,
+        title: "Earlier slot",
+        padding: { before: 0, after: 0 },
+      });
+
+      const plan = {
+        title: next.title,
+        channels: [channel(GUIDED)],
+        priority: 100,
+        padding: { before: 2, after: 5 },
+      };
+
+      expect((await recordings.previewRule(plan)).matches[0]?.capacity).toMatchObject({
+        kind: limit === 1 ? "partial" : "available",
+        start: limit === 1 ? next.start + MINUTE : next.start - 2 * MINUTE,
+      });
+      await recordings.cancel(other.id);
+      await recordings.schedule(programmePlan(next, { before: 2, after: 5 }));
+      expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
+    },
+  );
+
+  it("forecasts padded rule conflicts and starts higher priority pending work without duplicates", async () => {
+    const {
+      recordings,
+      listing,
+      programmePlan,
+      channel,
+      clockTo,
+      guide,
+      subscriptionId,
+      quit,
+      dataDir,
+    } = await scheduling();
+
+    const { next } = await listing();
+
+    const low = await recordings.schedule({
+      ...programmePlan(next),
+      channel: channel(TRACKS),
+    });
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      priority: 80,
+      padding: { before: 0, after: 5 },
+    };
+
+    const saved = await recordings.saveRule(plan);
+    await recordings.check();
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
+    await clockTo(next.start);
+
+    const captured = await until(recordings.list, (list) =>
+      list.some((each) => each.status.kind === "recording"),
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.channel).toEqual(channel(GUIDED));
+    expect(captured[0]?.scheduled?.schedule).not.toBe(low.id);
+    await guide.refresh(subscriptionId);
+    await recordings.check();
+    await recordings.check();
+    expect(await recordings.list()).toHaveLength(1);
+    await recordings.cancelRule(saved.id);
+    await recordings.cancelRule(saved.id);
+    await recordings.check();
+    expect((await recordings.list())[0]?.status.kind).toBe("recording");
+    await quit();
+    const restarted = await app(dataDir);
+    expect(await restarted.recordings.rules()).toEqual([]);
+  });
+
+  it("previews partial and missed padded rule opportunities without preempting active viewers or captures", async () => {
+    const { recordings, listing, channel, playback, clockTo } = await scheduling();
+    const { next } = await listing();
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      priority: 100,
+      padding: { before: 2, after: 5 },
+    };
+
+    const active = await recordings.start(channel(TRACKS), next.start + 5 * MINUTE, {});
+    expect(active.kind).toBe("started");
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity).toMatchObject({
+      kind: "partial",
+      start: next.start + 5 * MINUTE,
+    });
+    await recordings.saveRule(plan);
+    await clockTo(next.start);
+    expect(
+      (await recordings.list()).filter((each) => each.status.kind === "recording"),
+    ).toHaveLength(1);
+
+    if (active.kind !== "started") throw new Error("No capture");
+    expect((await recordings.list())[0]?.id).toBe(active.recording.id);
+    await recordings.stop(active.recording.id);
+    await playback.open(channel(TRACKS), ["h264", "aac"]);
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("missed");
+    await recordings.check();
+    expect((await recordings.connections(channel(TRACKS).subscriptionId)).uses).toContain("watch");
+  });
+
   it("previews and saves selected-channel rules, defaults to every airing and requires proven first runs", async () => {
     const { provider, guide, subscriptionId, channel, recordings, listing } = await scheduling();
     const { next } = await listing();

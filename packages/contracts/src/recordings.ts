@@ -288,6 +288,10 @@ export interface ScheduledRecording {
   readonly rule?: string;
 }
 
+/** Default priority for existing rules and manual schedules. Higher numbers go first. */
+export const RECORDING_PRIORITY_DEFAULT = 0;
+export const RECORDING_PRIORITY_MAX = 100;
+
 /** Bounded title matching on explicitly selected channels. Every airing is the default. */
 export const RecordingRulePlanSchema = lazy(() =>
   type({
@@ -297,6 +301,7 @@ export const RecordingRulePlanSchema = lazy(() =>
       .atLeastLength(1)
       .atMostLength(100),
     "mode?": "'every' | 'new-only'",
+    "priority?": `0 <= number.integer <= ${RECORDING_PRIORITY_MAX}`,
     padding: {
       before: `0 <= number.integer <= ${PADDING_MAX}`,
       after: `0 <= number.integer <= ${PADDING_MAX}`,
@@ -316,6 +321,16 @@ export interface RecordingRuleMatch {
   readonly episodeIdentity?: string;
   readonly plan: Extract<RecordingPlan, { kind: "programme" }>;
   readonly channelName: string;
+  /** Capacity forecast for the padded interval, using this app's known connections only.
+   * Active viewers keep their connections; other devices and provider failures remain unknown. */
+  readonly capacity?: RecordingCapacity;
+}
+
+export interface RecordingCapacity {
+  readonly kind: "available" | "partial" | "missed";
+  /** Earliest predicted capture, null when no time remains. */
+  readonly start: number | null;
+  readonly holders: readonly ConnectionHolder[];
 }
 
 export interface RecordingRulePreview {
