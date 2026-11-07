@@ -139,6 +139,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
     "Home",
     "Subscriptions",
     "Guides",
+    "Recordings",
     "Updates",
     "Privacy",
     "About",
