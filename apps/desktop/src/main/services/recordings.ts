@@ -1957,14 +1957,8 @@ function make(deps: RecordingsDeps) {
                 ...(yield* settings.ofSubscription(subscriptionId)),
               };
 
-              // Playlist imports expose their current snapshot without refreshing on a miss.
-              // Use the exact source's snapshot, not the disk-backed library's older channel list.
-              const importPlaylist = source.provider.playlistImport;
-
-              const playlist = importPlaylist
-                ? yield* Effect.tryPromise({ try: () => importPlaylist(), catch: (cause) => cause })
-                : undefined;
-
+              // A playlist's playback snapshot has no mapping inspection or refresh-on-miss.
+              // Undefined from that read means no known sharing, never a network fallback.
               for (const schedule of own) {
                 const listed = lookup(schedule.plan.channel.id);
 
@@ -1973,8 +1967,8 @@ function make(deps: RecordingsDeps) {
                 for (const variant of streamsToPlay(listed, preferences, undefined)) {
                   const stream = yield* Effect.tryPromise({
                     try: () =>
-                      playlist
-                        ? Promise.resolve(playlist.live.streams.get(variant.id) ?? null)
+                      source.provider.currentLiveStream
+                        ? Promise.resolve(source.provider.currentLiveStream(variant.id) ?? null)
                         : source.provider.liveStream(variant.id),
                     catch: (cause) =>
                       cause instanceof Failed

@@ -3288,6 +3288,71 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(rows.map((row) => row.status.kind).sort()).toEqual(["conflict", "planned"]);
   });
 
+  it.each([10_000, 10_001])(
+    "shares a playing unmapped playlist source with %i groups without inspection or downloads",
+    async (count) => {
+      const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
+      const target = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+
+      const body =
+        "#EXTM3U\n" +
+        Array.from(
+          { length: count },
+          (_, i) =>
+            `#EXTINF:-1 tvg-id="entry-${i}" group-title="Group ${i}",Entry ${i}\n${provider.url}/live/demo/demo/${target.streamId}.ts\n`,
+        ).join("");
+
+      let reads = 0;
+
+      const host = createServer((_request, response) => {
+        reads++;
+        response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(body);
+      });
+
+      await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+      onTestFinished(() => {
+        host.closeAllConnections();
+        host.close();
+      });
+      const address = host.address();
+
+      if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No address");
+      const runtime = await app(await tempDir());
+
+      const { id: subscriptionId } = await runtime.subscriptions.add({
+        server: `http://127.0.0.1:${address.port}/playlist.m3u`,
+        username: "",
+        password: "",
+      });
+
+      await runtime.library.refresh(subscriptionId);
+      const channel = { subscriptionId, id: "entry-0" };
+      const watching = await runtime.playback.open(channel, ["h264", "aac"]);
+      await reading(await fetch(watching.url)).next(16 * 1024);
+      const baseline = reads;
+      const later = new Date(Date.now() + 60 * MINUTE);
+
+      const saved = await runtime.recordings.schedule({
+        kind: "slot",
+        channel,
+        title: "Same source",
+        days: EVERY_DAY,
+        at: later.getHours() * 60 + later.getMinutes(),
+        minutes: 30,
+        padding: { before: 0, after: 0 },
+      });
+
+      expect(
+        (await runtime.recordings.schedules()).find((each) => each.id === saved.id)?.status.kind,
+      ).toBe("planned");
+      expect((await runtime.recordings.start(channel, Date.now() + MINUTE, {})).kind).toBe(
+        "started",
+      );
+      expect(reads).toBe(baseline);
+      await runtime.playback.close(watching.sessionId);
+    },
+  );
+
   it("lists schedules when an active playlist no longer resolves a pending channel", async () => {
     const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
 
