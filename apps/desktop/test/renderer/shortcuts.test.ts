@@ -22,6 +22,7 @@ import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.ts
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
+import { SettingsPage } from "../../src/renderer/src/features/settings/SettingsPage.tsx";
 
 vi.mock(
   "../../src/renderer/src/player/title-engine.ts",
@@ -195,4 +196,95 @@ it("refuses an old profile's shortcut save when the viewer changes before it com
     stop();
     selectProfileOwner(null);
   }
+});
+
+it("remaps from Settings, refuses taken and reserved keys, keeps committed keys after a failed save and resets", async () => {
+  ipc.reset();
+  vi.stubGlobal("__BUILD_COMMIT__", "abcdef");
+  ipc.always("language.get", {
+    choice: "system",
+    locale: "en-US",
+    system: "en-US",
+    formats: "en-US",
+  });
+  // A command this version doesn't know survives editing another one.
+  ipc.prefer({ keyboardShortcuts: { future: ["x"] } });
+  useUi.setState({ settings: "playback", settingsTarget: null });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const stop = syncPreferences(client, () => {});
+  const mounted = queryView(client);
+  cleanup = () => {
+    mounted.unmount();
+    stop();
+    useUi.setState({ settings: null });
+    vi.unstubAllGlobals();
+  };
+
+  await mounted.render(createElement(SettingsPage));
+  const view = mounted.container;
+
+  const mute = await vi.waitFor(() => {
+    const button = view.querySelector<HTMLButtonElement>('[data-shortcut="mute"]');
+    expect(button).not.toBeNull();
+
+    return button!;
+  });
+
+  const press = (name: string, options: KeyboardEventInit = {}) =>
+    act(async () => {
+      mute.dispatchEvent(key(name, options));
+    });
+
+  const choose = () =>
+    act(async () => {
+      mute.focus();
+      mute.click();
+    });
+
+  const alert = () => view.querySelector('[data-setting="keyboard-shortcuts"] [role="alert"]');
+  expect(mute.getAttribute("aria-label")).toBe("Mute: M");
+  await choose();
+  expect(mute.textContent).toBe("Press a key");
+  await press("c");
+  expect(alert()?.textContent).toBe("C is used by Subtitles. Press another key.");
+  await press("7");
+  expect(alert()?.textContent).toBe("That key is reserved. Press another key.");
+  await press("Escape");
+  // Escape cancels the capture without closing Settings, and nothing was saved.
+  expect(useUi.getState().settings).toBe("playback");
+  expect(mute.getAttribute("aria-label")).toBe("Mute: M");
+  expect(ipc.argsOf("preferences.update")).toEqual([]);
+
+  const failure = ipc.hold("preferences.update");
+  await choose();
+  await press("u");
+  failure.reject({ kind: "unexpected", detail: "Disk unavailable" });
+  await vi.waitFor(() => expect(alert()?.textContent).toContain("Try again"));
+  expect(mute.getAttribute("aria-label")).toBe("Mute: M");
+  expect(ipc.argsOf("preferences.update")).toEqual([
+    { keyboardShortcuts: { future: ["x"], mute: ["u"] } },
+  ]);
+
+  ipc.answer("preferences.update", (patch) =>
+    ipc.snapshot({ ...currentPreferences(client)!, ...patch }),
+  );
+  await act(async () =>
+    [...view.querySelectorAll("button")]
+      .find((button) => button.textContent === "Try again")!
+      .click(),
+  );
+  await vi.waitFor(() => expect(mute.getAttribute("aria-label")).toBe("Mute: U"));
+  expect(resolveShortcut(key("u"), "live", currentPreferences(client)?.keyboardShortcuts)).toBe(
+    "mute",
+  );
+  expect(
+    resolveShortcut(key("m"), "title", currentPreferences(client)?.keyboardShortcuts),
+  ).toBeNull();
+
+  await act(async () =>
+    view.querySelector<HTMLButtonElement>('button[aria-label="Reset Mute"]')!.click(),
+  );
+  await vi.waitFor(() => expect(mute.getAttribute("aria-label")).toBe("Mute: M"));
+  expect(document.activeElement).toBe(mute);
+  expect(ipc.argsOf("preferences.update").at(-1)).toEqual({ keyboardShortcuts: { future: ["x"] } });
 });
