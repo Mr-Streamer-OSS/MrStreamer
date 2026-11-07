@@ -1,3 +1,4 @@
+import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { Profiles } from "../platform/profile-store.ts";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { Failed } from "@mrstreamer/core/failure";
@@ -15,6 +16,10 @@ import type { Recordings } from "../services/recordings.ts";
 import type { Output } from "../services/output.ts";
 import type { Settings } from "../services/preferences.ts";
 import type { Analytics } from "../analytics/service.ts";
+
+// The public player's latest successful open owns its diagnostic reads. Receiver and household
+// sessions never enter this record, and a new viewer cannot inspect the previous viewer's session.
+const playerSessions = new WeakMap<Playback["Service"], { id: string; owner: ActiveProfile }>();
 
 export function playbackHandlers({
   playback,
@@ -40,6 +45,15 @@ export function playbackHandlers({
   readonly settings: Pick<Settings["Service"], "get" | "ofSubscription">;
   readonly analytics: Pick<Analytics, "admitPlayback" | "playbackFailureObserver">;
 }): HandlersFor<"playback"> {
+  const inspect = <A>(sessionId: string, read: Effect.Effect<A>) =>
+    Effect.flatMap(profiles.active, (owner) => {
+      const session = playerSessions.get(playback);
+
+      return session?.id === sessionId && sameProfile(session.owner, owner)
+        ? read
+        : Effect.succeed(null);
+    });
+
   return {
     "playback.open": (
       {
@@ -66,7 +80,7 @@ export function playbackHandlers({
               const channel = yield* library.channel(named);
               const variants = yield* streamsOf(settings, channel, variant, archive);
 
-              return yield* playback.open(ownedId(channel), decoders, {
+              const session = yield* playback.open(ownedId(channel), decoders, {
                 variants,
                 owner,
                 archive: archive ?? null,
@@ -76,6 +90,10 @@ export function playbackHandlers({
                 preview: preview ?? false,
                 turn,
               });
+
+              playerSessions.set(playback, { id: session.sessionId, owner });
+
+              return session;
             }),
           Effect.gen(function* () {
             // A page's preview never takes the provider's connection from a receiver. Refused
@@ -104,13 +122,17 @@ export function playbackHandlers({
               yield* playback.closeAll;
               const { url, revision, headers, listingKey } = yield* onDemand.file(title);
 
-              return yield* playback.openTitle(title, url, decoders, {
+              const session = yield* playback.openTitle(title, url, decoders, {
                 turn,
                 owner,
                 revision,
                 headers,
                 listingKey,
               });
+
+              playerSessions.set(playback, { id: session.sessionId, owner });
+
+              return session;
             }),
         ),
       );
@@ -126,11 +148,15 @@ export function playbackHandlers({
             Effect.gen(function* () {
               const recorded = yield* recordings.copy(copy, owner);
 
-              return yield* playback.openCopy(
+              const session = yield* playback.openCopy(
                 recorded ?? (yield* downloads.copy(copy, owner)),
                 decoders,
                 turn,
               );
+
+              playerSessions.set(playback, { id: session.sessionId, owner });
+
+              return session;
             }),
         ),
       );
@@ -138,8 +164,9 @@ export function playbackHandlers({
     "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
     "playback.closeAll": () =>
       Effect.andThen(coordination.begin, Effect.as(playback.closeAll, null)),
-    "playback.diagnostic": ({ sessionId }) => playback.diagnostic(sessionId),
-    "playback.failure": ({ sessionId, selector }) => playback.failure(sessionId, selector),
+    "playback.diagnostic": ({ sessionId }) => inspect(sessionId, playback.diagnostic(sessionId)),
+    "playback.failure": ({ sessionId, selector }) =>
+      inspect(sessionId, playback.failure(sessionId, selector)),
     "playback.timeline": ({ sessionId }) => playback.timeline(sessionId),
     "playback.seekLive": ({ sessionId, at, audio }) => playback.seekLive(sessionId, at, audio),
     "playback.tracks": ({ sessionId }) => playback.tracks(sessionId),

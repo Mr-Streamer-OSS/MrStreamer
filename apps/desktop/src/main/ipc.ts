@@ -349,6 +349,19 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
     marked: state.marked.filter((item) => online("series", item.series)),
   });
 
+  const changeReminder = (
+    method: "reminders.cancel" | "reminders.dismiss",
+    input: { id: string },
+    frame: Parameters<IpcHandlers["reminders.cancel"]>[1],
+  ) =>
+    Effect.flatMap(handlers["reminders.list"](undefined, frame), (list) => {
+      const reminder = list.reminders.find((item) => item.id === input.id);
+
+      return reminder && online("channel", reminder.channel)
+        ? handlers[method](input, frame)
+        : denied();
+    });
+
   // Every method keeps its correlated input/output type; only the deny-all default is shared.
   const closed = { ...handlers };
 
@@ -401,20 +414,14 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
           away: 0,
         })),
       ),
+    "updates.status": handlers["updates.status"],
+    "guide.savedQueries": () => Effect.succeed([]),
+    "playback.failure": handlers["playback.failure"],
+    "playback.diagnostic": handlers["playback.diagnostic"],
     "library.status": handlers["library.status"],
     "library.categories": handlers["library.categories"],
     "library.searchGroups": handlers["library.searchGroups"],
-    "library.channels": (input, frame) =>
-      Effect.map(handlers["library.channels"](input, frame), (rows) =>
-        rows
-          .filter((row) => online("channel", row) && !row.adult)
-          .map((row) => ({
-            ...row,
-            variants: row.variants.filter((variant) =>
-              online("channel", { subscriptionId: row.subscriptionId, id: variant.id }),
-            ),
-          })),
-      ),
+    "library.channels": handlers["library.channels"],
     "library.channel": (input, frame) =>
       online("channel", input.channel) ? handlers["library.channel"](input, frame) : denied(),
     "library.browse": handlers["library.browse"],
@@ -504,7 +511,7 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
                   ...entry,
                   name: allowed.name,
                   year: allowed.year,
-                  artworkUrl: null,
+                  artworkUrl: allowed.posterUrl,
                   title: allowed,
                   sources: entry.sources.filter((source) =>
                     allowed.versions.some((version) => version.subscriptionId === source),
@@ -514,6 +521,7 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
             : [];
         }),
       })),
+    "watchlist.remove": handlers["watchlist.remove"],
     "watchlist.saved": (input, frame) =>
       online(input.kind, input.version) ? handlers["watchlist.saved"](input, frame) : denied(),
     "watchlist.save": (input, frame) =>
@@ -627,6 +635,8 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
         ...list,
         reminders: list.reminders.filter((item) => online("channel", item.channel)),
       })),
+    "reminders.cancel": (input, frame) => changeReminder("reminders.cancel", input, frame),
+    "reminders.dismiss": (input, frame) => changeReminder("reminders.dismiss", input, frame),
     "reminders.set": (input, frame) =>
       online("channel", input.channel) ? handlers["reminders.set"](input, frame) : denied(),
     "window.miniPlayerAvailable": handlers["window.miniPlayerAvailable"],

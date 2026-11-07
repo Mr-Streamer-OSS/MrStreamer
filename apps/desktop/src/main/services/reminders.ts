@@ -290,11 +290,10 @@ function make(deps: RemindersDeps) {
     /** Tells of `reminder`, told at `now`: in the window, and from the system unless for adults. */
     const tell = (reminder: KeptReminder, now: number) =>
       Effect.gen(function* () {
-        if (!(yield* mayTell(reminder))) return;
         banners.set(reminder.id, true);
         dirty = true;
 
-        if (reminder.adult || !notifier?.supported) return;
+        if (reminder.adult || !notifier?.supported || !(yield* mayTell(reminder))) return;
         const late = lateMinutes(reminder.start, now);
         const channel = reminder.channelName;
         const { id } = reminder;
@@ -550,7 +549,8 @@ function make(deps: RemindersDeps) {
                 Effect.gen(function* () {
                   const file = store.kind === "read" ? store.file.reminders : [];
 
-                  for (const reminder of file) if (!(yield* mayTell(reminder))) quiet(reminder.id);
+                  for (const reminder of file)
+                    if (!(yield* mayTell(reminder))) closeNotice(reminder.id);
                   yield* publish;
                 }),
               )

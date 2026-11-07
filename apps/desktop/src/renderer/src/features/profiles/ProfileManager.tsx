@@ -466,10 +466,26 @@ function Approvals({
               ? known.data?.find(
                   (channel) =>
                     channel.subscriptionId === approval.subscriptionId &&
-                    channel.id === approval.id,
+                    channel.variants.some((variant) => variant.id === approval.id),
                 )?.title
               : titleOf(approval.kind, approval)?.title) ?? t("Not available"),
-            [KIND_LABELS[approval.kind](), source(approval.subscriptionId)].join(" · "),
+            [
+              KIND_LABELS[approval.kind](),
+              approval.kind === "channel"
+                ? known.data
+                    ?.filter((channel) => channel.subscriptionId === approval.subscriptionId)
+                    .flatMap((channel) => channel.variants)
+                    .find((variant) => variant.id === approval.id)?.name
+                : titleOf(approval.kind, approval)?.versions.find(
+                    (version) =>
+                      version.subscriptionId === approval.subscriptionId &&
+                      version.id === approval.id,
+                  )?.name,
+              source(approval.subscriptionId),
+              approval.id,
+            ]
+              .filter(Boolean)
+              .join(" · "),
           ),
         )}
       />

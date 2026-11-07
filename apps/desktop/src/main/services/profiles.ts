@@ -471,7 +471,11 @@ export function makeProfiles({
                 return yield* refused(t("Viewing profile changed; retry this request."));
               const now = yield* readPolicy;
 
-              if (now.revision !== policy.revision) return yield* policyFailure();
+              if (
+                JSON.stringify(now.profiles.find((row) => row.id === owner.id)) !==
+                JSON.stringify(kids)
+              )
+                return yield* policyFailure();
             }),
             approved: kids?.approved ?? null,
             run,
@@ -544,7 +548,11 @@ export function makeProfiles({
           kids: kids !== undefined,
           allows: (approval: KidsApproval) => allowsApproval(kids?.approved ?? null, approval),
           current: Effect.gen(function* () {
-            if (!isActive(owner) || (yield* readPolicy).revision !== policy.revision)
+            if (
+              !isActive(owner) ||
+              JSON.stringify((yield* readPolicy).profiles.find((row) => row.id === owner.id)) !==
+                JSON.stringify(kids)
+            )
               return yield* policyFailure();
           }),
         };
@@ -582,30 +590,36 @@ export function makeProfiles({
               new Set(input.profiles.map((row) => row.id)).size !== input.profiles.length ||
               input.profiles.some(
                 (row) =>
-                  row.id === DEFAULT_PROFILE_ID ||
-                  !rows.some((profile) => profile.id === row.id && !profile.deleting),
+                  row.id === DEFAULT_PROFILE_ID || !rows.some((profile) => profile.id === row.id),
               )
             )
-              return yield* pinRequired();
+              return yield* refused(t("This viewing profile is unavailable or being deleted."));
 
             // Policy changes affect inactive profiles only: active playback must first leave through the lifecycle cleanup.
             if (
               input.profiles.some((row) => row.id === active.id) ||
               policy.profiles.some((row) => row.id === active.id)
             )
-              return yield* pinRequired();
+              return yield* refused(t("Viewing profile changed; retry this request."));
+            const deleting = new Set(rows.filter((row) => row.deleting).map((row) => row.id));
+
+            const profiles = [
+              ...input.profiles.filter((row) => !deleting.has(row.id)),
+              ...policy.profiles.filter((row) => deleting.has(row.id)),
+            ];
+
             const salt = input.newPin ? randomUUID() : policy.salt;
 
             const next = {
               pin: input.newPin ? scryptSync(input.newPin, salt, 32).toString("hex") : policy.pin,
               salt,
               revision: policy.revision + 1,
-              profiles: input.profiles,
+              profiles,
             };
 
             yield* savePolicy(next);
 
-            return { protected: true, profiles: input.profiles } satisfies KidsPolicy;
+            return { protected: true, profiles } satisfies KidsPolicy;
           }),
         ),
       active: activeRead,

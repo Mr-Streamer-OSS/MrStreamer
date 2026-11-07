@@ -847,14 +847,23 @@ async function start(): Promise<void> {
   );
   dimensionsReady = true;
 
-  const initialOwner = await runtime.runPromise(profiles.active);
-  const initialDefaultOwner = initialOwner.id === DEFAULT_PROFILE_ID ? initialOwner : null;
+  // An unavailable registry keeps personal access closed while household startup continues.
+  const initial = await runtime.runPromiseExit(profiles.active);
+
+  const initialDefaultOwner =
+    Exit.isSuccess(initial) && initial.value.id === DEFAULT_PROFILE_ID ? initial.value : null;
+
+  const activeMatches = (owner: ActiveProfile) => {
+    const current = runtime.runSyncExit(profiles.active);
+
+    return Exit.isSuccess(current) && sameProfile(owner, current.value);
+  };
 
   const publishPreferences = (
     owner: ActiveProfile | null,
     snapshot: IpcEvents["preferences.changed"],
   ) => {
-    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    if (!mainWindow || !owner || !activeMatches(owner)) return;
     emit(mainWindow.webContents, "profiles.preferencesChanged", { owner, snapshot });
 
     if (owner.id === DEFAULT_PROFILE_ID)
@@ -862,7 +871,7 @@ async function start(): Promise<void> {
   };
 
   const stalePreferences = (owner: ActiveProfile | null) => {
-    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    if (!mainWindow || !owner || !activeMatches(owner)) return;
     emit(mainWindow.webContents, "profiles.preferencesStale", { owner });
 
     if (owner.id === DEFAULT_PROFILE_ID) emit(mainWindow.webContents, "preferences.stale", null);
@@ -921,7 +930,7 @@ async function start(): Promise<void> {
       }).pipe(
         Effect.tap((publication) =>
           Effect.sync(() => {
-            if (sameProfile(admission.owner, runtime.runSync(profiles.active))) {
+            if (activeMatches(admission.owner)) {
               publications.clear();
               publications.set(profileKey(admission.owner), publication);
             }
@@ -940,7 +949,7 @@ async function start(): Promise<void> {
   const restoredLocale = profileLocale.pending;
 
   let language = languageFor(
-    restoredLocale && sameProfile(restoredLocale.owner, runtime.runSync(profileSessions.active))
+    restoredLocale && activeMatches(restoredLocale.owner)
       ? restoredLocale.choice
       : await runtime.runPromise(settings.interfaceLanguage),
   );
@@ -997,8 +1006,45 @@ async function start(): Promise<void> {
       ),
     );
 
-  forward(library.changes, "library.updated", (status) => status);
-  forward(onDemand.changes, "ondemand.updated", (status) => status);
+  // Household publications trigger a fresh admitted public status, never publish household counts.
+  const publicStatus = <A, B>(changes: Stream.Stream<A>, read: (change: A) => Effect.Effect<B>) =>
+    changes.pipe(
+      Stream.mapEffect((change) =>
+        Effect.gen(function* () {
+          const admission = yield* profileSessions.admit;
+          const status = yield* admission.run(read(change));
+          yield* admission.current;
+
+          return status;
+        }).pipe(Effect.catchTag("Failed", () => Effect.succeed(null))),
+      ),
+      Stream.filter((status) => status !== null),
+    );
+
+  forward(
+    publicStatus(library.changes, (change) =>
+      Effect.map(
+        library.status,
+        (statuses) =>
+          statuses.find((status) => status.subscriptionId === change.subscriptionId) ?? {
+            ...change,
+            channelCount: 0,
+          },
+      ),
+    ),
+    "library.updated",
+    (status) => status,
+  );
+  forward(
+    publicStatus(onDemand.changes, (change) =>
+      Effect.map(onDemand.status, (status) => ({
+        ...status,
+        ...defined({ markedForAdults: change.markedForAdults }),
+      })),
+    ),
+    "ondemand.updated",
+    (status) => status,
+  );
   forward(onDemand.progressChanges, "ondemand.progress", (metadata) => metadata);
   forward(
     onDemand.detailsChanged,
@@ -1020,7 +1066,7 @@ async function start(): Promise<void> {
 
         const { owner } = change;
 
-        if (!owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+        if (!owner || !activeMatches(owner)) return;
         const legacy = owner.id === DEFAULT_PROFILE_ID;
 
         if (change.kind === "viewing" || change.kind === "erased") {

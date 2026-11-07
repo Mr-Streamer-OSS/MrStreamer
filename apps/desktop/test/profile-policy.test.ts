@@ -1,5 +1,8 @@
+import { type } from "arktype";
 import { playbackHandlers } from "../src/main/handlers/playback.ts";
 import { outputHandlers } from "../src/main/handlers/output.ts";
+import { Updates } from "../src/main/services/updates.ts";
+import { updateHandlers } from "../src/main/handlers/updates.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Output } from "../src/main/services/output.ts";
 import { PlaybackCoordination } from "../src/main/services/playback-coordination.ts";
@@ -37,7 +40,7 @@ import type { Result } from "@mrstreamer/contracts/errors";
 import type { IpcMainInvokeEvent } from "electron";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runtimeFor, tempDir, testConfig, fakeProvider, demoLogin } from "./support.ts";
 
@@ -204,7 +207,10 @@ async function fixture(
   const personal = await app.runPromise(sessions.admit);
   const lifecycle = profileHandlers({ profiles: sessions, sessions, enabled: true });
 
+  const updates = await app.runPromise(Updates);
+
   const base: Partial<IpcHandlers> = {
+    ...updateHandlers({ updates, storeReview: null }),
     ...lifecycle,
     ...playbackHandlers({
       playback,
@@ -503,9 +509,27 @@ it("hides a running household recording without stopping its stream and retains 
     ok: false,
     error: { detail: "Kids policy: this content or action is not approved." },
   });
+
+  const opened = await f.call(kid, "playback.open", {
+    channel: permittedChannel,
+    decoders: ["h264", "aac"],
+  });
+
+  expect(opened).toEqual({
+    ok: true,
+    value: expect.objectContaining({ sessionId: expect.any(String) }),
+  });
+
+  const session = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+  expect(await f.call(kid, "playback.failure", { sessionId: session.sessionId })).toMatchObject({
+    ok: true,
+  });
+  expect(await f.call(kid, "playback.diagnostic", { sessionId: session.sessionId })).toMatchObject({
+    ok: true,
+  });
   expect(
-    await f.call(kid, "playback.open", { channel: permittedChannel, decoders: ["h264", "aac"] }),
-  ).toEqual({ ok: true, value: expect.objectContaining({ sessionId: expect.any(String) }) });
+    await f.call(kid, "playback.diagnostic", { sessionId: "household-or-old-session" }),
+  ).toEqual({ ok: true, value: null });
   expect(await f.call(kid, "playback.closeAll", undefined)).toMatchObject({ ok: true });
   await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(1));
   const policyDb = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
@@ -660,8 +684,43 @@ it("suppresses restricted notifications and closes existing ones without changin
       ]),
     },
   });
+  expect(await f.call(back, "reminders.list", undefined)).toMatchObject({
+    ok: true,
+    value: {
+      reminders: expect.arrayContaining([
+        expect.objectContaining({ title: "Restricted second", banner: true }),
+      ]),
+    },
+  });
+  await f.call(back, "profiles.setPolicy", {
+    current: back,
+    pin: "1234",
+    profiles: [
+      {
+        id: f.kid.id,
+        approved: [{ kind: "channel", subscriptionId: f.source.id, id: String(channel.streamId) }],
+      },
+    ],
+  });
+  const approvedKid = await f.app.runPromise(f.sessions.switch(f.kid.id, back));
+  const visible = await f.app.runPromise(f.reminders.list);
+  const due = visible.reminders.find((reminder) => reminder.title === "Restricted second")!;
+  expect(await f.call(approvedKid, "reminders.dismiss", { id: due.id })).toEqual({
+    ok: true,
+    value: null,
+  });
+  expect(await f.call(approvedKid, "reminders.list", undefined)).toMatchObject({
+    ok: true,
+    value: {
+      reminders: expect.arrayContaining([expect.objectContaining({ id: due.id, banner: false })]),
+    },
+  });
   const saved = await readFile(join(f.dataDir, "reminders.json"), "utf8");
   expect(saved).toContain("Restricted second");
+  expect(await f.call(approvedKid, "reminders.cancel", { id: due.id })).toEqual({
+    ok: true,
+    value: null,
+  });
 });
 
 it("selects approved versions before grouping, artwork, counts and paging without replacing the household catalogue", async () => {
@@ -750,6 +809,10 @@ it("selects approved versions before grouping, artwork, counts and paging withou
   expect(search).toMatchObject({ ok: true, value: { movies: [{ id: "91079" }], series: [] } });
 
   if (search.ok) expect(JSON.stringify(search.value)).not.toContain("Restricted primary");
+  expect(await f.call(kid, "ondemand.status", undefined)).toMatchObject({
+    ok: true,
+    value: { lists: [{ movies: 2, series: 0 }] },
+  });
   const back = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
   expect(await f.call(back, "ondemand.collection", { ...query, limit: 100 })).toEqual(household);
   await f.app.runPromise(f.sessions.setPolicy({ current: back, pin: "1234", profiles: [] }));
@@ -814,4 +877,275 @@ it("keeps the previous policy retryable after a refused save and restores it acr
       commands["profiles.switch"]({ id: f.adult.id, current: kid, pin: "1234" }, "test"),
     ),
   ).toMatchObject({ id: f.adult.id });
+});
+
+it("filters exact live identities before grouped metadata", async () => {
+  const f = await fixture();
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: [{ kind: "channel", subscriptionId: f.source.id, id: "100000" }],
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+  expect(await f.call(kid, "library.status", undefined)).toMatchObject({
+    ok: true,
+    value: [{ channelCount: 1 }],
+  });
+
+  const direct = await f.call(kid, "library.channel", {
+    channel: { subscriptionId: f.source.id, id: "100000" },
+  });
+
+  const browsed = await f.call(kid, "library.browse", {
+    scope: { kind: "all" },
+    filters: { browseTopics: [], countries: [], languages: [], subscriptions: [] },
+    visibility: "viewer",
+  });
+
+  expect(browsed).toMatchObject({
+    ok: true,
+    value: { channels: [{ variants: [{ id: "100000" }] }] },
+  });
+
+  expect(direct).toMatchObject({ ok: true, value: { variants: [{ id: "100000" }] } });
+});
+
+it("keeps an approved noncanonical live variant visible", async () => {
+  const f = await fixture();
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: [{ kind: "channel", subscriptionId: f.source.id, id: "100001" }],
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+  expect(await f.call(kid, "library.status", undefined)).toMatchObject({
+    ok: true,
+    value: [{ channelCount: 1 }],
+  });
+
+  const direct = await f.call(kid, "library.channel", {
+    channel: { subscriptionId: f.source.id, id: "100001" },
+  });
+
+  expect(direct.ok).toBe(true);
+});
+
+it("ensures Home recommendations do not publish restricted primary seed name", async () => {
+  const f = await fixture({
+    titlesOf: (built) => {
+      const base = built.movies.find((item) => !item.adult)!;
+
+      return {
+        ...built,
+        movies: [
+          { ...base, id: 90001, name: "Restricted primary", tmdb: "500" },
+          { ...base, id: 90002, name: "Approved version", tmdb: "500" },
+          ...Array.from({ length: 40 }, (_, at) => ({
+            ...base,
+            id: 91000 + at,
+            name: `Restricted candidate ${at}`,
+            tmdb: String(10000 + at),
+          })),
+          { ...base, id: 90003, name: "Approved candidate", tmdb: "501" },
+        ],
+      };
+    },
+  });
+
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: [
+            { kind: "movie", subscriptionId: f.source.id, id: "90002" },
+            { kind: "movie", subscriptionId: f.source.id, id: "90003" },
+          ],
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+  const result = await f.call(kid, "ondemand.recommendations", {
+    seeds: [{ kind: "movie", version: { subscriptionId: f.source.id, id: "90002" } }],
+  });
+
+  expect(result).toMatchObject({
+    ok: true,
+    value: [{ seed: "Approved version", title: { id: "90003" } }],
+  });
+  expect(JSON.stringify(result)).not.toContain("Restricted primary");
+});
+
+it("keeps adult replies valid when only an inactive kids policy changes", async () => {
+  const f = await fixture();
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => release.resolve());
+  const original = f.library.channels;
+  f.library.channels = (input) =>
+    Effect.gen(function* () {
+      const result = yield* original(input);
+      arrived.resolve();
+      yield* Effect.promise(() => release.promise);
+
+      return result;
+    });
+  const pending = f.call(f.adult, "library.channels", {});
+  await arrived.promise;
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [{ id: f.kid.id, approved: [] }],
+  });
+  release.resolve();
+  expect(await pending).toMatchObject({ ok: true });
+});
+
+it("lets kids remove a saved approved title and read safe guide/update state", async () => {
+  const f = await fixture();
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [
+      { id: f.kid.id, approved: [{ kind: "movie", subscriptionId: f.source.id, id: "90001" }] },
+    ],
+  });
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  const entry = { subscriptionId: f.source.id, id: "90001" };
+  const saved = await f.call(kid, "watchlist.save", { kind: "movie", version: entry });
+  expect(saved).toMatchObject({ ok: true });
+
+  const membership = type({ subscriptionId: "string", id: "string" }).assert(
+    saved.ok ? saved.value : null,
+  );
+
+  expect(await f.call(kid, "watchlist.remove", { entry: membership })).toMatchObject({ ok: true });
+  expect(
+    await f.call(kid, "watchlist.list", { sort: "title", offset: 0, limit: 10 }),
+  ).toMatchObject({ ok: true, value: { total: 0 } });
+  expect(await f.call(kid, "guide.savedQueries", { subscriptionId: f.source.id })).toEqual({
+    ok: true,
+    value: [],
+  });
+  expect(await f.call(kid, "updates.status", undefined)).toMatchObject({ ok: true });
+});
+
+it("preserves deletion tombstone policy rows when an adult saves other policies", async () => {
+  const f = await fixture();
+
+  const retained = {
+    id: f.kid.id,
+    approved: [{ kind: "movie" as const, subscriptionId: f.source.id, id: "90001" }],
+  };
+
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [retained],
+  });
+  const db = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+
+  try {
+    db.exec(
+      "CREATE TRIGGER refuse_policy_delete BEFORE UPDATE ON kids_policy BEGIN SELECT RAISE(FAIL, 'refused'); END",
+    );
+    expect(
+      await f.call(f.adult, "profiles.remove", { id: f.kid.id, current: f.adult, pin: "1234" }),
+    ).toMatchObject({ ok: false });
+    db.exec("DROP TRIGGER refuse_policy_delete");
+    expect(
+      await f.call(f.adult, "profiles.setPolicy", {
+        current: f.adult,
+        pin: "1234",
+        profiles: [{ id: f.kid.id, approved: [] }],
+      }),
+    ).toMatchObject({ ok: true, value: { profiles: [retained] } });
+
+    const invalid = await f.call(f.adult, "profiles.setPolicy", {
+      current: f.adult,
+      pin: "1234",
+      profiles: [{ id: "unknown", approved: [] }],
+    });
+
+    expect(invalid).toMatchObject({
+      ok: false,
+      error: { detail: "This viewing profile is unavailable or being deleted." },
+    });
+  } finally {
+    db.close();
+  }
+});
+
+it("never attempts an unapproved automatic live fallback", async () => {
+  const f = await fixture();
+  const before = f.provider.streamRequests();
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [
+      { id: f.kid.id, approved: [{ kind: "channel", subscriptionId: f.source.id, id: "100000" }] },
+    ],
+  });
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+  const opened = await f.call(kid, "playback.open", {
+    channel: { subscriptionId: f.source.id, id: "100000" },
+    decoders: ["h264", "aac"],
+  });
+
+  expect(opened).toMatchObject({ ok: true });
+
+  const session = type({ url: "string", sessionId: "string" }).assert(
+    opened.ok ? opened.value : null,
+  );
+
+  const response = await fetch(session.url);
+  expect(response.ok).toBe(false);
+  expect(f.provider.streamRequests() - before).toBe(1);
+  expect(await f.call(kid, "playback.failure", { sessionId: session.sessionId })).toMatchObject({
+    ok: true,
+    value: expect.objectContaining({ kind: expect.any(String) }),
+  });
+});
+
+it("keeps household services available while a database open failure denies personal admission", async () => {
+  const dataDir = await tempDir();
+  await mkdir(join(dataDir, "mrstreamer.db"));
+
+  const app = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const sessions = await app.runPromise(ProfileSessions);
+  expect((await app.runPromiseExit(sessions.admit))._tag).toBe("Failure");
+  const recordings = await app.runPromise(Recordings);
+  expect(await app.runPromise(recordings.list)).toEqual([]);
+  const reminders = await app.runPromise(Reminders);
+  expect(await app.runPromise(reminders.list)).toMatchObject({ reminders: [] });
 });

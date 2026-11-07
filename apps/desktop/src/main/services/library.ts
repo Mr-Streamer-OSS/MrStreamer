@@ -1,3 +1,4 @@
+import type { KidsApproval } from "@mrstreamer/contracts/profiles";
 import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import type { UsageObservers } from "../analytics/observers.ts";
 // The live catalogue: each saved subscription's, fetched from its provider and cached on disk,
@@ -141,6 +142,7 @@ interface OwnCategory extends Omit<Category, "members"> {
 
 /** One subscription's catalogue. */
 interface IndexedCatalogue {
+  readonly file: CatalogueFile;
   /** The subscription whose channels and categories these are. */
   readonly subscriptionId: string;
   readonly fetchedAt: number;
@@ -382,7 +384,17 @@ function make(options: LibraryOptions) {
       Effect.gen(function* () {
         const found = yield* cached(subscription);
 
-        return statusOf(subscription.id, found && ((yield* adults) ? found : withoutAdults(found)));
+        const policy = yield* Effect.serviceOption(AdmittedKids);
+
+        const shown =
+          found &&
+          (policy._tag === "Some" && policy.value.approved !== null
+            ? admittedCatalogue(found, policy.value.approved)
+            : (yield* adults)
+              ? found
+              : withoutAdults(found));
+
+        return statusOf(subscription.id, shown);
       });
 
     const fetchAndStore = (source: Source, playlist?: PlaylistRefresh) =>
@@ -587,49 +599,15 @@ function make(options: LibraryOptions) {
       const policy = yield* Effect.serviceOption(AdmittedKids);
       const approved = policy._tag === "Some" ? policy.value.approved : null;
 
-      const restrict = (lists: Combined): Combined => {
-        if (approved === null) return lists;
+      if (approved !== null) {
+        const lists = combine(loaded.map((member) => admittedCatalogue(member, approved)));
 
-        const allows = (channel: LiveChannel) =>
-          !channel.adult &&
-          allowsApproval(approved, {
-            kind: "channel",
-            subscriptionId: channel.subscriptionId,
-            id: channel.id,
-          });
-
-        const byCategory = new Map(
-          [...lists.byCategory].map(([key, channels]) => [key, channels.filter(allows)]),
-        );
-
-        return {
-          ...lists,
-          channels: lists.channels.filter(allows),
-          members: lists.members.map((member) => {
-            const indices = member.channels.flatMap((channel, index) =>
-              allows(channel) ? [index] : [],
-            );
-
-            return {
-              ...member,
-              channels: member.channels.filter(allows),
-              searchNames: indices.map((index) => member.searchNames[index] ?? ""),
-              titles: indices.map((index) => member.titles[index] ?? ""),
-              byId: new Map([...member.byId].filter(([, channel]) => allows(channel))),
-            };
-          }),
-          byCategory,
-          categories: lists.categories.flatMap((category) => {
-            const count = byCategory.get(ownedKey(category))?.length ?? 0;
-
-            return count ? [{ ...category, channelCount: count }] : [];
-          }),
-        };
-      };
+        return { lists, search: lists };
+      }
 
       return {
-        lists: restrict(listsOf((yield* adults) ? "all" : "ordinary", loaded)),
-        search: restrict(listsOf("ordinary", loaded)),
+        lists: listsOf((yield* adults) ? "all" : "ordinary", loaded),
+        search: listsOf("ordinary", loaded),
       };
     });
 
@@ -851,6 +829,7 @@ function index(file: CatalogueFile, subscriptionId: string, outdated: boolean): 
   }
 
   return {
+    file,
     subscriptionId,
     fetchedAt: file.fetchedAt,
     ...defined({ importRevision: file.importRevision || undefined }),
@@ -1231,4 +1210,29 @@ function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
       subscriptions: counted(facets.subscriptions),
     },
   };
+}
+
+/** Rebuild from admitted provider streams before deriving names, groups, guide IDs or facets. */
+function admittedCatalogue(
+  member: IndexedCatalogue,
+  approved: readonly KidsApproval[],
+): IndexedCatalogue {
+  const isAdult = adultIn(member.file.categories);
+
+  return index(
+    {
+      ...member.file,
+      channels: member.file.channels.filter(
+        (channel) =>
+          !isAdult(channel) &&
+          allowsApproval(approved, {
+            kind: "channel",
+            subscriptionId: member.subscriptionId,
+            id: channel.id,
+          }),
+      ),
+    },
+    member.subscriptionId,
+    member.outdated,
+  );
 }

@@ -796,7 +796,23 @@ const handlers: {
   status: async ({ adults: now, owners }) => {
     showing(now);
 
-    return (await Promise.all(owners.map(current))).map(statusOf);
+    if (!owners.some((owner) => owner.approved !== undefined))
+      return (await Promise.all(owners.map(current))).map(statusOf);
+
+    const found = await catalogueOf(owners, viewerLanguage);
+
+    return owners.map((owner) => {
+      const member = found.members.find((each) => each.subscriptionId === owner.subscriptionId);
+      const status = statusOf(member ?? null);
+
+      return owner.approved === undefined
+        ? status
+        : {
+            ...status,
+            movies: member?.catalogue.movies.length ?? 0,
+            series: member?.catalogue.series.length ?? 0,
+          };
+    });
   },
   refresh,
   finishRefresh,
@@ -889,13 +905,8 @@ const handlers: {
     );
   },
   recommendations: async ({ owners, language, seeds }) => {
-    const members = owners.flatMap((owner) => {
-      const held = loaded.get(owner.subscriptionId);
-
-      return held && held.importRevision === owner.importRevision ? [held] : [];
-    });
-
-    const found = shownOf(members, language);
+    const found = await catalogueOf(owners, language);
+    const { members } = found;
 
     const catalogues = {
       movie: collectionsOf(found, "movie").list("all"),
@@ -947,13 +958,8 @@ const handlers: {
     return results;
   },
   related: async ({ language, kind, version, owners, metadata: about }) => {
-    const members = owners.flatMap((owner) => {
-      const held = loaded.get(owner.subscriptionId);
-
-      return held && held.importRevision === owner.importRevision ? [held] : [];
-    });
-
-    const found = shownOf(members, language);
+    const found = await catalogueOf(owners, language);
+    const { members } = found;
     const titles = collectionsOf(found, kind).list("all");
 
     const seed = titles.find((title) =>
