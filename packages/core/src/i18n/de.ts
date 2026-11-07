@@ -105,7 +105,7 @@ export const de: Translation = {
   "Press a key": "Drücke eine Taste",
   "Press a key for {command}. Escape cancels.": "Drücke eine Taste für {command}. Esc bricht ab.",
   "{key} is used by {command}. Reset that command first, or Reset all.":
-    "{key} wird von {command} verwendet. Setze zuerst diesen Befehl zurück oder wähle Alles zurücksetzen.",
+    "{key} wird von {command} verwendet. Setze zuerst diesen Befehl zurück oder wähle Alle zurücksetzen.",
   "{key} is used by {command}. Press another key.":
     "{key} wird für {command} verwendet. Drücke eine andere Taste.",
   "That key is reserved. Press another key.":
