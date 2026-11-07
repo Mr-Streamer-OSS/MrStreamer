@@ -882,13 +882,20 @@ async function capturing(
 
 /** Bytes the files under `folder` take. */
 async function bytesIn(folder: string) {
-  const names = await readdir(folder, { recursive: true }).catch(() => []);
+  const names = await readdir(folder, { recursive: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
 
   const sizes = await Promise.all(
     names.map((name) =>
       stat(join(folder, name)).then(
         (found) => (found.isFile() ? found.size : 0),
-        () => 0,
+        (error: NodeJS.ErrnoException) => {
+          // Eviction can remove a file between listing it and measuring it.
+          if (error.code === "ENOENT") return 0;
+          throw error;
+        },
       ),
     ),
   );
