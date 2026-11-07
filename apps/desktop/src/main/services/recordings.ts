@@ -48,6 +48,7 @@ import { isDeepStrictEqual } from "node:util";
 import type {
   ConnectionHolder,
   Recording,
+  RecordingResumeList,
   RecordingConnections,
   RecordingCapacity,
   RecordingCut,
@@ -236,7 +237,9 @@ export class Recordings extends Context.Service<
      * has that id. Fails, listing it as missing, when its file went.
      */
     copy(id: string, owner?: ActiveProfile): Effect.Effect<LocalCopy | null, Failed>;
-    /** Keeps how far an ended recording played. */
+    /** Main-only owner-bound projection; callers must authorize every exact recording row. */
+    resume(owner?: ActiveProfile): Effect.Effect<RecordingResumeList, Failed>;
+    /** Keeps how far a retained recording played, including one still capturing. */
     recordProgress(
       id: string,
       position: number,
@@ -275,7 +278,7 @@ export class Recordings extends Context.Service<
       readonly scheduled: boolean;
       readonly unsaved: boolean;
     }>;
-    /** The list after each change, and as recordings grow, about once a second. */
+    /** Inventory after each change and as recordings grow, about once a second; no personal progress. */
     readonly changes: Stream.Stream<readonly Recording[]>;
     /** Lists saved rules; a refused startup inventory stays refused until the next start. */
     readonly rules: Effect.Effect<readonly RecordingRule[], Failed>;
@@ -384,6 +387,7 @@ function make(deps: RecordingsDeps) {
         position: number;
         duration: number;
         retryAt: number;
+        watchedAt: number;
       }
     >();
 
@@ -2158,9 +2162,11 @@ function make(deps: RecordingsDeps) {
       late: ScheduleMiss | null,
     ): NonNullable<StoredRecording["scheduled"]> => {
       const owed = owedOf(schedule, occurrence);
+      const rule = ruleOf(schedule.id);
 
       return {
         schedule: schedule.id,
+        ...(rule && { rule }),
         from: occurrence.start,
         ...(owed > occurrence.start && { owed }),
         late,
@@ -2410,7 +2416,13 @@ function make(deps: RecordingsDeps) {
         }
 
         const saved = yield* Effect.result(
-          progress.owner.write("recording", progress.id, progress.position, progress.duration),
+          progress.owner.write(
+            "recording",
+            progress.id,
+            progress.position,
+            progress.duration,
+            progress.watchedAt,
+          ),
         );
 
         if (saved._tag === "Success" && pendingProgress.get(id) === progress)
@@ -3055,6 +3067,44 @@ function make(deps: RecordingsDeps) {
             progress: yield* owner.read("recording", id, record.progress ?? null),
           } satisfies LocalCopy;
         }),
+      resume: (captured?: ActiveProfile) =>
+        Effect.gen(function* () {
+          const owner = captured ? personal.of(captured) : yield* personal.admit;
+          yield* usable;
+          const positions = yield* owner.recordings;
+          yield* lookAgain;
+
+          // Use inventory identities, never the provider catalogue or a title-name match.
+          // File failures omit the copy rather than promise playback; no growing-edge completion heuristic.
+          const present = new Set(
+            yield* Effect.promise(() =>
+              Promise.all(
+                positions.map(async ({ id }) => {
+                  const record = records.get(id);
+
+                  if (!record || record.status.kind === "missed") return null;
+
+                  return stat(fileOf(record)).then(
+                    (file) => (file.isFile() && file.size > 0 ? id : null),
+                    () => null,
+                  );
+                }),
+              ),
+            ),
+          );
+
+          const inventory = new Map((yield* shown).map((recording) => [recording.id, recording]));
+          const items: RecordingResumeList["items"][number][] = [];
+
+          for (const { id, position, duration, at } of positions) {
+            const recording = inventory.get(id);
+
+            if (recording && present.has(id))
+              items.push({ recording, progress: { position, duration, at } });
+          }
+
+          return { owner: owner.owner, items };
+        }),
       recordProgress: (id: string, position: number, duration: number, captured?: ActiveProfile) =>
         Effect.gen(function* () {
           const owner = captured ? personal.of(captured) : yield* personal.admit;
@@ -3066,9 +3116,19 @@ function make(deps: RecordingsDeps) {
               error: { kind: "unexpected", detail: t("This recording is no longer there.") },
             });
           const key = JSON.stringify([owner.owner.id, id]);
-          const progress = { id, owner, position, duration, retryAt: Date.now() + RETRY_MS };
+          const watchedAt = Date.now();
+
+          const progress = {
+            id,
+            owner,
+            position,
+            duration,
+            watchedAt,
+            retryAt: watchedAt + RETRY_MS,
+          };
+
           pendingProgress.set(key, progress);
-          yield* owner.write("recording", id, position, duration).pipe(
+          yield* owner.write("recording", id, position, duration, watchedAt).pipe(
             Effect.tap(() =>
               Effect.sync(() => {
                 if (pendingProgress.get(key) === progress) pendingProgress.delete(key);

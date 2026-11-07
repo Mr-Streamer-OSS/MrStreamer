@@ -61,7 +61,7 @@ export function fileRequest(
     file.once("close", () => init.signal?.removeEventListener("abort", stop));
     const body = Readable.toWeb(file) as ReadableStream<Uint8Array>;
 
-    return new Response(body, { status: range && Number.isFinite(end) ? 206 : 200, headers });
+    return new Response(body, { status: range ? 206 : 200, headers });
   };
 }
 

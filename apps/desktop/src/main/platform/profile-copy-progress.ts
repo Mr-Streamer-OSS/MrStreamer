@@ -21,6 +21,7 @@ const SCHEMA = `create table if not exists profile_copy_progress (
   copy_id text not null,
   position real,
   duration real,
+  watched_at real,
   primary key (profile_id, kind, copy_id)
 )`;
 
@@ -56,6 +57,14 @@ export const copyProgress = Effect.gen(function* () {
 
         if (!initialized) {
           opened.db.exec(SCHEMA);
+
+          if (
+            !opened.db
+              .prepare("pragma table_info(profile_copy_progress)")
+              .all()
+              .some((column) => column.name === "watched_at")
+          )
+            opened.db.exec("alter table profile_copy_progress add column watched_at real");
           initialized = true;
         }
 
@@ -98,15 +107,30 @@ export const copyProgress = Effect.gen(function* () {
         // A seeded absence keeps both columns null.
         return row?.position === null ? null : Position.assert(row);
       }),
-    write: (kind: CopyKind, id: string, position: number, duration: number) =>
+    /** Explicit recording writes have a captured user time; seeds and downloads do not. */
+    recordings: access(owner, (db, owner) =>
+      db
+        .prepare(
+          `select copy_id, position, duration, watched_at from profile_copy_progress
+        where profile_id = ? and kind = 'recording' and position is not null
+        order by watched_at desc, copy_id asc`,
+        )
+        .all(owner)
+        .map((row) => ({
+          id: type("string").assert(row.copy_id),
+          ...Position.assert(row),
+          at: type("number | null").assert(row.watched_at),
+        })),
+    ),
+    write: (kind: CopyKind, id: string, position: number, duration: number, watchedAt?: number) =>
       access(owner, (db, owner) => {
         Position.assert({ position, duration });
         db.prepare(
           `insert into profile_copy_progress
-          (profile_id, kind, copy_id, position, duration) values (?, ?, ?, ?, ?)
+          (profile_id, kind, copy_id, position, duration, watched_at) values (?, ?, ?, ?, ?, ?)
           on conflict (profile_id, kind, copy_id) do update
-          set position = excluded.position, duration = excluded.duration`,
-        ).run(owner, kind, id, Math.min(position, duration), duration);
+          set position = excluded.position, duration = excluded.duration, watched_at = excluded.watched_at`,
+        ).run(owner, kind, id, Math.min(position, duration), duration, watchedAt ?? null);
       }),
   });
 

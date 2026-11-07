@@ -2682,6 +2682,219 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
   });
 
+  it("projects retained recording identity and independent captured-owner resume after provider removal and restart", async () => {
+    const provider = await fakeProvider({ live: true });
+    const dataDir = await tempDir();
+
+    const config = {
+      ...testConfig(dataDir),
+      ffmpeg: "ffmpeg",
+      ffprobe: "ffprobe",
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    };
+
+    const runtime = runtimeFor(mainLayer(config));
+    onTestFinished(() => runtime.dispose());
+    const recordings = await promised(runtime, Recordings);
+    const subscriptions = await promised(runtime, Subscriptions);
+    const library = await promised(runtime, Library);
+    const roster = await promised(runtime, Roster);
+    const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+    await library.refresh(subscriptionId);
+    const source = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+    const channel = () => ({ subscriptionId, id: String(source.streamId) });
+    const profiles = await promised(runtime, ProfileSessions);
+    const original = await profiles.active();
+    const made = await profiles.create("Resume viewer");
+    const other = await profiles.switch(made.id);
+    await profiles.switch(original.id);
+    const started = await recordings.start(channel(), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Not started");
+    const { id } = started.recording;
+    await recordings.recordProgress(id, 0, 90, original);
+    await recordings.recordProgress(id, 42, 90, other);
+    expect((await recordings.resume(original)).items).toMatchObject([
+      {
+        recording: { id, channel: channel(), status: { kind: "recording" } },
+        progress: { position: 0, duration: 90, at: expect.any(Number) },
+      },
+    ]);
+    await expect(recordings.copy(id)).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    await roster.remove(subscriptionId, true);
+    await runtime.dispose();
+    const restarted = runtimeFor(mainLayer(config));
+    onTestFinished(() => restarted.dispose());
+    const again = { recordings: await promised(restarted, Recordings), runtime: restarted };
+    expect((await again.recordings.resume(original)).items).toMatchObject([
+      { recording: { id, channel: channel() }, progress: { position: 0, duration: 90 } },
+    ]);
+    expect((await again.recordings.resume(other)).items).toMatchObject([
+      { recording: { id }, progress: { position: 42, duration: 90 } },
+    ]);
+    const current = await promised(again.runtime, ProfileSessions);
+    await current.remove(other.id);
+    await expect(again.recordings.resume(other)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    await rm((await again.recordings.copy(id, original))!.path);
+    expect((await again.recordings.resume(original)).items).toEqual([]);
+  });
+
+  it("migrates legacy resume times as unknown, keeps seeds and zero, and orders exact ids deterministically", async () => {
+    const dataDir = await tempDir();
+
+    const ids = [
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+      "00000000-0000-4000-8000-000000000003",
+      "00000000-0000-4000-8000-000000000004",
+    ];
+
+    const records = ids.map((id) => ({
+      id,
+      file: "a.ts",
+      channel: { subscriptionId: "gone", id: "1" },
+      channelName: "Gone",
+      title: "Same title",
+      start: 1000,
+      stop: 2000,
+      ended: 2000,
+      bytes: 100,
+      status: { kind: "complete" },
+      progress: { position: 33, duration: 90 },
+    }));
+
+    for (const id of ids) {
+      await mkdir(join(dataDir, "recordings", id), { recursive: true });
+      await writeFile(join(dataDir, "recordings", id, "a.ts"), fixture("h264-aac.mpegts"));
+    }
+
+    await writeFile(
+      join(dataDir, "recordings", "recordings.json"),
+      JSON.stringify({ version: 1, recordings: records }),
+    );
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    db.exec(
+      "create table profile_copy_progress (profile_id text not null, kind text not null, copy_id text not null, position real, duration real, primary key (profile_id, kind, copy_id))",
+    );
+    db.prepare("insert into profile_copy_progress values ('default', 'recording', ?, 33, 90)").run(
+      ids[0]!,
+    );
+    db.prepare(
+      "insert into profile_copy_progress values ('default', 'recording', ?, null, null)",
+    ).run(ids[3]!);
+    db.close();
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    // Enumeration does not turn legacy inventory into a playback write.
+    const migrationLock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      migrationLock.exec("begin immediate");
+      await expect(recordings.resume()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    } finally {
+      migrationLock.exec("rollback");
+      migrationLock.close();
+    }
+
+    expect((await recordings.resume()).items.map(({ recording }) => recording.id)).toEqual([
+      ids[0],
+    ]);
+
+    for (const id of ids.toReversed())
+      expect((await recordings.copy(id))?.progress).toEqual(
+        id === ids[3] ? null : { position: 33, duration: 90 },
+      );
+    expect(
+      (await recordings.resume()).items.map(({ recording, progress }) => [
+        recording.id,
+        progress.at,
+      ]),
+    ).toEqual(ids.slice(0, 3).map((id) => [id, null]));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+    try {
+      await recordings.recordProgress(ids[2]!, 0, 90);
+      await recordings.recordProgress(ids[1]!, 120, 90);
+    } finally {
+      clock.mockRestore();
+    }
+
+    expect(
+      (await recordings.resume()).items.map(({ recording, progress }) => [
+        recording.id,
+        progress.position,
+        progress.at,
+      ]),
+    ).toEqual([
+      [ids[1], 90, now],
+      [ids[2], 0, now],
+      [ids[0], 33, null],
+    ]);
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      lock.exec("alter table profile_copy_progress rename to unavailable_progress");
+      await expect(recordings.resume()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    } finally {
+      lock.exec("alter table unavailable_progress rename to profile_copy_progress");
+      lock.close();
+    }
+
+    expect((await recordings.resume()).items).toHaveLength(3);
+  });
+
+  it("retains the user's watch time when a failed recording save retries after a newer write", async () => {
+    const { dataDir, recordings, channel } = await connected();
+    const ids: string[] = [];
+
+    for (let i = 0; i < 2; i++) {
+      const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+      if (started.kind !== "started") throw new Error("Not started");
+      ids.push(started.recording.id);
+      await recordings.stop(started.recording.id);
+    }
+
+    await recordings.recordProgress(ids[0]!, 1, 90);
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+    try {
+      lock.exec("begin immediate");
+      await expect(recordings.recordProgress(ids[0]!, 42, 90)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      lock.exec("rollback");
+      clock.mockReturnValue(now + 1);
+      await recordings.recordProgress(ids[1]!, 0, 90);
+      clock.mockReturnValue(now + 10_001);
+      await recordings.check();
+    } finally {
+      clock.mockRestore();
+
+      if (lock.isTransaction) lock.exec("rollback");
+      lock.close();
+    }
+
+    expect(
+      (await recordings.resume()).items.map(({ recording, progress }) => [
+        recording.id,
+        progress.position,
+        progress.at,
+      ]),
+    ).toEqual([
+      [ids[1], 0, now + 1],
+      [ids[0], 42, now],
+    ]);
+  });
+
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {
     const { channel, recordings, savedSubtitles } = await connected({ maxConnections: 2 });
     const ids: string[] = [];
@@ -4165,6 +4378,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]?.channel).toEqual(channel(GUIDED));
     expect(captured[0]?.scheduled?.schedule).not.toBe(low.id);
+    expect(captured[0]?.scheduled?.rule).toBe(saved.id);
+    await recordings.recordProgress(captured[0]!.id, 0, 90);
     await guide.refresh(subscriptionId);
     await recordings.check();
     await recordings.check();
@@ -4176,6 +4391,15 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await quit();
     const restarted = await app(dataDir);
     expect(await restarted.recordings.rules()).toEqual([]);
+    expect((await restarted.recordings.resume()).items).toMatchObject([
+      {
+        recording: {
+          id: captured[0]!.id,
+          scheduled: { schedule: captured[0]!.scheduled!.schedule, rule: saved.id },
+        },
+        progress: { position: 0, duration: 90 },
+      },
+    ]);
   });
 
   it("previews partial and missed padded rule opportunities without preempting active viewers or captures", async () => {
