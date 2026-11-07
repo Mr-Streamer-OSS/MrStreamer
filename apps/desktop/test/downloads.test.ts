@@ -8,10 +8,13 @@ import * as streams from "node:stream/promises";
 import * as files from "node:fs/promises";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { basename, join, sep } from "node:path";
 import { Writable } from "node:stream";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import { Failed } from "@mrstreamer/core/failure";
+import { transfer, type TransferRequest } from "../src/main/downloads/transfer.ts";
 import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { setLanguage } from "@mrstreamer/core/i18n";
@@ -435,6 +438,60 @@ function seriesDetailsHold() {
     return { arrived: arrived.promise, release: () => released.resolve() };
   };
 }
+
+describe.skipIf(!hasTools)("transfer identity callback failures", () => {
+  const advice = {
+    kind: "keychain-refused",
+    connect: "snap connect mrstreamer:password-manager-service",
+  } satisfies AppError;
+
+  it.each([
+    { name: "Failed advice", cause: new Failed({ error: advice }), error: advice },
+    { name: "AppFailure advice", cause: new AppFailure(advice), error: advice },
+    {
+      name: "ordinary Error",
+      cause: new Error("Identity could not be saved"),
+      error: { kind: "unexpected", detail: "Identity could not be saved" },
+    },
+    {
+      name: "primitive cause",
+      cause: "Identity storage unavailable",
+      error: { kind: "unexpected", detail: "Identity storage unavailable" },
+    },
+  ])("keeps the partial on initial $name and transfers it on retry", async ({ cause, error }) => {
+    const provider = await fakeProvider();
+
+    const film = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Long subtitles"),
+    )!;
+
+    const bytes = fixture(film.fixture!);
+    const part = join(await tempDir(), "media.part");
+    const before = Buffer.from("Earlier partial file");
+    await writeFile(part, before);
+    let refusing = true;
+
+    const request: TransferRequest = {
+      url: `${provider.url}/movie/demo/demo/${film.id}.${film.container}`,
+      headers: {},
+      request: fetch,
+      userAgent: "MR Streamer test",
+      part,
+      known: null,
+      signal: new AbortController().signal,
+      progress: () => {},
+      identify: () => {
+        if (refusing) throw cause;
+      },
+    };
+
+    expect(await transfer(request)).toEqual({ kind: "failed", failure: { kind: "app", error } });
+    expect(await readFile(part)).toEqual(before);
+    refusing = false;
+    expect(await transfer(request)).toMatchObject({ kind: "complete", size: bytes.length });
+    expect(digest(await readFile(part))).toBe(digest(bytes));
+  });
+});
 
 describe.skipIf(!hasTools)("downloads", () => {
   it.each(["copy", "cleanup"])(
@@ -2852,9 +2909,10 @@ describe.skipIf(!hasTools)("the queue", () => {
   /**
    * A transfer paused while another copy of the app holds the database: the pause is written
    * down, the transfer stops and where it stopped can't be. Its partial file closes only once the
-   * lock is taken, so the lock meets that very write.
+   * lock is taken, so the lock meets that very write. New injected cases fail that write at
+   * SQLite instead; the production store preserves Failed advice and wraps other causes.
    */
-  async function pausedUnkept() {
+  async function pausedUnkept(settlement?: { cause: unknown; error: AppError }) {
     const closing = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<void>();
     let holding = true;
@@ -2898,15 +2956,39 @@ describe.skipIf(!hasTools)("the queue", () => {
     await written(started.dataDir, id, 200_000);
     const pausing = started.downloads.pause(id);
     await closing.promise;
-    const lock = new DatabaseSync(join(started.dataDir, "mrstreamer.db"));
-    lock.exec("begin exclusive");
-    closed.resolve();
 
-    try {
-      await expect(pausing).rejects.toMatchObject({ error: { kind: "unexpected" } });
-    } finally {
-      lock.exec("rollback");
-      lock.close();
+    if (settlement) {
+      // Fail this download's settlement write at SQLite, through the real store's attempt adapter.
+      const run = StatementSync.prototype.run;
+
+      const refusal = vi.spyOn(StatementSync.prototype, "run").mockImplementation(function (
+        this: StatementSync,
+        ...args
+      ) {
+        if (this.sourceSQL.startsWith("insert into downloads ") && args.at(0) === id)
+          throw settlement.cause;
+
+        return run.apply(this, args);
+      });
+
+      closed.resolve();
+
+      try {
+        await expect(pausing).rejects.toMatchObject({ error: settlement.error });
+      } finally {
+        refusal.mockRestore();
+      }
+    } else {
+      const lock = new DatabaseSync(join(started.dataDir, "mrstreamer.db"));
+      lock.exec("begin exclusive");
+      closed.resolve();
+
+      try {
+        await expect(pausing).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      } finally {
+        lock.exec("rollback");
+        lock.close();
+      }
     }
 
     return { ...started, film, id };
@@ -3222,6 +3304,56 @@ describe.skipIf(!hasTools)("the queue", () => {
     expect(provider.fileBytes() - sent).toBe(film.bytes.length - 200_000);
     expect(provider.mostFilesAtOnce()).toBe(1);
   }, 60_000);
+
+  it.each([
+    {
+      name: "Failed advice",
+      cause: new Failed({
+        error: {
+          kind: "keychain-refused",
+          connect: "snap connect mrstreamer:password-manager-service",
+        },
+      }),
+      error: {
+        kind: "keychain-refused",
+        connect: "snap connect mrstreamer:password-manager-service",
+      } satisfies AppError,
+    },
+    {
+      name: "ordinary Error",
+      cause: new Error("Settlement could not be saved"),
+      error: {
+        kind: "unexpected",
+        detail: "Settlement could not be saved",
+      } satisfies AppError,
+    },
+    {
+      name: "primitive cause",
+      cause: "Settlement storage unavailable",
+      error: { kind: "unexpected", detail: "Settlement storage unavailable" } satisfies AppError,
+    },
+  ])(
+    "reports settlement $name and retries from the kept partial",
+    async ({ cause, error }) => {
+      const { provider, dataDir, downloads, find, film, id } = await pausedUnkept({ cause, error });
+      await vi.waitFor(() => expect(provider.activeStreams()).toBe(0), { timeout: 1000 });
+      expect((await find(id))?.status).toMatchObject({
+        kind: "failed",
+        failure: { kind: "app", error },
+      });
+      expect(await partial(dataDir, id)).toBe(200_000);
+      const sent = provider.fileBytes();
+      provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
+      await downloads.retry(id);
+      await vi.waitFor(async () => expect((await find(id))?.status.kind).toBe("complete"), {
+        timeout: LONG,
+      });
+      expect(digest(await copyOf(dataDir, id))).toBe(digest(film.bytes));
+      expect(provider.fileBytes() - sent).toBe(film.bytes.length - 200_000);
+      expect(provider.mostFilesAtOnce()).toBe(1);
+    },
+    60_000,
+  );
 
   it("keeps the pause of a transfer whose stopping point couldn't be written: the next start lists it paused", async () => {
     const { provider, dataDir, find, quit, film, id } = await pausedUnkept();

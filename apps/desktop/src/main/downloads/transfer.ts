@@ -23,7 +23,7 @@ import { once } from "node:events";
 import type { Writable } from "node:stream";
 import type { DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
-import { Failed, failedWith } from "@mrstreamer/core/failure";
+import { failedWith } from "@mrstreamer/core/failure";
 import type { Provider } from "@mrstreamer/core/provider";
 import { t } from "@mrstreamer/core/i18n";
 import type { PartIdentity } from "../platform/downloads-store.ts";
@@ -259,7 +259,7 @@ async function receive(
     asked.identify(onDisk);
   } catch (cause) {
     await body.cancel().catch(() => {});
-    const failure = cause instanceof Failed ? cause : failedWith(cause);
+    const failure = failedWith(cause);
 
     return { kind: "failed", failure: { kind: "app", error: failure.error } };
   }
