@@ -12,6 +12,9 @@ import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { basename, join, sep } from "node:path";
 import { Writable } from "node:stream";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import { Failed } from "@mrstreamer/core/failure";
+import { transfer, type TransferRequest } from "../src/main/downloads/transfer.ts";
 import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { setLanguage } from "@mrstreamer/core/i18n";
@@ -435,6 +438,60 @@ function seriesDetailsHold() {
     return { arrived: arrived.promise, release: () => released.resolve() };
   };
 }
+
+describe.skipIf(!hasTools)("transfer identity callback failures", () => {
+  const advice = {
+    kind: "keychain-refused",
+    connect: "snap connect mrstreamer:password-manager-service",
+  } satisfies AppError;
+
+  it.each([
+    { name: "Failed advice", cause: new Failed({ error: advice }), error: advice },
+    { name: "AppFailure advice", cause: new AppFailure(advice), error: advice },
+    {
+      name: "ordinary Error",
+      cause: new Error("Identity could not be saved"),
+      error: { kind: "unexpected", detail: "Identity could not be saved" },
+    },
+    {
+      name: "primitive cause",
+      cause: "Identity storage unavailable",
+      error: { kind: "unexpected", detail: "Identity storage unavailable" },
+    },
+  ])("keeps the partial on initial $name and transfers it on retry", async ({ cause, error }) => {
+    const provider = await fakeProvider();
+
+    const film = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Long subtitles"),
+    )!;
+
+    const bytes = fixture(film.fixture!);
+    const part = join(await tempDir(), "media.part");
+    const before = Buffer.from("Earlier partial file");
+    await writeFile(part, before);
+    let refusing = true;
+
+    const request: TransferRequest = {
+      url: `${provider.url}/movie/demo/demo/${film.id}.${film.container}`,
+      headers: {},
+      request: fetch,
+      userAgent: "MR Streamer test",
+      part,
+      known: null,
+      signal: new AbortController().signal,
+      progress: () => {},
+      identify: () => {
+        if (refusing) throw cause;
+      },
+    };
+
+    expect(await transfer(request)).toEqual({ kind: "failed", failure: { kind: "app", error } });
+    expect(await readFile(part)).toEqual(before);
+    refusing = false;
+    expect(await transfer(request)).toMatchObject({ kind: "complete", size: bytes.length });
+    expect(digest(await readFile(part))).toBe(digest(bytes));
+  });
+});
 
 describe.skipIf(!hasTools)("downloads", () => {
   it.each(["copy", "cleanup"])(
