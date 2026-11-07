@@ -3060,7 +3060,7 @@ function make(deps: RecordingsDeps) {
           yield* usable;
           const record = records.get(id);
 
-          if (!record || record.status.kind === "missed" || isLive(record))
+          if (!record || record.status.kind === "missed")
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("This recording is no longer there.") },
             });

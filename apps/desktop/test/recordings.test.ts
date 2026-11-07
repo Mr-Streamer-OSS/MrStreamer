@@ -2178,6 +2178,187 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(existsSync(join(dataDir, "recordings", "mine"))).toBe(true);
   });
 
+  describe("active recording progress", () => {
+    async function started() {
+      const provider = await fakeProvider({ live: true, streams: looping });
+      const dataDir = await tempDir();
+
+      const runtime = runtimeFor(
+        mainLayer({
+          ...testConfig(dataDir),
+          ffmpeg: "ffmpeg",
+          ffprobe: "ffprobe",
+          profiles: {
+            consent: { read: Effect.succeed(true), write: () => Effect.void },
+            stopInteractive: () => Effect.void,
+          },
+        }),
+      );
+
+      onTestFinished(() => runtime.dispose());
+      const subscriptions = await promised(runtime, Subscriptions);
+      const library = await promised(runtime, Library);
+      const recordings = await promised(runtime, Recordings);
+      const profiles = await promised(runtime, ProfileSessions);
+      const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+      await library.refresh(subscriptionId);
+      const source = provider.catalogue.channels.find((each) => each.name === TRACKS);
+
+      if (!source) throw new Error("No channel");
+
+      const answer = await recordings.start(
+        { subscriptionId, id: String(source.streamId) },
+        Date.now() + 120_000,
+        {},
+      );
+
+      if (answer.kind !== "started") throw new Error("Not started");
+      const { id } = answer.recording;
+      expect(
+        (
+          await until(
+            recordings.list,
+            ([each]) => each?.status.kind === "recording" && each.bytes > 0,
+          )
+        )[0]?.status.kind,
+      ).toBe("recording");
+
+      return { dataDir, runtime, recordings, profiles, id };
+    }
+
+    it("saves and retries active progress for its captured profile after switching, without opening the copy", async () => {
+      const { dataDir, runtime, recordings, profiles, id } = await started();
+      const original = await profiles.active();
+      await recordings.recordProgress(id, 9, 90);
+      const created = await profiles.create("Other viewer");
+      const captured = await profiles.switch(created.id);
+      await recordings.recordProgress(id, 11, 90, captured);
+      await profiles.switch(original.id);
+      await expect(recordings.copy(id, captured)).rejects.toMatchObject({
+        error: { detail: "It is still recording." },
+      });
+      const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+      try {
+        lock.exec("begin immediate");
+        await expect(recordings.recordProgress(id, 42, 90, captured)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+      } finally {
+        if (lock.isTransaction) lock.exec("rollback");
+        lock.close();
+      }
+
+      const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_001);
+
+      try {
+        await recordings.check();
+      } finally {
+        clock.mockRestore();
+      }
+
+      expect((await recordings.list())[0]?.status.kind).toBe("recording");
+      await recordings.stop(id);
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 42,
+        duration: 90,
+      });
+      expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+      await runtime.dispose();
+      const restarted = await app(dataDir);
+      onTestFinished(restarted.quit);
+      expect((await restarted.recordings.copy(id, captured))?.progress).toEqual({
+        position: 42,
+        duration: 90,
+      });
+      expect((await restarted.recordings.copy(id))?.progress).toEqual({
+        position: 9,
+        duration: 90,
+      });
+    });
+    it("retires an active recording's retained retry after owner deletion without recreating progress", async () => {
+      const { dataDir, recordings, profiles, id } = await started();
+      const original = await profiles.active();
+      await recordings.recordProgress(id, 9, 90, original);
+      const created = await profiles.create("Leaving viewer");
+      const captured = await profiles.switch(created.id);
+      await recordings.recordProgress(id, 11, 90, captured);
+      await profiles.switch(original.id);
+      const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+      try {
+        lock.exec("begin immediate");
+        await expect(recordings.recordProgress(id, 55, 90, captured)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+      } finally {
+        if (lock.isTransaction) lock.exec("rollback");
+        lock.close();
+      }
+
+      await profiles.remove(captured.id);
+      expect((await profiles.list()).some((each) => each.id === captured.id)).toBe(false);
+      // Observe SQLite's public boundary: a retired retry neither writes nor checks its owner again.
+      let registryReads = 0;
+      let progressWrites = 0;
+      const connections = new Set<DatabaseSync>();
+      const prepare = DatabaseSync.prototype.prepare;
+
+      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+        this: DatabaseSync,
+        sql: string,
+      ) {
+        connections.add(this);
+        this.setAuthorizer((action, table) => {
+          if (action === sqlite.SQLITE_READ && table === "profiles") registryReads++;
+
+          if (
+            table === "profile_copy_progress" &&
+            (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+          )
+            progressWrites++;
+
+          return sqlite.SQLITE_OK;
+        });
+
+        return prepare.call(this, sql);
+      });
+
+      const restore = () => {
+        adapter.mockRestore();
+
+        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
+      };
+
+      onTestFinished(restore);
+      let now = Date.now();
+
+      for (const first of [true, false]) {
+        now += 10_001;
+        const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+        try {
+          await recordings.check();
+        } finally {
+          clock.mockRestore();
+        }
+
+        if (first) expect(registryReads).toBeGreaterThan(0);
+        else expect(registryReads).toBe(0);
+        expect(progressWrites).toBe(0);
+        registryReads = 0;
+      }
+
+      restore();
+      expect((await recordings.list())[0]?.status.kind).toBe("recording");
+      await recordings.stop(id);
+      await expect(recordings.copy(id, captured)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+    });
+  });
+
   it("keeps personal progress while inventory writes fail, and lists a missing copy before playback", async () => {
     const { dataDir, channel, recordings, quit } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
