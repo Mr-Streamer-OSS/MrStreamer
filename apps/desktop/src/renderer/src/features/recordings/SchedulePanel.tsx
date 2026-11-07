@@ -17,6 +17,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import {
   DEFAULT_PADDING,
   PADDING_MAX,
+  RECORDING_RULE_LIMITS,
   type ConnectionHolder,
   type RecordingPadding,
   type RecordingRule,
@@ -590,6 +591,7 @@ function RuleFields({
   const [from] = useState(() => Date.now());
   const [mode, setMode] = useState<Mode>(initialMode);
   const unmarkedId = useId();
+  const fullId = useId();
 
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set((chosen ?? named.map((each) => each.owned)).map(ownedKey)),
@@ -643,6 +645,7 @@ function RuleFields({
   const failure = save.error ?? stop.error ?? preview.error ?? found.error;
   const shown = channels.length > 0 ? preview.data : undefined;
   const modes: readonly Mode[] = ["every", "new-only"];
+  const full = selected.size >= RECORDING_RULE_LIMITS.matches;
 
   return (
     <>
@@ -650,7 +653,12 @@ function RuleFields({
         <div className="flex min-w-0 flex-[1_1_28rem] flex-col">
           <Field label={t("Channels")}>
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 py-1">
-              <div role="group" aria-label={t("Channels")} className="flex flex-wrap gap-1.5">
+              <div
+                role="group"
+                aria-label={t("Channels")}
+                aria-describedby={full ? fullId : undefined}
+                className="flex flex-wrap gap-1.5"
+              >
                 {offered.map(({ owned, name }) => {
                   const key = ownedKey(owned);
                   const on = selected.has(key);
@@ -660,21 +668,21 @@ function RuleFields({
                       key={key}
                       type="button"
                       aria-pressed={on}
-                      disabled={!on && selected.size >= 100}
+                      disabled={!on && full}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         const next = new Set(selected);
 
                         if (on) next.delete(key);
-                        // RecordingRulePlan accepts at most 100 selected channels.
-                        else if (next.size < 100) next.add(key);
+                        // Keep selection within the shared recording-rule limit.
+                        else if (next.size < RECORDING_RULE_LIMITS.matches) next.add(key);
                         setSelected(next);
                       }}
                       className={cn(
                         "flex h-7 items-center rounded-full px-3 text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
                         on
                           ? "bg-foreground font-semibold text-black"
-                          : "bg-white/8 font-medium text-muted-foreground hover:bg-white/12 hover:text-foreground",
+                          : "bg-white/8 font-medium text-muted-foreground enabled:hover:bg-white/12 enabled:hover:text-foreground",
                       )}
                     >
                       {name}
@@ -682,6 +690,13 @@ function RuleFields({
                   );
                 })}
               </div>
+              {full && (
+                <span id={fullId} className="text-xs text-muted-foreground">
+                  {t("{limit} channels selected. Deselect one to choose another.", {
+                    limit: RECORDING_RULE_LIMITS.matches,
+                  })}
+                </span>
+              )}
               {/* Discovery stopped at its page budget; the selected-channel cap is separate. */}
               {found.data?.limited && (
                 <span className="text-xs text-muted-foreground">

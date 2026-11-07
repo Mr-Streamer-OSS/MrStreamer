@@ -1754,6 +1754,8 @@ export const fr: Translation = {
     "Le guide liste plus de diffusions qu'une vérification n'en lit. Les suivantes viennent à mesure que celles-ci passent.",
   "More channels may match. The guide search limit was reached.":
     "D'autres chaînes peuvent correspondre. La limite de recherche du guide a été atteinte.",
+  "{limit} channels selected. Deselect one to choose another.":
+    "{limit} chaînes sélectionnées. Désélectionnez-en une pour en choisir une autre.",
   "Turn on rule": "Activer la règle",
   "Stop following": "Ne plus suivre",
   "{count} more": { one: "{count} de plus", many: "{count} de plus", other: "{count} de plus" },

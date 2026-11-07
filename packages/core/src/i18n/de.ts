@@ -1696,6 +1696,8 @@ export const de: Translation = {
     "Der Programmführer listet mehr Ausstrahlungen, als eine Prüfung liest. Spätere folgen, wenn diese vorbei sind.",
   "More channels may match. The guide search limit was reached.":
     "Weitere Sender könnten passen. Das Suchlimit des Programmführers wurde erreicht.",
+  "{limit} channels selected. Deselect one to choose another.":
+    "{limit} Sender ausgewählt. Wähle einen ab, um einen anderen zu wählen.",
   "Turn on rule": "Regel einschalten",
   "Stop following": "Nicht mehr folgen",
   "{count} more": { one: "{count} weitere", other: "{count} weitere" },

@@ -1680,6 +1680,8 @@ export const nl: Translation = {
     "De gids toont meer uitzendingen dan één controle leest. Latere volgen zodra deze voorbij zijn.",
   "More channels may match. The guide search limit was reached.":
     "Er kunnen meer zenders overeenkomen. De zoeklimiet van de gids is bereikt.",
+  "{limit} channels selected. Deselect one to choose another.":
+    "{limit} zenders gekozen. Deselecteer er een om een andere te kiezen.",
   "Turn on rule": "Regel aanzetten",
   "Stop following": "Niet meer volgen",
   "{count} more": { one: "nog {count}", other: "nog {count}" },
