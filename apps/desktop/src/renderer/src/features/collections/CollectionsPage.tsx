@@ -151,7 +151,7 @@ function Members({
       </div>
       {selected.length > 0 && (
         <Picked
-          key={JSON.stringify(selected)}
+          key={JSON.stringify(selected.map(collectionKey))}
           collection={collection}
           others={others}
           picked={selected}

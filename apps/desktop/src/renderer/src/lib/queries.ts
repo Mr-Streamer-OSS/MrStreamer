@@ -886,6 +886,9 @@ export function syncOnDemand(client: QueryClient): () => void {
     fetched = now;
     const marked = status.markedForAdults === true;
 
+    // Privacy follows the query client even while collection surfaces are closed.
+    if (marked) forget(client, { queryKey: ["collections"] });
+
     if (newLists || marked) invalidateDetailsCatalogue();
 
     const dropped = (query: QueryFilters["queryKey"]) => {

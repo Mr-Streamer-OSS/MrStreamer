@@ -5,6 +5,7 @@
 // the same, mounted: the Collections tab's grid and picks, and the menu in a title's details.
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+import { syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement, useState } from "react";
@@ -428,7 +429,11 @@ async function mountTab() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = queryView(client);
   await view.render(createElement(CollectionsPage, { active: true }));
-  unmount = view.unmount;
+  const stop = syncOnDemand(client);
+  unmount = () => {
+    stop();
+    view.unmount();
+  };
 }
 
 /** A grid tile's poster button, by what it is named. */
@@ -779,4 +784,120 @@ it("discards cached adult collection content before a delayed preference reread"
   expect(document.body.textContent).not.toContain("Kite Season");
   await act(async () => reread.resolve({ total: 0, members: [] }));
   await vi.waitFor(() => expect(document.body.textContent).toContain("0 titles"));
+});
+
+it.each([false, true])(
+  "drops restricted facts off-surface with an old response in flight: %s",
+  async (inFlight) => {
+    ipc.reset();
+    ipc.always("subscription.list", [SAVED]);
+    selectProfileOwner(null);
+    const { syncOnDemand, syncWatchlist } = await import("../../src/renderer/src/lib/queries.ts");
+    const privateTitle = { ...kite, posterUrl: "https://img.invalid/private.jpg" };
+    const kept = mainCollections([{ name: "Privacy films", members: [member(privateTitle)] }]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const stops = [syncOnDemand(client), syncWatchlist(client)];
+    const view = queryView(client);
+    unmount = () => {
+      stops.forEach((stop) => stop());
+      view.unmount();
+    };
+
+    await view.render(createElement(CollectionsPage, { active: true }));
+    await poster("Kite Season, Movie, 2022");
+    expect(document.body.innerHTML).toContain("private.jpg");
+    const old = inFlight ? ipc.hold("collections.page") : null;
+
+    if (old) {
+      const reads = ipc.argsOf("collections.page").length;
+      await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+      await vi.waitFor(() => expect(ipc.argsOf("collections.page").length).toBeGreaterThan(reads));
+    }
+
+    await view.render(null);
+    kept.find("c0")!.members = [];
+    await act(async () =>
+      ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+    );
+    const reread = ipc.hold("collections.page");
+    await view.render(createElement(CollectionsPage, { active: true }));
+
+    try {
+      await act(async () => old?.resolve({ total: 1, members: [member(privateTitle)] }));
+      expect(document.querySelector("img")).toBeNull();
+      expect(document.body.textContent).not.toContain("Kite Season");
+      expect(document.body.textContent).not.toContain("1 title");
+    } finally {
+      await act(async () => reread.resolve({ total: 0, members: [] }));
+    }
+  },
+);
+
+it.each([false, true])(
+  "keeps a failed removal visible through a metadata update: %s",
+  async (changed) => {
+    ipc.reset();
+    ipc.always("subscription.list", [SAVED]);
+    useUi.setState({ details: null });
+    const main = mainCollections([{ name: "Films", members: [member(kite)] }]);
+    await mountTab();
+    await poster("Kite Season, Movie, 2022");
+    await pick("Kite Season");
+    const held = ipc.hold("collections.change");
+    await act(async () => button("Remove from Films").click());
+    // TMDB metadata lands meanwhile: the same member now has artwork.
+    main.find("c0")!.members[0] = member(
+      changed ? { ...kite, posterUrl: "https://img.invalid/kite.jpg" } : kite,
+    );
+    const reads = ipc.argsOf("collections.page").length;
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+    await vi.waitFor(() => expect(ipc.argsOf("collections.page").length).toBeGreaterThan(reads));
+
+    if (changed) await vi.waitFor(() => expect(document.body.innerHTML).toContain("kite.jpg"));
+    expect(button("Remove from Films").hasAttribute("disabled")).toBe(true);
+    await act(async () => held.reject({ kind: "unexpected", detail: "disk" }));
+    await vi.waitFor(() => expect(document.querySelector("[role=alert]")).not.toBeNull());
+  },
+);
+
+it("keeps the selected member menu and focus through metadata updates", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+
+  const main = mainCollections([
+    { name: "Films", members: [member(kite)] },
+    { name: "Weekend", members: [] },
+  ]);
+
+  await mountTab();
+  await poster("Kite Season, Movie, 2022");
+  await pick("Kite Season");
+  await act(async () => button("Add to collection").click());
+  await vi.waitFor(() => expect(document.querySelector("[role=menuitem]")).not.toBeNull());
+  const item = document.querySelector<HTMLElement>("[role=menuitem]")!;
+  await act(async () => item.focus());
+  main.find("c0")!.members[0] = member({ ...kite, posterUrl: "https://img.invalid/menu.jpg" });
+  await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+  await vi.waitFor(() => expect(document.body.innerHTML).toContain("menu.jpg"));
+  expect(document.querySelector("[role=menuitem]")).toBe(item);
+  expect(document.activeElement).toBe(item);
+});
+
+it("drops obsolete failed commands when one of the selected identities is deselected", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  mainCollections([{ name: "Films", members: [member(kite), member(canyon)] }]);
+  await mountTab();
+  await poster("Kite Season, Movie, 2022");
+  await pick("Kite Season");
+  await pick("Canyon Hours");
+  const held = ipc.hold("collections.change");
+  await act(async () => button("Remove from Films").click());
+  await act(async () => held.reject({ kind: "unexpected", detail: "disk" }));
+  await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
+  await pick("Kite Season");
+  expect(document.querySelector("[aria-label='1 selected']")).not.toBeNull();
+  expect(document.querySelector("[role=alert]")).toBeNull();
+  expect(() => button("Retry")).toThrow();
+  expect(button("Remove from Films").hasAttribute("disabled")).toBe(false);
 });

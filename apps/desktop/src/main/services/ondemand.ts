@@ -354,8 +354,8 @@ function make(deps: OnDemandDeps) {
       string,
       {
         readonly pending: boolean;
-        readonly stamp?: string;
-        readonly loaded: boolean;
+        stamp?: string;
+        loaded: boolean;
       }
     >();
 
@@ -702,14 +702,10 @@ function make(deps: OnDemandDeps) {
 
           // Unstamped legacy data is still bound to this source token and worker incarnation.
           if (!token.loaded) {
-            const loaded = {
-              pending: false,
-              loaded: true,
-              ...defined({ stamp: status.catalogueStamp }),
-            };
+            // Concurrent initial reads share currency; only acceptance or lifetime changes replace it.
+            token.loaded = true;
 
-            catalogues.set(source.id, loaded);
-            tokens[index] = loaded;
+            if (status.catalogueStamp !== undefined) token.stamp = status.catalogueStamp;
           }
         }
 

@@ -60,7 +60,7 @@ export function useCommitCollection(): (
 /**
  * Reads the collections again once the main process says this viewer's changed, and once the
  * lists of titles changed: they say which members are available, and with what artwork. Lists
- * that marked a member for adults drop what was read before, rather than show it while asking.
+ * marked for adults are reset by the global on-demand listener, even while this view is closed.
  */
 function syncCollections(client: QueryClient): () => void {
   const read = () => {
@@ -77,8 +77,7 @@ function syncCollections(client: QueryClient): () => void {
   });
 
   const stopLists = listen("ondemand.updated", ({ markedForAdults }) => {
-    if (markedForAdults) void client.resetQueries({ queryKey: ["collections"] });
-    else read();
+    if (!markedForAdults) read();
   });
 
   return () => {

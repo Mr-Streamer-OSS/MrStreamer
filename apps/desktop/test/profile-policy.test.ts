@@ -2094,6 +2094,57 @@ it("refuses checkpoints during acceptance and acquisitions crossed by acceptance
   ).toBe("Success");
 });
 
+it.each(["cold", "reconfigure", "source replacement"])(
+  "allows concurrent first collection catalogue snapshots after %s without weakening currency",
+  async (transition) => {
+    const provider = await fakeProvider();
+    const dataDir = await tempDir();
+    let app = runtimeFor(mainLayer(testConfig(dataDir)));
+    onTestFinished(() => app.dispose());
+    let onDemand = await app.runPromise(OnDemand);
+    const roster = await app.runPromise(Roster);
+    const source = await app.runPromise(roster.add(demoLogin(provider)));
+    await app.runPromise(onDemand.refresh(source.id));
+    const before = await app.runPromise(onDemand.catalogueSnapshot([source.id]));
+
+    const loaded = await Promise.all(
+      [1, 2].map(() => app.runPromiseExit(onDemand.catalogueSnapshot([source.id]))),
+    );
+
+    expect(loaded.map((result) => result._tag)).toEqual(["Success", "Success"]);
+
+    if (transition === "cold") {
+      await app.dispose();
+      app = runtimeFor(mainLayer(testConfig(dataDir)));
+      onDemand = await app.runPromise(OnDemand);
+    } else if (transition === "reconfigure") {
+      const settings = await app.runPromise(Settings);
+      await app.runPromise(settings.update({ tmdbKey: "changed-test-key" }));
+      await app.runPromise(onDemand.reconfigure);
+    } else {
+      const subscriptions = await app.runPromise(Subscriptions);
+      await app.runPromise(subscriptions.add(demoLogin(provider)));
+    }
+
+    expect(Effect.runSyncExit(before.current)._tag).toBe("Failure");
+
+    const snapshots = await Promise.all(
+      [1, 2].map(() => app.runPromiseExit(onDemand.catalogueSnapshot([source.id]))),
+    );
+
+    expect(snapshots.map((result) => result._tag)).toEqual(["Success", "Success"]);
+
+    for (const result of snapshots)
+      if (result._tag === "Success")
+        expect(Effect.runSyncExit(result.value.current)._tag).toBe("Success");
+    await app.runPromise(onDemand.refresh(source.id));
+
+    for (const result of snapshots)
+      if (result._tag === "Success")
+        expect(Effect.runSyncExit(result.value.current)._tag).toBe("Failure");
+  },
+);
+
 it("keeps configured metadata available without exposing household progress to kids", async () => {
   const tmdb = await startFakeTmdb();
   onTestFinished(() => tmdb.close());
