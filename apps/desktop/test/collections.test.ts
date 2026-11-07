@@ -21,6 +21,7 @@ const movie: CollectionTitle = {
   titleId: "42",
   name: "Same name",
   year: 2025,
+  adult: false,
 };
 
 const other: CollectionTitle = { ...movie, sourceId: "source-b" };
@@ -28,7 +29,11 @@ const series: CollectionTitle = { ...movie, kind: "series" };
 
 const visibility: CollectionVisibility = {
   owner,
-  sourceIds: ["source-a", "source-b"],
+  sources: [
+    { id: "source-a", key: "account-a" },
+    { id: "source-b", key: "account-b" },
+  ],
+  adult: true,
   approved: "all",
   catalogue: [],
 };
@@ -118,6 +123,125 @@ describe("personal collections", () => {
     ]);
   });
 
+  it("reorders visible members while retaining hidden slots", async () => {
+    const { service, context } = await fixture().open();
+    await seed(service, context);
+    await run(
+      service.change(
+        { ...context, approved: [movie, series] },
+        {
+          kind: "order-members",
+          id: "one",
+          titles: [series, movie],
+        },
+      ),
+    );
+    expect(
+      (await run(service.page(context, "one"))).members.map(
+        (member) => member.kind + member.sourceId,
+      ),
+    ).toEqual(["seriessource-a", "moviesource-b", "moviesource-a"]);
+  });
+
+  it("hides saved adult and unknown titles before labels, counts and pages", async () => {
+    const { service, context } = await fixture().open();
+    await seed(service, context);
+    await run(
+      service.change(context, {
+        kind: "member",
+        id: "one",
+        title: { ...movie, adult: true },
+        present: true,
+      }),
+    );
+    expect(await run(service.page({ ...context, adult: false }, "one"))).toEqual({
+      total: 2,
+      members: [other, series].map((title) => ({ ...title, available: false })),
+    });
+    expect((await run(service.list({ ...context, adult: false })))[0]?.total).toBe(2);
+  });
+
+  it("maps persisted account identity to a reconnected subscription without crossing accounts", async () => {
+    const { open } = fixture();
+    const a = await open();
+    await seed(a.service, a.context);
+    await a.close();
+    const b = await open();
+    const reconnected = { ...b.context, sources: [{ id: "reconnected", key: "account-a" }] };
+    expect(
+      (await run(b.service.page(reconnected, "one"))).members.map((title) => title.sourceId),
+    ).toEqual(["reconnected", "reconnected"]);
+    expect(
+      (
+        await run(
+          b.service.page(
+            { ...reconnected, sources: [{ id: "source-a", key: "unrelated" }] },
+            "one",
+          ),
+        )
+      ).total,
+    ).toBe(0);
+  });
+
+  it("securely erases one account across collections and restart while preserving other memberships", async () => {
+    const { open } = fixture();
+    const a = await open();
+    await seed(a.service, a.context);
+    await seed(a.service, a.context, "two");
+    await run(a.store.erase("account-a"));
+    expect((await run(a.service.page(a.context, "one"))).members).toEqual([
+      { ...other, available: false },
+    ]);
+    await a.close();
+    const b = await open();
+    expect(await run(b.service.list(b.context))).toEqual([
+      { id: "one", name: "one", total: 1 },
+      { id: "two", name: "two", total: 1 },
+    ]);
+  });
+
+  it("retries committed creates through restart without renaming or recreating deleted collections", async () => {
+    const { open } = fixture();
+    const a = await open();
+    const command = { kind: "create", id: "one", name: "Films" } as const;
+    await run(a.service.change(a.context, command));
+    await run(a.service.change(a.context, command));
+    await run(a.service.change(a.context, { kind: "rename", id: "one", name: "Renamed" }));
+    await run(a.service.change(a.context, command));
+    expect((await run(a.service.list(a.context)))[0]?.name).toBe("Renamed");
+    await run(a.service.change(a.context, { kind: "delete", id: "one" }));
+    await a.close();
+    const b = await open();
+    await expect(run(b.service.change(b.context, command))).rejects.toThrow();
+    expect(await run(b.service.list(b.context))).toEqual([]);
+  });
+
+  it("reports recoverable typed failures for duplicate names, missing collections and invalid pages", async () => {
+    const { service, context } = await fixture().open();
+    await run(service.change(context, { kind: "create", id: "one", name: "Café" }));
+
+    const error = async (effect: Effect.Effect<unknown, unknown>) => {
+      const result = await run(Effect.result(effect));
+
+      if (result._tag === "Success") throw new Error("Expected refusal");
+
+      return result.failure;
+    };
+
+    expect(
+      await error(service.change(context, { kind: "create", id: "two", name: "CAFE" })),
+    ).toMatchObject({ error: { kind: "list-name-taken" } });
+    expect(await error(service.page(context, "missing"))).toMatchObject({
+      error: { kind: "no-list" },
+    });
+    expect(await error(service.page(context, "one", -1))).toMatchObject({
+      error: { kind: "list-changed" },
+    });
+    expect(
+      await error(service.change(context, { kind: "rename", id: "missing", name: "Films" })),
+    ).toMatchObject({ error: { kind: "no-list" } });
+  });
+
   it("filters exact mixed source/type versions before counts, labels and page slicing, retaining unavailable identity", async () => {
     const { service, context } = await fixture().open();
     await seed(service, context);
@@ -142,9 +266,13 @@ describe("personal collections", () => {
       total: 0,
       members: [],
     });
-    expect((await run(service.page({ ...restricted, sourceIds: ["source-b"] }, "one"))).total).toBe(
-      1,
-    );
+    expect(
+      (
+        await run(
+          service.page({ ...restricted, sources: [{ id: "source-b", key: "account-b" }] }, "one"),
+        )
+      ).total,
+    ).toBe(1);
     await expect(
       run(service.change(restricted, { kind: "member", id: "one", title: movie, present: false })),
     ).rejects.toThrow();
@@ -192,6 +320,7 @@ describe("personal collections", () => {
 
     const delayed = makeCollections(
       {
+        ...a.store,
         read: Effect.andThen(
           Deferred.succeed(started, undefined),
           Effect.andThen(Deferred.await(release), a.store.read),

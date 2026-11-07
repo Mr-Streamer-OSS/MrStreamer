@@ -8,12 +8,14 @@ import {
   type CollectionPage,
   type CollectionTitle,
 } from "@mrstreamer/contracts/collections";
-import type { CollectionsStore } from "../platform/collections-store.ts";
+import type { SavedSubscription } from "./subscription.ts";
+import type { CollectionsStore, StoredTitle } from "../platform/collections-store.ts";
 
 /** Main-process captured policy only. An empty approval list denies every member. */
 export interface CollectionVisibility {
   readonly owner: ActiveProfile;
-  readonly sourceIds: readonly string[];
+  readonly adult: boolean;
+  readonly sources: readonly Pick<SavedSubscription, "id" | "key">[];
   readonly approved: "all" | readonly CollectionIdentity[];
   /** Exact, ungrouped source rows. Filter before selecting labels or counting members. */
   readonly catalogue: readonly CollectionTitle[];
@@ -44,13 +46,14 @@ export function makeCollections(
   // Copy caller-owned arrays before the first await, including their identity records.
   const capture = (visibility: CollectionVisibility) => {
     check(visibility);
-    const sources = new Set(visibility.sourceIds);
+    const sources = visibility.sources.map((source) => ({ id: source.id, key: source.key }));
 
     const approved =
       visibility.approved === "all" ? null : new Set(visibility.approved.map(collectionKey));
 
     const allows = (title: CollectionIdentity) =>
-      sources.has(title.sourceId) && (approved === null || approved.has(collectionKey(title)));
+      sources.some((source) => source.id === title.sourceId) &&
+      (approved === null || approved.has(collectionKey(title)));
 
     const catalogue = new Map(
       visibility.catalogue.filter(allows).map((title) => [
@@ -61,11 +64,37 @@ export function makeCollections(
           titleId: title.titleId,
           name: title.name,
           year: title.year,
+          adult: title.adult !== false,
         },
       ]),
     );
 
-    return { allows, catalogue };
+    const stored = (title: CollectionIdentity) => {
+      const source = sources.find((source) => source.id === title.sourceId);
+
+      if (!source) throw new Failed({ error: { kind: "no-subscription" } });
+
+      return { account: source.key, kind: title.kind, titleId: title.titleId };
+    };
+
+    const adult = visibility.adult;
+
+    const visible = (saved: StoredTitle) => {
+      const source = sources.find((source) => source.key === saved.account);
+
+      if (!source) return null;
+      const { account: _, ...facts } = saved;
+      const identity = { ...facts, sourceId: source.id };
+
+      if (!allows(identity)) return null;
+      const title = catalogue.get(collectionKey(identity));
+
+      if (!adult && (saved.adult !== false || title?.adult === true)) return null;
+
+      return { ...(title ?? identity), available: title !== undefined };
+    };
+
+    return { allows, catalogue, stored, visible, adult };
   };
 
   const attempt = <A>(run: () => A) =>
@@ -81,10 +110,10 @@ export function makeCollections(
 
       return lists.map((list) => ({
         ...list,
-        members: list.members.filter(captured.allows).map((saved) => {
-          const title = captured.catalogue.get(collectionKey(saved));
+        members: list.members.flatMap((saved) => {
+          const member = captured.visible(saved);
 
-          return { ...(title ?? saved), available: title !== undefined };
+          return member ? [member] : [];
         }),
       }));
     });
@@ -108,11 +137,11 @@ export function makeCollections(
           limit < 1 ||
           limit > 200
         )
-          return yield* refused();
+          return yield* new Failed({ error: { kind: "list-changed" } });
         const lists = yield* read(visibility);
         const list = lists.find((list) => list.id === id);
 
-        if (!list) return yield* refused();
+        if (!list) return yield* new Failed({ error: { kind: "no-list" } });
 
         return { total: list.members.length, members: list.members.slice(offset, offset + limit) };
       }),
@@ -128,8 +157,34 @@ export function makeCollections(
             command.titles.some((title) => !captured.allows(title)))
         )
           return yield* refused();
+
         // The store checks the guard inside its transaction; once committed, the change is stored.
-        yield* store.change(command, current);
+        if (command.kind === "member") {
+          const title = captured.catalogue.get(collectionKey(command.title)) ?? command.title;
+
+          if (!captured.adult && title.adult !== false) return yield* refused();
+          yield* store.change(
+            {
+              ...command,
+              title: {
+                ...captured.stored(command.title),
+                name: title.name,
+                year: title.year,
+                adult: title.adult !== false,
+              },
+            },
+            current,
+          );
+        } else if (command.kind === "order-members") {
+          yield* store.change(
+            {
+              ...command,
+              titles: command.titles.map(captured.stored),
+              visible: (title) => captured.visible(title) !== null,
+            },
+            current,
+          );
+        } else yield* store.change(command, current);
       }),
   };
 }

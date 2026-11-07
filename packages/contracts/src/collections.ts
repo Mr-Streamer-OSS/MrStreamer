@@ -1,6 +1,6 @@
 import type { TitleKind } from "./ondemand.ts";
 
-/** Immutable saved source id, media type and provider id. Display names never identify members. */
+/** Current admitted subscription id, media type and provider id. Display names never identify members. */
 export interface CollectionIdentity {
   readonly sourceId: string;
   readonly kind: TitleKind;
@@ -11,6 +11,8 @@ export interface CollectionIdentity {
 export interface CollectionTitle extends CollectionIdentity {
   readonly name: string;
   readonly year: number | null;
+  /** Missing adult facts are treated as restricted until explicitly known. */
+  readonly adult?: boolean;
 }
 
 /** The most characters a collection's name has, once trimmed. */
@@ -30,7 +32,7 @@ export interface CollectionPage {
   readonly total: number;
 }
 
-/** Commands are atomic. Orders must name every current item exactly once. */
+/** Commands are atomic. Orders name every visible item exactly once; hidden member slots retain their positions. */
 export type CollectionChange =
   | { readonly kind: "create"; readonly id: string; readonly name: string }
   | { readonly kind: "rename"; readonly id: string; readonly name: string }

@@ -6,13 +6,14 @@
 // A member is the exact source version given as `title`, never every title of the same name.
 import { Menu } from "@base-ui/react/menu";
 import { Check, Ellipsis, ListPlus, Plus } from "lucide-react";
-import { useRef, useState, type SyntheticEvent } from "react";
+import { useId, useRef, useState, type SyntheticEvent } from "react";
 import {
   COLLECTION_NAME_MAX,
   type CollectionChange,
   type CollectionTitle,
   type PersonalCollection,
 } from "@mrstreamer/contracts/collections";
+import { failedWith } from "@mrstreamer/core/failure";
 import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
@@ -38,19 +39,50 @@ function useCommit(commit: CommitCollection) {
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<CollectionChange | null>(null);
   const busy = useRef(false);
+  const generation = useRef(0);
+  const [problem, setProblem] = useState<{ text: string; retry: boolean } | null>(null);
+
+  const dismiss = () => {
+    generation.current++;
+    setFailed(null);
+    setProblem(null);
+  };
 
   const run = async (change: CollectionChange) => {
     if (busy.current) return false;
+    const turn = generation.current;
     busy.current = true;
     setSaving(true);
     setFailed(null);
+    setProblem(null);
 
     try {
       await commit(change);
 
       return true;
-    } catch {
-      setFailed(change);
+    } catch (cause) {
+      if (turn === generation.current) {
+        // Failed is a main-process value; renderer adapters usually reject AppFailure.
+        const typed = failedWith(cause).error;
+
+        const actionable =
+          typed.kind === "list-name-taken" ||
+          typed.kind === "no-list" ||
+          typed.kind === "list-changed";
+
+        setFailed(change);
+        setProblem({
+          text:
+            typed.kind === "list-name-taken"
+              ? t("Another list has this name.")
+              : typed.kind === "no-list"
+                ? t("This list is no longer there.")
+                : typed.kind === "list-changed"
+                  ? t("This list changed.")
+                  : t("Couldn't save."),
+          retry: !actionable,
+        });
+      }
 
       return false;
     } finally {
@@ -59,7 +91,7 @@ function useCommit(commit: CommitCollection) {
     }
   };
 
-  return { saving, failed, run, dismiss: () => setFailed(null) };
+  return { saving, failed, problem, run, dismiss };
 }
 
 /**
@@ -69,11 +101,13 @@ function useCommit(commit: CommitCollection) {
 function NameField({
   initial,
   failed,
+  saving,
   onSave,
   onCancel,
 }: {
   initial: string;
-  failed: boolean;
+  saving: boolean;
+  failed: string | null;
   onSave: (name: string) => void;
   onCancel: () => void;
 }) {
@@ -81,6 +115,7 @@ function NameField({
   const cancelled = useRef(false);
 
   const save = () => {
+    if (saving) return;
     const trimmed = name.trim();
 
     if (trimmed === "" || (trimmed === initial && !failed)) onCancel();
@@ -91,10 +126,11 @@ function NameField({
     <div className="flex flex-col gap-1.5 py-px">
       <Input
         compact
+        readOnly={saving}
         autoFocus
         aria-label={t("Collection name")}
         maxLength={COLLECTION_NAME_MAX}
-        aria-invalid={failed || undefined}
+        aria-invalid={!!failed || undefined}
         value={name}
         onFocus={(event) => event.currentTarget.select()}
         onChange={(event) => setName(event.target.value)}
@@ -116,7 +152,7 @@ function NameField({
       />
       {failed && (
         <p role="alert" className="px-3 text-xs text-destructive">
-          {t("Couldn't save.")}
+          {failed}
         </p>
       )}
     </div>
@@ -148,6 +184,7 @@ export function CollectionNav({
   commit: CommitCollection;
 }) {
   const [editing, setEditing] = useState<Editing | null>(null);
+  const edit = useRef<Editing | null>(null);
   const change = useCommit(commit);
   // What takes the focus once the field or question that had it goes: a row's button, or New
   // collection. Both remount after editing, so each takes it from its ref once it is back.
@@ -161,12 +198,21 @@ export function CollectionNav({
 
   const close = (focus: string | typeof NEW) => {
     refocus.current = focus;
+    edit.current = null;
     setEditing(null);
     change.dismiss();
   };
 
+  const begin = (next: Editing) => {
+    change.dismiss();
+    edit.current = next;
+    setEditing(next);
+  };
+
   const save = async (next: CollectionChange, focus: string | typeof NEW) => {
-    if (await change.run(next)) close(focus);
+    const started = edit.current;
+
+    if ((await change.run(next)) && edit.current === started) close(focus);
   };
 
   // A reorder names every collection, in the order shown with this one moved.
@@ -175,7 +221,11 @@ export function CollectionNav({
     void change.run({ kind: "reorder", ids: ids.toSpliced(index + by, 0, id) });
   };
 
-  const failedHere = (kind: CollectionChange["kind"]) => change.failed?.kind === kind;
+  const failedHere = (kind: CollectionChange["kind"]) =>
+    change.failed?.kind === kind &&
+    (kind === "reorder" || ("id" in change.failed && change.failed.id === editing?.id))
+      ? (change.problem?.text ?? null)
+      : null;
 
   return (
     <nav aria-label={t("Collections")} className="flex flex-col gap-0.5 text-[13px] leading-4">
@@ -184,6 +234,7 @@ export function CollectionNav({
           <li key={collection.id}>
             {editing?.kind === "rename" && editing.id === collection.id ? (
               <NameField
+                saving={change.saving}
                 initial={collection.name}
                 failed={failedHere("rename")}
                 onCancel={() => close(collection.id)}
@@ -211,11 +262,12 @@ export function CollectionNav({
                 </button>
                 <CollectionOptions
                   name={collection.name}
+                  saving={change.saving}
                   first={index === 0}
                   last={index === collections.length - 1}
-                  onRename={() => setEditing({ kind: "rename", id: collection.id })}
+                  onRename={() => begin({ kind: "rename", id: collection.id })}
                   onMove={(by) => move(collection.id, index, by)}
-                  onDelete={() => setEditing({ kind: "delete", id: collection.id })}
+                  onDelete={() => begin({ kind: "delete", id: collection.id })}
                 />
               </div>
             )}
@@ -223,6 +275,8 @@ export function CollectionNav({
               <ConfirmDelete
                 name={collection.name}
                 failed={failedHere("delete")}
+                saving={change.saving}
+                retry={change.problem?.retry ?? true}
                 onCancel={() => close(collection.id)}
                 onDelete={() => void save({ kind: "delete", id: collection.id }, NEW)}
               />
@@ -232,6 +286,7 @@ export function CollectionNav({
       </ul>
       {editing?.kind === "create" ? (
         <NameField
+          saving={change.saving}
           initial=""
           failed={failedHere("create")}
           onCancel={() => close(NEW)}
@@ -241,7 +296,7 @@ export function CollectionNav({
         <button
           ref={focusIfDue(NEW)}
           // One id per field, so sending a refused create again cannot make a second collection.
-          onClick={() => setEditing({ kind: "create", id: crypto.randomUUID() })}
+          onClick={() => begin({ kind: "create", id: crypto.randomUUID() })}
           className="flex h-[34px] items-center gap-2 rounded-lg px-3 text-muted-foreground outline-none hover:bg-white/6 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Plus className="size-3.5 flex-none" />
@@ -251,7 +306,7 @@ export function CollectionNav({
       {failedHere("reorder") && (
         // Moving again rebuilds the order from what is shown now, so this offers no Retry.
         <p role="alert" className="flex items-baseline gap-3 px-3 py-1 text-xs">
-          <span className="min-w-0 flex-1 text-destructive">{t("Couldn't save.")}</span>
+          <span className="min-w-0 flex-1 text-destructive">{change.problem?.text}</span>
           <button onClick={change.dismiss} className="flex-none text-white underline">
             {t("Close")}
           </button>
@@ -266,11 +321,13 @@ function CollectionOptions({
   name,
   first,
   last,
+  saving,
   onRename,
   onMove,
   onDelete,
 }: {
   name: string;
+  saving: boolean;
   first: boolean;
   last: boolean;
   onRename: () => void;
@@ -283,6 +340,7 @@ function CollectionOptions({
   return (
     <Menu.Root>
       <Menu.Trigger
+        disabled={saving}
         aria-label={label}
         title={label}
         className="grid size-8 flex-none place-items-center rounded-full text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-popup-open:opacity-100"
@@ -324,11 +382,15 @@ function CollectionOptions({
 function ConfirmDelete({
   name,
   failed,
+  saving,
+  retry,
   onCancel,
   onDelete,
 }: {
   name: string;
-  failed: boolean;
+  failed: string | null;
+  saving: boolean;
+  retry: boolean;
   onCancel: () => void;
   onDelete: () => void;
 }) {
@@ -346,15 +408,17 @@ function ConfirmDelete({
       }}
     >
       <span role={failed ? "alert" : undefined} className={cn(failed && "text-destructive")}>
-        {failed ? t("Couldn't save.") : question}
+        {failed || question}
       </span>
       <div className="flex items-center gap-2">
         <Button size="sm" autoFocus onClick={onCancel}>
           {t("Cancel")}
         </Button>
-        <Button size="sm" variant="destructive" onClick={onDelete}>
-          {failed ? t("Retry") : t("Delete collection")}
-        </Button>
+        {(!failed || retry) && (
+          <Button size="sm" variant="destructive" disabled={saving} onClick={onDelete}>
+            {failed ? t("Retry") : t("Delete collection")}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -378,11 +442,14 @@ export function CollectionMembership({
 }) {
   const change = useCommit(commit);
   const [creating, setCreating] = useState<string | null>(null);
+  const draft = useRef<string | null>(null);
+  const labelId = useId();
   // The button comes back after the new collection's field, and takes the focus back from it.
   const refocus = useRef(false);
   const label = t("Collections for {name}", { name: title.name });
 
   const finish = () => {
+    draft.current = null;
     setCreating(null);
     change.dismiss();
     refocus.current = true;
@@ -392,6 +459,8 @@ export function CollectionMembership({
   // refused add then offers Retry below the button like any other tick.
   const create = async (id: string, name: string) => {
     if (!(await change.run({ kind: "create", id, name }))) return;
+
+    if (draft.current !== id) return;
     finish();
     await change.run({ kind: "member", id, title, present: true });
   };
@@ -400,8 +469,9 @@ export function CollectionMembership({
     return (
       <div className="w-[15rem]">
         <NameField
+          saving={change.saving}
           initial=""
-          failed={change.failed?.kind === "create"}
+          failed={change.failed?.kind === "create" ? (change.problem?.text ?? null) : null}
           onCancel={finish}
           onSave={(name) => void create(creating, name)}
         />
@@ -418,12 +488,15 @@ export function CollectionMembership({
             node.focus();
           }}
           aria-label={label}
+          aria-labelledby={labelId}
           render={<Button variant="secondary" size="lg" aria-busy={change.saving || undefined} />}
         >
           {memberOf.size > 0 ? <Check /> : <ListPlus />}
-          {memberOf.size > 0
-            ? t("In {count} collections", { count: memberOf.size })
-            : t("Add to collection")}
+          <span id={labelId}>
+            {memberOf.size > 0
+              ? t("In {count} collections", { count: memberOf.size })
+              : t("Add to collection")}
+          </span>
         </Menu.Trigger>
         <Menu.Portal>
           <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
@@ -439,6 +512,7 @@ export function CollectionMembership({
               {collections.map((collection) => (
                 <Menu.CheckboxItem
                   key={collection.id}
+                  disabled={change.saving}
                   checked={memberOf.has(collection.id)}
                   onCheckedChange={(present) =>
                     void change.run({ kind: "member", id: collection.id, title, present })
@@ -456,7 +530,13 @@ export function CollectionMembership({
               {collections.length > 0 && <Menu.Separator className="mx-1 my-1 h-px bg-white/12" />}
               <Menu.Item
                 closeOnClick
-                onClick={() => setCreating(crypto.randomUUID())}
+                disabled={change.saving}
+                onClick={() => {
+                  change.dismiss();
+                  const id = crypto.randomUUID();
+                  draft.current = id;
+                  setCreating(id);
+                }}
                 className={cn(menuItem, "flex h-9 items-center gap-2.5 px-2")}
               >
                 <Plus className="size-3.5 flex-none" />
@@ -468,12 +548,16 @@ export function CollectionMembership({
       </Menu.Root>
       {change.failed?.kind === "member" && (
         <p role="alert" className="flex items-baseline gap-3 text-sm">
-          <span className="text-destructive">{t("Couldn't save.")}</span>
+          <span className="text-destructive">{change.problem?.text}</span>
           <button
-            onClick={() => change.failed && void change.run(change.failed)}
+            onClick={() =>
+              change.problem?.retry
+                ? change.failed && void change.run(change.failed)
+                : change.dismiss()
+            }
             className="text-white underline underline-offset-4"
           >
-            {t("Retry")}
+            {change.problem?.retry ? t("Retry") : t("Close")}
           </button>
         </p>
       )}
