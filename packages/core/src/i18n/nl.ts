@@ -3,6 +3,46 @@
 import type { Translation } from "../i18n.ts";
 
 export const nl: Translation = {
+  "Viewing preferences could not be read. Repair the file or switch profiles.":
+    "De kijkvoorkeuren konden niet worden gelezen. Herstel het bestand of wissel van profiel.",
+  "This viewing profile is unavailable or being deleted.":
+    "Dit kijkprofiel is niet beschikbaar of wordt verwijderd.",
+  "This viewing profile is being deleted.": "Dit kijkprofiel wordt verwijderd.",
+  "Profile switching requires the installation consent owner.":
+    "Profielwisselen vereist de toestemmingsinstellingen van deze installatie.",
+  "Viewing profile changed; retry this request.": "Kijkprofiel gewijzigd. Probeer het opnieuw.",
+  "Viewing profile configuration did not finish; select the profile again to retry.":
+    "Het kijkprofiel is niet volledig ingesteld. Selecteer het opnieuw.",
+  "This profile admission has ended; retry the operation.":
+    "Deze profielaanvraag is verlopen. Probeer het opnieuw.",
+  "A profile name must contain 1 to 80 characters.":
+    "Een profielnaam moet 1 tot 80 tekens bevatten.",
+  "Profile switching is not enabled until interactive isolation is ready.":
+    "Profielwisselen is nog niet beschikbaar.",
+  "Finish deleting the pending profile before erasing a source.":
+    "Voltooi het verwijderen van het profiel voordat je een bron wist.",
+  "Profile isolation is not ready.": "Profielen zijn nog niet beschikbaar.",
+  "Viewing profile changed; retry this subtitle choice.":
+    "Kijkprofiel gewijzigd. Kies de ondertiteling opnieuw.",
+
+  "Playback could not be saved. Try again.":
+    "Afspelen kon niet worden opgeslagen. Probeer het opnieuw.",
+  "Viewing profile changed. Try again.": "Kijkprofiel gewijzigd. Probeer het opnieuw.",
+  Default: "Standaard",
+  Profiles: "Profielen",
+  "Profile: {name}": "Profiel: {name}",
+  "Profile name": "Profielnaam",
+  "New profile": "Nieuw profiel",
+  "Adding…": "Toevoegen…",
+  "Switching…": "Wisselen…",
+  "Deleting…": "Verwijderen…",
+  "Delete {name}": "{name} verwijderen",
+  "Retry deleting {name}": "{name} opnieuw verwijderen",
+  "Deleting didn't finish": "Verwijderen is niet afgerond",
+  "Delete {name}? Their lists, progress and settings go. Recordings and downloads stay.":
+    "{name} verwijderen? Lijsten, voortgang en instellingen verdwijnen. Opnames en downloads blijven.",
+  "Recordings and downloads are shared. Lists, progress and favourites stay with each profile.":
+    "Opnames en downloads zijn gedeeld. Lijsten, voortgang en favorieten blijven bij elk profiel.",
   "Update to {version}": "Bijwerken naar {version}",
   "You have {version}": "Je hebt {version}",
   "Find a setting": "Zoek een instelling",

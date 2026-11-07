@@ -2,6 +2,7 @@
 // provider file it was made from, but a finished copy needs no subscription: it plays from disk,
 // with its own details, artwork and progress, after its subscription expired or was removed. Media paths,
 // addresses and logins stay in the main process; artwork comes through the app's own scheme.
+import type { ActiveProfile } from "./profiles.ts";
 import type { AppError } from "./errors.ts";
 import type { RawTitleRef } from "./ondemand.ts";
 import type { AudioTrack, StreamFailure, SubtitleTrack } from "./playback.ts";
@@ -109,6 +110,8 @@ export interface DownloadSeries {
 export interface DownloadList {
   /** Desktop managed-folder state; older and mobile lists may omit it. */
   readonly storage?: DownloadFolder;
+  /** The personal progress owner captured before listing household copies. Absent on older transports. */
+  readonly profile?: ActiveProfile;
   readonly items: readonly Download[];
   /**
    * What each series the items name (`Download.series`) listed when the latest of its downloads
@@ -128,6 +131,8 @@ export interface DownloadList {
 
 /** What plays a downloaded copy: like a title session, of a file on this computer. */
 export interface CopySession {
+  /** Captured when the copy was opened; old clients may omit it. */
+  readonly owner?: ActiveProfile;
   readonly sessionId: string;
   readonly copy: string;
   /** Loopback URL. Carries no path. */

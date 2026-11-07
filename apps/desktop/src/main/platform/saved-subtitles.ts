@@ -1,3 +1,4 @@
+import { t } from "@mrstreamer/core/i18n";
 // Downloaded cues and timing belong to an exact listed file, never a movie name or TMDB id.
 //
 // Each result also notes which bytes it was saved for, when the playback that saved it could prove
@@ -5,6 +6,9 @@
 // (`duplicate`). The proof is written with the result, in one transaction, by whatever writes its
 // cues or timing; a write without proof leaves it with none, so no earlier file's proof stays on
 // cues chosen or timed for bytes nobody proved.
+import { createHash } from "node:crypto";
+import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
+import { AdmittedSettings } from "../services/preferences.ts";
 import type { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_SUBTITLE_TIMING,
@@ -71,6 +75,13 @@ const Proof = lazy(() =>
 
 /** Also prepared by account erasure when no playback service has run. */
 export function prepareSavedSubtitles(db: DatabaseSync): void {
+  // Profile removal owns exact-owner cleanup, including before any subtitle operation runs.
+  db.exec("drop trigger if exists delete_profile_subtitle_choices");
+  db.exec(`create table if not exists profile_subtitle_choices (
+    profile_id text not null, account text not null, kind text not null, id text not null,
+    source_stamp text not null, listing_key text not null, choice text not null,
+    primary key (profile_id, account, kind, id, source_stamp, listing_key)
+  )`);
   db.exec(`create table if not exists saved_subtitles (
     account text not null,
     kind text not null,
@@ -90,6 +101,9 @@ export function prepareSavedSubtitles(db: DatabaseSync): void {
     source_stamp text not null, listing_key text not null, result_key text not null,
     proof text not null, primary key (account, kind, id, source_stamp, listing_key, result_key)
   )`);
+  db.exec(`create trigger if not exists erase_subtitle_choices after delete on saved_subtitles
+    begin delete from profile_subtitle_choices where account = old.account and kind = old.kind and id = old.id
+    and source_stamp = old.source_stamp and listing_key = old.listing_key; end`);
 }
 
 export class SavedSubtitles extends Context.Service<
@@ -98,7 +112,7 @@ export class SavedSubtitles extends Context.Service<
     read(file: SubtitleFile): Effect.Effect<SavedSubtitle | null, Failed>;
     result(file: SubtitleFile, key: string): Effect.Effect<SavedSubtitle | null, Failed>;
     /**
-     * Makes `subtitle` the file's selected result, saved for the bytes `proof` says playback
+     * Makes `subtitle` the admitted viewer's selected result, saved for the bytes `proof` says playback
      * read; without a proof, for none.
      */
     remember(
@@ -116,7 +130,7 @@ export class SavedSubtitles extends Context.Service<
       proof?: FileProof | null,
     ): Effect.Effect<void, Failed>;
     /**
-     * Makes a saved result the file's selected and shown one: the selected row when `selection`
+     * Makes a saved result the admitted viewer's selected and shown one: the selected row when `selection`
      * names it, else the cached result of that key with its own timing. Fails when neither holds it.
      */
     show(file: SubtitleFile, selection?: string): Effect.Effect<void, Failed>;
@@ -170,8 +184,13 @@ export const savedSubtitlesLayer = Layer.effect(
         do update set saved = excluded.saved`);
 
       const pruneResults = db.prepare(`delete from saved_subtitle_results where rowid in (
-        select rowid from saved_subtitle_results where
+        select rowid from saved_subtitle_results as result where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?
+        and result_key != ''
+        and not exists (select 1 from profile_subtitle_choices as choice where
+          choice.account = result.account and choice.kind = result.kind and choice.id = result.id
+          and choice.source_stamp = result.source_stamp and choice.listing_key = result.listing_key
+          and json_extract(choice.choice, '$.key') = result.result_key)
         order by rowid desc limit -1 offset 8)`);
 
       const touchResult = db.prepare(`delete from saved_subtitle_results where
@@ -233,18 +252,12 @@ export const savedSubtitlesLayer = Layer.effect(
       const identity = (file: SubtitleFile) =>
         [file.account, file.kind, file.id, file.sourceStamp, file.listingKey] as const;
 
-      const read = (file: SubtitleFile): Stored | null => {
+      const legacyRead = (file: SubtitleFile): Stored | null => {
         const row = select.get(...identity(file));
 
         if (!row) return null;
 
-        try {
-          const parsed = Stored()(JSON.parse(String(row.saved)));
-
-          return parsed instanceof type.errors ? null : parsed;
-        } catch {
-          return null;
-        }
+        return Stored().assert(JSON.parse(String(row.saved)));
       };
 
       /** A result as the cache keeps it: cues, timing and key. Whether it shows is the selection's. */
@@ -264,14 +277,113 @@ export const savedSubtitlesLayer = Layer.effect(
 
         if (!row) return null;
 
-        try {
-          const parsed = SavedSubtitle()(JSON.parse(String(row.saved)));
-
-          return parsed instanceof type.errors ? null : parsed;
-        } catch {
-          return null;
-        }
+        return SavedSubtitle().assert(JSON.parse(String(row.saved)));
       };
+
+      // Choices hold references only. Cue bytes, proof and timing stay in the file cache.
+      const Choice = type({ key: "string | null", "selection?": "string", "shown?": "false" });
+
+      const internalKey = (saved: Stored) =>
+        saved.resultKey ??
+        (saved.subtitle
+          ? createHash("sha256").update(JSON.stringify(saved.subtitle)).digest("hex")
+          : null);
+
+      const choiceRow = db.prepare(`select choice from profile_subtitle_choices where
+        profile_id = ? and account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?`);
+
+      const writeChoice = db.prepare(`insert into profile_subtitle_choices
+        (profile_id, account, kind, id, source_stamp, listing_key, choice) values (?, ?, ?, ?, ?, ?, ?)
+        on conflict (profile_id, account, kind, id, source_stamp, listing_key) do update set choice = excluded.choice`);
+
+      const choose = (owner: string, file: SubtitleFile, saved: Stored) =>
+        writeChoice.run(
+          owner,
+          ...identity(file),
+          JSON.stringify({
+            key: internalKey(saved),
+            ...defined({ selection: saved.resultKey, shown: saved.shown }),
+          }),
+        );
+
+      const seedDefault = (file: SubtitleFile) => {
+        const row = choiceRow.get(DEFAULT_PROFILE_ID, ...identity(file));
+        const legacy = legacyRead(file);
+
+        // Older builds kept embedded timing in the selected row. Migrate it once to the
+        // shared file-track slot before Default's downloaded choice can replace that row.
+        // A null Default choice instead marks a compatibility placeholder, not saved file timing.
+        if (
+          legacy?.subtitle === null &&
+          (!row || JSON.parse(String(row.choice)) !== null) &&
+          !cachedResult(file, NO_RESULT)
+        )
+          rememberResult.run(...identity(file), NO_RESULT, JSON.stringify(result(legacy)));
+
+        if (row) return;
+
+        if (!legacy) {
+          writeChoice.run(DEFAULT_PROFILE_ID, ...identity(file), "null");
+
+          return;
+        }
+
+        const key = internalKey(legacy);
+
+        if (key) {
+          rememberResult.run(...identity(file), key, JSON.stringify(result(legacy)));
+          // Legacy unkeyed cues used the file-track slot before personal choices had references.
+          const proof = legacy.resultKey === undefined ? proofOf(file, NO_RESULT) : null;
+
+          if (proof) writeProof.run(...identity(file), key, JSON.stringify(proof));
+        }
+
+        choose(DEFAULT_PROFILE_ID, file, legacy);
+      };
+
+      const read = (file: SubtitleFile, owner: string): Stored | null => {
+        seedDefault(file);
+        const row = choiceRow.get(owner, ...identity(file));
+
+        if (!row) return cachedResult(file, NO_RESULT);
+        const parsed: unknown = JSON.parse(String(row.choice));
+
+        if (parsed === null) return cachedResult(file, NO_RESULT);
+        const choice = Choice.assert(parsed);
+        const held = cachedResult(file, choice.key ?? NO_RESULT);
+
+        if (!held) return null;
+
+        return {
+          subtitle: choice.key === null ? null : held.subtitle,
+          timing: held.timing,
+          ...defined({ resultKey: choice.selection, shown: choice.shown }),
+        };
+      };
+
+      const personal = <A>(work: (owner: string) => A) =>
+        Effect.gen(function* () {
+          const admitted = yield* Effect.serviceOption(AdmittedSettings);
+
+          return yield* attempt(() => {
+            if (admitted._tag === "Some" && !admitted.value.current())
+              throw new Error(t("Viewing profile changed; retry this subtitle choice."));
+            const owner = admitted._tag === "Some" ? admitted.value.owner.id : DEFAULT_PROFILE_ID;
+
+            if (
+              db
+                .prepare("select 1 from sqlite_master where type = 'table' and name = 'profiles'")
+                .get()
+            ) {
+              const registered = db.prepare("select * from profiles where id = ?").get(owner);
+
+              if (!registered || registered["deleting"] === 1)
+                throw new Error(t("This viewing profile is unavailable or being deleted."));
+            }
+
+            return transaction(db, () => work(owner));
+          });
+        });
 
       /**
        * Saves the file's selected row. `proved` says which bytes its cues and timing are of now,
@@ -280,37 +392,45 @@ export const savedSubtitlesLayer = Layer.effect(
       const save = (
         file: SubtitleFile,
         saved: Stored,
+        owner: string,
         proved?: { readonly proof: FileProof | null },
       ) => {
         const checked = Stored().assert(saved);
         const proof = proved?.proof ? JSON.stringify(Proof().assert(proved.proof)) : null;
-        const key = checked.resultKey ?? NO_RESULT;
-        transaction(db, () => {
-          removeObsoleteResults.run(...identity(file));
-          removeObsoleteProofs.run(...identity(file));
+        const key = internalKey(checked) ?? NO_RESULT;
+        seedDefault(file);
+        db.prepare(
+          `delete from profile_subtitle_choices where account = ? and kind = ? and id = ?
+          and (source_stamp != ? or listing_key != ?)`,
+        ).run(...identity(file));
+        removeObsoleteResults.run(...identity(file));
+        removeObsoleteProofs.run(...identity(file));
 
-          if (proved) {
-            removeProof.run(...identity(file), key);
+        if (proved) {
+          removeProof.run(...identity(file), key);
 
-            if (proof !== null) writeProof.run(...identity(file), key, proof);
-          }
+          if (proof !== null) writeProof.run(...identity(file), key, proof);
+        }
 
-          write.run(...identity(file), JSON.stringify(checked));
+        choose(owner, file, checked);
 
-          if (checked.resultKey) {
-            touchResult.run(...identity(file), checked.resultKey);
-            rememberResult.run(
-              ...identity(file),
-              checked.resultKey,
-              JSON.stringify(result(checked)),
-            );
-            pruneResults.run(...identity(file));
-          }
-        });
+        // The empty result key holds shared embedded timing, independently of Default's
+        // legacy selected row. It is not a downloaded result and never ages out with those.
+        touchResult.run(...identity(file), key);
+        rememberResult.run(...identity(file), key, JSON.stringify(result(checked)));
+        pruneResults.run(...identity(file));
+
+        // Older builds read this row as Default's choice. Other viewers only change references
+        // and shared result timing; compose Default again after updating those shared bytes.
+        const legacy = owner === DEFAULT_PROFILE_ID ? checked : read(file, DEFAULT_PROFILE_ID);
+        write.run(
+          ...identity(file),
+          JSON.stringify(legacy ?? { subtitle: null, timing: checked.timing }),
+        );
       };
 
       return {
-        read: (file: SubtitleFile) => attempt(() => visible(read(file))),
+        read: (file: SubtitleFile) => personal((owner) => visible(read(file, owner))),
         result: (file: SubtitleFile, key: string) => attempt(() => cachedResult(file, key)),
         remember: (
           file: SubtitleFile,
@@ -319,8 +439,8 @@ export const savedSubtitlesLayer = Layer.effect(
           timing?: SubtitleTiming,
           proof: FileProof | null = null,
         ) =>
-          attempt(() => {
-            const previous = read(file);
+          personal((owner) => {
+            const previous = read(file, owner);
             save(
               file,
               {
@@ -333,6 +453,7 @@ export const savedSubtitlesLayer = Layer.effect(
                 subtitle,
                 ...defined({ resultKey: key || undefined }),
               },
+              owner,
               { proof },
             );
           }),
@@ -342,22 +463,24 @@ export const savedSubtitlesLayer = Layer.effect(
           selection?: string,
           proof: FileProof | null = null,
         ) =>
-          attempt(() => {
-            const previous = read(file);
+          personal((owner) => {
+            const previous = read(file, owner);
 
             if (selection !== undefined && previous?.resultKey !== selection)
               throw new Error("The selected subtitle changed before its timing was saved.");
-            save(file, { ...previous, timing, subtitle: previous?.subtitle ?? null }, { proof });
+            save(file, { ...previous, timing, subtitle: previous?.subtitle ?? null }, owner, {
+              proof,
+            });
           }),
         show: (file: SubtitleFile, selection?: string) =>
-          attempt(() => {
-            const previous = read(file);
+          personal((owner) => {
+            const previous = read(file, owner);
 
             if (previous?.subtitle && previous.resultKey === selection) {
               // Only `false` is stored: a row without the mark shows.
               const { shown, ...row } = previous;
 
-              if (shown === false) save(file, row);
+              if (shown === false) save(file, row, owner);
 
               return;
             }
@@ -366,14 +489,18 @@ export const savedSubtitlesLayer = Layer.effect(
 
             if (!selection || !held?.subtitle)
               throw new Error("That subtitle is no longer saved for this file.");
-            save(file, { timing: held.timing, subtitle: held.subtitle, resultKey: selection });
+            save(
+              file,
+              { timing: held.timing, subtitle: held.subtitle, resultKey: selection },
+              owner,
+            );
           }),
         hide: (file: SubtitleFile) =>
-          attempt(() => {
-            const previous = read(file);
+          personal((owner) => {
+            const previous = read(file, owner);
 
             if (previous?.subtitle && previous.shown !== false)
-              save(file, { ...previous, shown: false });
+              save(file, { ...previous, shown: false }, owner);
           }),
         duplicate: (
           from: SubtitleFile,
@@ -394,10 +521,27 @@ export const savedSubtitlesLayer = Layer.effect(
               );
             };
 
+            seedDefault(from);
+
+            const choices = db
+              .prepare(
+                `select profile_id, choice from profile_subtitle_choices where
+              account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?`,
+              )
+              .all(...identity(from))
+              .filter((each) => {
+                const parsed: unknown = JSON.parse(String(each.choice));
+
+                if (parsed === null) return true;
+                const choice = Choice.assert(parsed);
+
+                return proven(choice.key ?? NO_RESULT);
+              });
+
             const row = select.get(...identity(from));
 
             const selected =
-              row && proven(read(from)?.resultKey ?? NO_RESULT) ? String(row.saved) : null;
+              row && proven(internalKey(legacyRead(from)!) ?? NO_RESULT) ? String(row.saved) : null;
 
             const results = selectResults
               .all(...identity(from))
@@ -405,9 +549,18 @@ export const savedSubtitlesLayer = Layer.effect(
 
             transaction(db, () => {
               removeAll.run(to.account, to.kind, to.id);
+              db.prepare(
+                `delete from profile_subtitle_choices where account = ? and kind = ? and id = ?`,
+              ).run(to.account, to.kind, to.id);
               removeAllResults.run(to.account, to.kind, to.id);
 
               if (selected !== null) write.run(...identity(to), selected);
+              // A copy's shared row is not a legacy Default choice, even if only another
+              // viewer's result was proven for its bytes.
+              writeChoice.run(DEFAULT_PROFILE_ID, ...identity(to), "null");
+
+              for (const each of choices)
+                writeChoice.run(String(each.profile_id), ...identity(to), String(each.choice));
 
               for (const each of results) {
                 rememberResult.run(...identity(to), String(each.result_key), String(each.saved));
@@ -420,6 +573,10 @@ export const savedSubtitlesLayer = Layer.effect(
           attempt(() => {
             transaction(db, () => {
               remove.run(...identity(file));
+              db.prepare(
+                `delete from profile_subtitle_choices where
+                account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?`,
+              ).run(...identity(file));
               // With no replacement selected, Forget also clears caches from older identities.
               removeResults.run(...identity(file), file.account, file.kind, file.id);
               removeProofs.run(file.account, file.kind, file.id);

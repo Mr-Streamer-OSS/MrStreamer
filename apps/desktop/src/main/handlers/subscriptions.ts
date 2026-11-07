@@ -1,8 +1,20 @@
 import * as Effect from "effect/Effect";
+import type { IpcMethod } from "@mrstreamer/contracts/ipc";
 import type { HandlersFor } from "../ipc.ts";
 import type { Subscriptions } from "../services/subscription.ts";
 import type { Roster } from "../services/roster.ts";
 import type { Settings } from "../services/preferences.ts";
+
+/** Household writes share the subscription lock with removal, which drains personal permits. */
+export const householdMutations: ReadonlySet<IpcMethod> = new Set<
+  keyof HandlersFor<"subscription" | "playlist">
+>([
+  "subscription.add",
+  "subscription.update",
+  "subscription.remove",
+  "subscription.recheck",
+  "playlist.map",
+]);
 
 export function subscriptionHandlers({
   subscriptions,

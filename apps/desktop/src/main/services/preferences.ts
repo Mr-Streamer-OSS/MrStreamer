@@ -1,6 +1,8 @@
 import type { Json } from "@mrstreamer/contracts/json";
+import { t } from "@mrstreamer/core/i18n";
 
-import { type } from "arktype";
+import { type, type Type } from "arktype";
+import { readFile } from "node:fs/promises";
 import { LiveDiscovery, RememberedLiveBrowse } from "@mrstreamer/contracts/live-browse";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { homeRows } from "@mrstreamer/core/home/rows";
@@ -23,6 +25,9 @@ import {
 // may have gone while it waited. The interface language is kept beside them, and changed only
 // through `setInterfaceLanguage`.
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
+import { profileDirectory } from "../platform/profile-store.ts";
 import type { LanguageChoice } from "@mrstreamer/contracts/language";
 import {
   defaultPreferences,
@@ -84,6 +89,39 @@ async function readStored(path: string): Promise<Stored | null> {
   return { ...data, ...parsed };
 }
 
+/** Private files have no legacy downgrade contract: only a missing file starts with defaults. */
+async function readPrivatePreferences<T>(
+  path: string,
+  schema: Type<T>,
+): Promise<Type<T>["infer"] | null> {
+  let bytes: string;
+
+  try {
+    bytes = await readFile(path, "utf8");
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return null;
+    throw cause;
+  }
+
+  // Parser diagnostics can echo stored values, including the viewer's private API key.
+  try {
+    const data: unknown = JSON.parse(bytes);
+    const parsed = schema(data);
+
+    if (!(parsed instanceof type.errors)) return parsed;
+  } catch {
+    // Preserve the failed file, but never include its contents in an error or log.
+  }
+
+  throw new Error(t("Viewing preferences could not be read. Repair the file or switch profiles."));
+}
+
+/** Installation consent remains owned by Analytics, including while another viewer is active. */
+export interface InstallationConsent {
+  readonly read: Effect.Effect<boolean>;
+  readonly write: (enabled: boolean) => Effect.Effect<void>;
+}
+
 export class Settings extends Context.Service<
   Settings,
   {
@@ -133,15 +171,30 @@ export class Settings extends Context.Service<
     return saved?.interfaceLanguage;
   }
 
-  /** Settings in `dataDir`. */
+  /** Default's settings keep their original paths. */
   static readonly layer = (dataDir: string, usage?: UsageObservers) =>
-    Layer.effect(Settings, make(dataDir, usage));
+    Layer.effect(Settings, make(dataDir, usage, DEFAULT_PROFILE_ID));
+
+  /** Private viewing settings with a live overlay from the installation's consent owner. */
+  static readonly profileLayer = (
+    dataDir: string,
+    profileId: string,
+    consent: InstallationConsent,
+    usage?: UsageObservers,
+  ) =>
+    Layer.effect(
+      Settings,
+      Effect.map(make(dataDir, usage, profileId), (settings) =>
+        withInstallationConsent(settings, consent),
+      ),
+    );
 }
 
-function make(dataDir: string, usage?: UsageObservers) {
+function make(dataDir: string, usage: UsageObservers | undefined, profileId: string) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
-    const path = join(dataDir, "preferences.json");
+    const personalDir = profileDirectory(dataDir, profileId);
+    const path = join(personalDir, "preferences.json");
     const one = yield* Semaphore.make(1);
     let current: Stored | null = null;
     /** What the viewer left each added subscription at, by its id, as last read or written. */
@@ -149,7 +202,10 @@ function make(dataDir: string, usage?: UsageObservers) {
 
     /** The file as last read or written. Only runs while holding `one`. */
     const stored = Effect.promise(async () => {
-      current ??= (await readStored(path)) ?? {
+      // Default retains the format handling older releases use at its original path.
+      current ??= (await (profileId === DEFAULT_PROFILE_ID
+        ? readStored(path)
+        : readPrivatePreferences(path, Stored()))) ?? {
         ...defaultPreferences,
         ...defaultSubscriptionPreferences,
       };
@@ -197,7 +253,14 @@ function make(dataDir: string, usage?: UsageObservers) {
     ) => one.withPermits(1)(Effect.flatMap(saved(subscriptionId), run));
 
     const addedPath = (subscription: SavedSubscription) =>
-      join(subscription.dir, "preferences.json");
+      profileId === DEFAULT_PROFILE_ID
+        ? join(subscription.dir, "preferences.json")
+        : join(
+            personalDir,
+            "subscriptions",
+            createHash("sha256").update(subscription.id).digest("hex"),
+            "preferences.json",
+          );
 
     /** Commits the added source's file and cached value together while holding `one`. */
     const saveAdded = (subscription: SavedSubscription, next: SubscriptionPreferences) =>
@@ -213,7 +276,9 @@ function make(dataDir: string, usage?: UsageObservers) {
       Effect.promise(async () => {
         const kept =
           added.get(subscription.id) ??
-          (await readJsonFile(addedPath(subscription), SubscriptionPreferences())) ??
+          (await (profileId === DEFAULT_PROFILE_ID
+            ? readJsonFile(addedPath(subscription), SubscriptionPreferences())
+            : readPrivatePreferences(addedPath(subscription), SubscriptionPreferences()))) ??
           defaultSubscriptionPreferences;
 
         added.set(subscription.id, kept);
@@ -505,4 +570,56 @@ function discoverySelection(selection: LiveDiscovery): LiveDiscovery {
     case "all":
       return { kind: "all" };
   }
+}
+
+/** Overlay the live installation owner; no profile file stores or copies consent. */
+export function withInstallationConsent(
+  settings: Settings["Service"],
+  consent: InstallationConsent,
+): Settings["Service"] {
+  const get = Effect.gen(function* () {
+    const personal = yield* settings.get;
+
+    return { ...personal, analyticsEnabled: yield* consent.read };
+  });
+
+  return {
+    ...settings,
+    get,
+    update: (patch) =>
+      Effect.gen(function* () {
+        const { analyticsEnabled, ...personal } = patch;
+
+        if (analyticsEnabled !== undefined) yield* consent.write(analyticsEnabled);
+
+        if (Object.keys(personal).length > 0) yield* settings.update(personal);
+
+        return yield* get;
+      }),
+  };
+}
+
+/** Captured preferences for shared catalogue reads admitted by the window. */
+export class AdmittedSettings extends Context.Service<
+  AdmittedSettings,
+  {
+    readonly owner: ActiveProfile;
+    readonly settings: Settings["Service"];
+    readonly current: () => boolean;
+  }
+>()("mrstreamer/AdmittedSettings") {}
+
+/** Shared catalogue facts may be reused; an admitted viewer's preferences are read only for it. */
+export function viewingPreferences(fallback: Settings["Service"]) {
+  return Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) => {
+    if (admitted._tag === "None") return fallback.get;
+
+    return Effect.andThen(
+      Effect.sync(() => {
+        if (!admitted.value.current())
+          throw new Error("Viewing profile changed; retry this catalogue read.");
+      }),
+      admitted.value.settings.get,
+    );
+  });
 }

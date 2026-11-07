@@ -47,7 +47,7 @@ export function downloadHandlers({
     "downloads.pauseAll": () => Effect.as(downloads.pauseAll, null),
     "downloads.resumeAll": () => Effect.as(downloads.resumeAll, null),
     "downloads.move": ({ id, by }) => Effect.as(downloads.move(id, by), null),
-    "downloads.recordProgress": ({ id, position, duration }) =>
-      Effect.as(downloads.recordProgress(id, position, duration), null),
+    "downloads.recordProgress": ({ id, position, duration, owner }) =>
+      Effect.as(downloads.recordProgress(id, position, duration, owner), null),
   };
 }

@@ -20,7 +20,8 @@
 // row, with Cancel move, which keeps its original before commit or the committed moved copy after
 // commit, and stops the remaining selection.
 //   With no subscription saved the page stands alone, opened from Connect: its bar has only
-//   Downloads, and Recordings once any is kept, and Add subscription goes back to the form.
+//   Downloads, and Recordings once any is kept, Add subscription, which goes back to the form,
+//   and the profile avatar.
 import { useMutation } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Check, ChevronDown, Minus, Pause, Play } from "lucide-react";
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -40,6 +41,7 @@ import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { BarFrame, Brand, PageButton, WindowBar } from "../../components/WindowBar.tsx";
 import { statusLine, transferred, useDownloads, watchOffline } from "../../lib/downloads.ts";
+import { ProfileMenu } from "../profiles/ProfileMenu.tsx";
 import { useAnyRecording } from "../recordings/recordings.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
@@ -365,6 +367,7 @@ export function OfflineBar() {
         <Button variant="ghost" size="sm" onClick={() => openView("home")}>
           {t("Add subscription")}
         </Button>
+        <ProfileMenu />
       </div>
     </BarFrame>
   );

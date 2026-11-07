@@ -1,6 +1,12 @@
 // Composition root: creates the window and wires the services to IPC.
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
+import {
+  DEFAULT_PROFILE_ID,
+  sameProfile,
+  type ActiveProfile,
+} from "@mrstreamer/contracts/profiles";
+import { ProfileSessions, type ProfileAdmission } from "./services/profiles.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -28,7 +34,7 @@ import {
 } from "@mrstreamer/contracts/downloads";
 import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
-import { Failed } from "@mrstreamer/core/failure";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { t } from "@mrstreamer/core/i18n";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { updatesInApp } from "@mrstreamer/contracts/updates";
@@ -94,8 +100,8 @@ import { Playback } from "./services/playback.ts";
 import { Recordings } from "./services/recordings.ts";
 import { Reminders } from "./services/reminders.ts";
 import { OnlineSubtitles } from "./services/online-subtitles.ts";
-import { Settings } from "./services/preferences.ts";
-import { preferencePublication } from "./preference-publication.ts";
+import { Settings, AdmittedSettings, viewingPreferences } from "./services/preferences.ts";
+import { preferencePublication, type PreferencePublication } from "./preference-publication.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { DEFAULT_SCHEDULE, Updates, type UpdatesConfig } from "./services/updates.ts";
@@ -608,6 +614,18 @@ async function start(): Promise<void> {
   /** The system shuts down or ends the session: what records goes on when the app runs again. */
   let shuttingDown = false;
 
+  let stopProfilePlayback: () => Effect.Effect<void, Failed> = () =>
+    Effect.fail(
+      new Failed({ error: { kind: "unexpected", detail: "Playback is still starting." } }),
+    );
+
+  // Restored-profile configuration runs while the runtime is being built. Retain its exact
+  // owner until main's language and tray bindings are ready, without reentering that runtime.
+  const profileLocale: {
+    pending: { choice: string | undefined; owner: ActiveProfile } | null;
+    apply: ((choice: string | undefined, owner: ActiveProfile) => void) | null;
+  } = { pending: null, apply: null };
+
   const runtime = ManagedRuntime.make(
     mainLayer({
       dataDir,
@@ -617,6 +635,24 @@ async function start(): Promise<void> {
         setting: (setting) => analytics.settingObserver(setting),
       },
       downloads: { observeTransfer: observeOperation("download_ended") },
+      profiles: {
+        consent: {
+          read: Effect.promise(async () => (await analytics.settings()).enabled),
+          write: (enabled) => Effect.asVoid(Effect.promise(() => analytics.configure(enabled))),
+        },
+        stopInteractive: () => stopProfilePlayback(),
+        configured: (settings, owner) =>
+          Effect.gen(function* () {
+            const choice = yield* settings.interfaceLanguage;
+            yield* Effect.try({
+              try: () => {
+                if (profileLocale.apply) profileLocale.apply(choice, owner);
+                else profileLocale.pending = { choice, owner };
+              },
+              catch: failedWith,
+            });
+          }),
+      },
       secrets: keychainSecrets(snap),
       userAgent,
       ffmpeg: toolPath("ffmpeg"),
@@ -657,6 +693,7 @@ async function start(): Promise<void> {
     reminders,
     recordings,
     profiles,
+    profileSessions,
   } = await runtime.runPromise(
     Effect.all({
       subscriptions: Subscriptions,
@@ -679,8 +716,12 @@ async function start(): Promise<void> {
       reminders: Reminders,
       recordings: Recordings,
       profiles: Profiles,
+      profileSessions: ProfileSessions,
     }),
   );
+
+  stopProfilePlayback = () =>
+    Effect.andThen(playback.closeForProfile, Effect.andThen(output.scan(false), output.disconnect));
 
   // Back from sleep or unlocked, the clock may have moved past where a guide hands a channel on,
   // and past a reminder's or a schedule's start.
@@ -793,6 +834,27 @@ async function start(): Promise<void> {
   );
   dimensionsReady = true;
 
+  const initialOwner = await runtime.runPromise(profiles.active);
+  const initialDefaultOwner = initialOwner.id === DEFAULT_PROFILE_ID ? initialOwner : null;
+
+  const publishPreferences = (
+    owner: ActiveProfile | null,
+    snapshot: IpcEvents["preferences.changed"],
+  ) => {
+    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    emit(mainWindow.webContents, "profiles.preferencesChanged", { owner, snapshot });
+
+    if (owner.id === DEFAULT_PROFILE_ID)
+      emit(mainWindow.webContents, "preferences.changed", snapshot);
+  };
+
+  const stalePreferences = (owner: ActiveProfile | null) => {
+    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    emit(mainWindow.webContents, "profiles.preferencesStale", { owner });
+
+    if (owner.id === DEFAULT_PROFILE_ID) emit(mainWindow.webContents, "preferences.stale", null);
+  };
+
   const preferences = await runtime.runPromise(
     preferencePublication({
       read: Effect.gen(function* () {
@@ -811,14 +873,49 @@ async function start(): Promise<void> {
             }),
         }),
       reconfigure: onDemand.reconfigure,
-      publish: (snapshot) => {
-        if (mainWindow) emit(mainWindow.webContents, "preferences.changed", snapshot);
-      },
-      stale: () => {
-        if (mainWindow) emit(mainWindow.webContents, "preferences.stale", null);
-      },
+      publish: (snapshot) => publishPreferences(initialDefaultOwner, snapshot),
+      stale: () => stalePreferences(initialDefaultOwner),
     }),
   );
+
+  const profileKey = (owner: ActiveProfile) => JSON.stringify([owner.id, owner.revision]);
+
+  const publications = new Map<string, PreferencePublication>(
+    initialDefaultOwner ? [[profileKey(initialDefaultOwner), preferences]] : [],
+  );
+
+  const preferencesFor = (admission: ProfileAdmission) =>
+    Effect.suspend(() => {
+      const retained = publications.get(profileKey(admission.owner));
+
+      if (retained) return Effect.succeed(retained);
+      const scoped = admission.services.settings;
+
+      return preferencePublication({
+        read: scoped.get,
+        write: (patch) => scoped.update(patch),
+        consent: (enabled) =>
+          Effect.tryPromise({
+            try: () => analytics.configure(enabled),
+            catch: () =>
+              new Failed({
+                error: { kind: "unexpected", detail: "Analytics preference could not be saved." },
+              }),
+          }),
+        reconfigure: onDemand.reconfigure,
+        publish: (snapshot) => publishPreferences(admission.owner, snapshot),
+        stale: () => stalePreferences(admission.owner),
+      }).pipe(
+        Effect.tap((publication) =>
+          Effect.sync(() => {
+            if (sameProfile(admission.owner, runtime.runSync(profiles.active))) {
+              publications.clear();
+              publications.set(profileKey(admission.owner), publication);
+            }
+          }),
+        ),
+      );
+    });
 
   refreshConsent = async () => {
     await runtime.runPromise(preferences.get);
@@ -827,7 +924,14 @@ async function start(): Promise<void> {
   // Replay initial consent once composition exists, including reads settled before it was ready.
   void analytics.loaded.then(refreshConsent).catch(() => {});
   // The interface language, before the window asks for it.
-  let language = languageFor(await runtime.runPromise(settings.interfaceLanguage));
+  const restoredLocale = profileLocale.pending;
+
+  let language = languageFor(
+    restoredLocale && sameProfile(restoredLocale.owner, runtime.runSync(profileSessions.active))
+      ? restoredLocale.choice
+      : await runtime.runPromise(settings.interfaceLanguage),
+  );
+
   applyLanguage(language);
 
   const exporter = diagnosticsExporter(dataDir, async () => {
@@ -874,9 +978,43 @@ async function start(): Promise<void> {
   forward(onDemand.progressChanges, "ondemand.progress", (metadata) => metadata);
   forward(onDemand.detailsChanged, "ondemand.detailsChanged", (title) => title);
   forward(guide.changes, "guide.updated", () => null);
-  forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
-  forward(watchlist.changes, "watchlist.changed", () => null);
-  forward(customLists.changes, "customLists.changed", () => null);
+  void runtime.runFork(
+    Stream.runForEach(profileSessions.changes, (change) =>
+      Effect.sync(() => {
+        if (!mainWindow) return;
+
+        if (change.kind === "active") {
+          emit(mainWindow.webContents, "profiles.activeChanged", change.active);
+
+          return;
+        }
+
+        const { owner } = change;
+
+        if (!owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+        const legacy = owner.id === DEFAULT_PROFILE_ID;
+
+        if (change.kind === "viewing" || change.kind === "erased") {
+          const sequence = change.kind === "viewing" ? change.sequence : 0;
+          emit(mainWindow.webContents, "profiles.viewingChanged", { owner, sequence });
+
+          if (legacy) emit(mainWindow.webContents, "viewing.changed", { sequence });
+        }
+
+        if (change.kind === "watchlist" || change.kind === "erased") {
+          emit(mainWindow.webContents, "profiles.watchlistChanged", { owner });
+
+          if (legacy) emit(mainWindow.webContents, "watchlist.changed", null);
+        }
+
+        if (change.kind === "lists" || change.kind === "erased") {
+          emit(mainWindow.webContents, "profiles.listsChanged", { owner });
+
+          if (legacy) emit(mainWindow.webContents, "customLists.changed", null);
+        }
+      }),
+    ),
+  );
   forward(updates.changes, "updates.changed", (status) => {
     analytics.setUpdateChannel(updatesInApp(status.distribution) ? status.channel : "none");
 
@@ -1085,9 +1223,19 @@ async function start(): Promise<void> {
         output,
         settings,
         analytics,
+        profiles,
       }),
       ...subtitleHandlers({ onlineSubtitles }),
-      ...outputHandlers({ output, coordination, library, onDemand, settings, analytics, pickList }),
+      ...outputHandlers({
+        output,
+        coordination,
+        library,
+        onDemand,
+        settings,
+        analytics,
+        pickList,
+        profiles,
+      }),
       ...viewingHandlers({ viewing, settings }),
       ...customListHandlers({ customLists }),
       ...downloadHandlers({
@@ -1116,11 +1264,19 @@ async function start(): Promise<void> {
         },
       }),
       ...reminderHandlers({ reminders }),
-      ...profileHandlers({ profiles }),
+      ...profileHandlers({ profiles, sessions: profileSessions, enabled: true }),
       ...recordingHandlers({
         recordings,
         library,
-        settings,
+        settings: {
+          get: viewingPreferences(settings),
+          ofSubscription: (id) =>
+            Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
+              admitted._tag === "Some"
+                ? admitted.value.settings.ofSubscription(id)
+                : settings.ofSubscription(id),
+            ),
+        },
         chooseFolder: async (current) => {
           const options: Electron.OpenDialogOptions = {
             title: t("Choose a folder for recordings"),
@@ -1182,6 +1338,67 @@ async function start(): Promise<void> {
         }),
     },
     (sender) => sender === mainWindow?.webContents,
+    {
+      admit: profileSessions.admitFor,
+      handlers: (admission) => {
+        const scoped = admission.services;
+
+        return {
+          ...subscriptionHandlers({ subscriptions, roster, settings: scoped.settings }),
+          ...libraryHandlers({ library, subscriptions, roster, settings: scoped.settings }),
+          ...titleHandlers({
+            onDemand,
+            watchlist: scoped.watchlist,
+            viewing: scoped.viewing,
+            subscriptions,
+            roster,
+          }),
+          ...viewingHandlers({ viewing: scoped.viewing, settings: scoped.settings }),
+          ...customListHandlers({ customLists: scoped.lists }),
+          ...playbackHandlers({
+            playback,
+            coordination,
+            library,
+            onDemand,
+            downloads,
+            recordings,
+            output,
+            settings: scoped.settings,
+            analytics,
+            profiles: { active: Effect.succeed(admission.owner) },
+          }),
+          ...outputHandlers({
+            output,
+            coordination,
+            library,
+            onDemand,
+            settings: scoped.settings,
+            analytics,
+            pickList,
+            profiles: { active: Effect.succeed(admission.owner) },
+          }),
+          "preferences.get": () =>
+            Effect.flatMap(preferencesFor(admission), (publication) => publication.get),
+          "preferences.update": (patch) =>
+            Effect.flatMap(preferencesFor(admission), (publication) => publication.update(patch)),
+          "language.get": () => Effect.map(scoped.settings.interfaceLanguage, languageFor),
+          "language.set": ({ choice }) =>
+            Effect.gen(function* () {
+              yield* scoped.settings.setInterfaceLanguage(choice);
+              const active = yield* profileSessions.active;
+              const chosen = languageFor(choice);
+
+              if (sameProfile(active, admission.owner)) {
+                language = chosen;
+                applyLanguage(chosen);
+                refreshTray();
+              }
+
+              return chosen;
+            }),
+        } satisfies Partial<IpcHandlers>;
+      },
+    },
   );
 
   // What plays here ends with the window, and so does a connect to a receiver still under way:
@@ -1416,6 +1633,18 @@ async function start(): Promise<void> {
       ]),
     );
   };
+
+  profileLocale.apply = (choice, owner) => {
+    if (!sameProfile(owner, runtime.runSync(profileSessions.active))) return;
+    language = languageFor(choice);
+    applyLanguage(language);
+    refreshTray();
+  };
+
+  if (profileLocale.pending) {
+    profileLocale.apply(profileLocale.pending.choice, profileLocale.pending.owner);
+    profileLocale.pending = null;
+  }
 
   staysWithoutWindow = () => {
     if (

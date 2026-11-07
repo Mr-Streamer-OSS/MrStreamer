@@ -1,3 +1,10 @@
+import {
+  ActiveProfileSchema,
+  ownedByProfile,
+  type ActiveProfile,
+} from "@mrstreamer/contracts/profiles";
+import { householdMutations } from "./handlers/subscriptions.ts";
+import type { ProfileAdmission } from "./services/profiles.ts";
 import type { Type } from "arktype";
 import { ipcMain, type WebContents } from "electron";
 import { type } from "arktype";
@@ -48,6 +55,10 @@ export function registerIpc(
   run: <A>(effect: Effect.Effect<A, Failed>) => Promise<Exit.Exit<A, Failed>>,
   handlers: IpcHandlers,
   isTrusted: (sender: WebContents) => boolean,
+  personal?: {
+    readonly admit: (expected?: ActiveProfile) => Effect.Effect<ProfileAdmission, Failed>;
+    readonly handlers: (admission: ProfileAdmission) => Partial<IpcHandlers>;
+  },
 ): void {
   // Entries live only while an invocation runs. No renderer can address another sender/frame.
   const pending = new Map<WebContents, Map<string, AbortController>>();
@@ -121,6 +132,23 @@ export function registerIpc(
         };
       }
 
+      let expected: ActiveProfile | undefined;
+
+      if (type.keywords.object.root.allows(raw) && "__profile" in raw && "input" in raw) {
+        if (raw.__profile !== undefined) {
+          const owner = ActiveProfileSchema()(raw.__profile);
+
+          if (owner instanceof type.errors)
+            return {
+              ok: false,
+              error: { kind: "invalid-input", detail: "Invalid viewing profile admission." },
+            };
+          expected = owner;
+        }
+
+        raw = raw.input;
+      }
+
       validate ??= schema();
       const input = validate(raw);
 
@@ -178,7 +206,27 @@ export function registerIpc(
         owned = track(event.sender, key);
       }
 
-      let work = Effect.suspend(() => handler(input, frame));
+      let work = Effect.gen(function* () {
+        if (!personal || !ownedByProfile(method)) return yield* handler(input, frame);
+        const admitted = yield* personal.admit(expected);
+        // The mapping keeps per-method types at construction; this loop already dispatches the
+        // union of validated inputs, as the ordinary handler above does.
+        const selected = personal.handlers(admitted)[method] as typeof handler | undefined;
+
+        // These household writes serialize with removal, which drains personal permits.
+        // Capture the admitted context under a short permit, then release it before that write lock.
+        // Forked catalogue work retains its original Settings and current-owner check.
+        if (householdMutations.has(method)) {
+          const context = yield* admitted.run(Effect.context<never>());
+
+          return yield* Effect.provideContext(
+            Effect.suspend(() => (selected ?? handler)(input, frame)),
+            context,
+          );
+        }
+
+        return yield* admitted.run(Effect.suspend(() => (selected ?? handler)(input, frame)));
+      });
 
       if (owned) {
         const { signal } = owned;

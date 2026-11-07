@@ -34,6 +34,7 @@
 // an app that remembers a channel's streams after its list drops some does; else the channel the
 // catalogue lists now. Starring, unstarring, showing and ordering favourites all go by that one
 // answer. Recent channels and watching go by the catalogue alone.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { seriesOf, type TitleRef } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -189,6 +190,19 @@ export interface RawTitleFilter {
 }
 
 /** Where the events and the state they add up to are kept. */
+/** Immutable desktop owner; native/default callers keep the ordinary changes stream. */
+export class ViewingProfile extends Context.Service<ViewingProfile, ActiveProfile>()(
+  "mrstreamer/ViewingProfile",
+) {}
+
+/** The source generations captured by a desktop profile admission, before any async work. */
+export class ViewingErasure extends Context.Service<
+  ViewingErasure,
+  {
+    readonly current: (account: string) => boolean;
+  }
+>()("mrstreamer/ViewingErasure") {}
+
 export class ViewingStore extends Context.Service<
   ViewingStore,
   {
@@ -222,6 +236,8 @@ export class ViewingStore extends Context.Service<
       readonly accounts: readonly string[];
       readonly commandId: string;
       readonly at: number;
+      /** Checked inside the transaction before receipt lookup, including idempotent retries. */
+      readonly current?: () => boolean;
       readonly decide: (
         stored: StoredViewing,
         look: StoredLook,
@@ -362,6 +378,10 @@ export class ViewingRecord extends Context.Service<
     erase(account: string): Effect.Effect<void, Failed>;
     /** The sequence after each committed change. */
     readonly changes: Stream.Stream<number>;
+    readonly profileChanges?: Stream.Stream<{
+      readonly owner: ActiveProfile | null;
+      readonly sequence: number;
+    }>;
   }
 >()("mrstreamer/ViewingRecord") {
   static readonly layer = Layer.effect(ViewingRecord, make());
@@ -546,6 +566,11 @@ function make() {
     const listed = yield* ViewingSeries;
     const changes = yield* PubSub.unbounded<number>();
 
+    const profileChanges = yield* PubSub.unbounded<{
+      readonly owner: ActiveProfile | null;
+      readonly sequence: number;
+    }>();
+
     // The first start with the record brings in the lists preferences.json kept, which were the
     // original subscription's. The file loses them only after the import commits; a retry after a
     // crash finds the marker and imports nothing twice. Lists wait for an account to import into.
@@ -697,7 +722,14 @@ function make() {
       gone: Failed = noSubscription,
     ) =>
       Effect.gen(function* () {
-        if (!ownersOf(yield* account.owners, named)) return yield* gone;
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+        const initial = ownersOf(yield* account.owners, named);
+
+        if (
+          !initial ||
+          (erasure._tag === "Some" && initial.some((owner) => !erasure.value.current(owner.key)))
+        )
+          return yield* gone;
         const found = yield* settled;
         const owners = ownersOf(found.owners, named);
 
@@ -708,13 +740,24 @@ function make() {
           accounts: found.owners.map((owner) => owner.key),
           commandId,
           at,
+          ...defined({
+            current:
+              erasure._tag === "Some"
+                ? () => owners.every((owner) => erasure.value.current(owner.key))
+                : undefined,
+          }),
           decide: (stored, look) =>
             owners.some((owner) => owner.stands?.() === false)
               ? gone
               : events({ ...found, stored }, owners, look),
         });
 
+        const owner = yield* Effect.serviceOption(ViewingProfile);
         yield* PubSub.publish(changes, stored.sequence);
+        yield* PubSub.publish(profileChanges, {
+          owner: owner._tag === "Some" ? owner.value : null,
+          sequence: stored.sequence,
+        });
 
         return shown({ ...found, stored });
       });
@@ -974,6 +1017,7 @@ function make() {
         }),
       erase: (key: string) => store.erase(key),
       changes: Stream.fromPubSub(changes),
+      profileChanges: Stream.fromPubSub(profileChanges),
     };
   });
 }

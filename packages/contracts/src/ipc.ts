@@ -79,7 +79,12 @@ import {
 } from "./playback.ts";
 import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
-import type { ActiveProfile } from "./profiles.ts";
+import {
+  ActiveProfileSchema,
+  type ActiveProfile,
+  type ProfileRequest,
+  type LocalProfile,
+} from "./profiles.ts";
 import type { Reminder, ReminderList } from "./reminders.ts";
 import {
   RecordingPlanSchema,
@@ -305,6 +310,10 @@ export const ipcInputs = {
   /** Takes a reminder's notice in the window down for this run; it stays listed. */
   "reminders.dismiss": () => type({ id: "string > 0" }),
   "profiles.active": none,
+  "profiles.list": none,
+  "profiles.create": () => type({ name: "string > 0", current: ActiveProfileSchema() }),
+  "profiles.switch": () => type({ id: "string > 0", current: ActiveProfileSchema() }),
+  "profiles.remove": () => type({ id: "string > 0", current: ActiveProfileSchema() }),
   "recordings.list": none,
   /**
    * What holds a subscription's connections now, as Record shows before it starts, and with
@@ -343,7 +352,12 @@ export const ipcInputs = {
   "recordings.cancel": () => type({ id: "string > 0" }),
   /** Keeps how far an ended recording played, as `downloads.recordProgress` does for a copy. */
   "recordings.recordProgress": () =>
-    type({ id: "string > 0", position: "number >= 0", duration: "number > 0" }),
+    type({
+      id: "string > 0",
+      position: "number >= 0",
+      duration: "number > 0",
+      "owner?": ActiveProfileSchema(),
+    }),
   "recordings.storage": none,
   /** Bytes to keep free on the disk, and the space recordings may take, null for no limit. */
   "recordings.setLimits": () =>
@@ -644,7 +658,12 @@ export const ipcInputs = {
   "downloads.move": () => type({ id: "string > 0", by: "-1 | 1" }),
   /** Remembers how far a copy played here, with the copy alone. */
   "downloads.recordProgress": () =>
-    type({ id: "string > 0", position: "number >= 0", duration: "number > 0" }),
+    type({
+      id: "string > 0",
+      position: "number >= 0",
+      duration: "number > 0",
+      "owner?": ActiveProfileSchema(),
+    }),
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
@@ -766,6 +785,10 @@ export interface IpcOutputs {
    * Fails while the profiles can't be read or written, rather than guess one.
    */
   "profiles.active": ActiveProfile;
+  "profiles.list": readonly LocalProfile[];
+  "profiles.create": LocalProfile;
+  "profiles.switch": ActiveProfile;
+  "profiles.remove": null;
   /** Every recording, newest first. Fails while they can't be read. */
   "recordings.list": readonly Recording[];
   "recordings.connections": RecordingConnections;
@@ -1065,11 +1088,23 @@ export type IpcInput<M extends IpcMethod> = ReturnType<(typeof ipcInputs)[M]>["i
 export type IpcOutput<M extends IpcMethod> = IpcOutputs[M];
 
 /** Methods without input can be called with no argument. */
-export type IpcArgs<M extends IpcMethod> =
+export type IpcCallArgs<M extends IpcMethod> =
   undefined extends IpcInput<M> ? [input?: IpcInput<M>] : [input: IpcInput<M>];
+
+/** The optional desktop envelope does not change a method's domain input. */
+export type IpcArgs<M extends IpcMethod> = IpcCallArgs<M> | [request: ProfileRequest<IpcInput<M>>];
 
 /** Events the main process pushes to the UI. */
 export interface IpcEvents {
+  "profiles.activeChanged": ActiveProfile;
+  "profiles.viewingChanged": { readonly owner: ActiveProfile; readonly sequence: number };
+  "profiles.watchlistChanged": { readonly owner: ActiveProfile };
+  "profiles.listsChanged": { readonly owner: ActiveProfile };
+  "profiles.preferencesChanged": {
+    readonly owner: ActiveProfile;
+    readonly snapshot: PreferenceSnapshot;
+  };
+  "profiles.preferencesStale": { readonly owner: ActiveProfile };
   /** Committed private preferences, ordered within this main-process lifetime only. */
   "preferences.changed": PreferenceSnapshot;
   /** A save could not read back composed state. Keep the last snapshot stale until a read succeeds. */

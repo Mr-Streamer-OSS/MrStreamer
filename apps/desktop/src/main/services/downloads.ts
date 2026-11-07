@@ -37,6 +37,7 @@
 // queued download listed; which copies go together and what plays next are worked out from those
 // (see @mrstreamer/core/downloads/series). An episode queued before this, or by an earlier build,
 // has no series and stands alone.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { copyProgress } from "../platform/profile-copy-progress.ts";
 import { downloadFailure, type OperationObserver } from "../analytics/operations.ts";
 import { randomUUID } from "node:crypto";
@@ -166,9 +167,14 @@ export class Downloads extends Context.Service<
      * the new order can't be written down.
      */
     move(id: string, by: -1 | 1): Effect.Effect<void, Failed>;
-    recordProgress(id: string, position: number, duration: number): Effect.Effect<void, Failed>;
+    recordProgress(
+      id: string,
+      position: number,
+      duration: number,
+      owner?: ActiveProfile,
+    ): Effect.Effect<void, Failed>;
     /** A complete copy, for playback to open; fails when it isn't, or its file is gone. */
-    copy(id: string): Effect.Effect<LocalCopy, Failed>;
+    copy(id: string, owner?: ActiveProfile): Effect.Effect<LocalCopy, Failed>;
     /** A copy's kept picture, for the app's artwork scheme; null without one. */
     artwork(
       id: string,
@@ -481,10 +487,13 @@ function make(deps: DownloadsDeps) {
       record: StoredDownload,
       owners: ReadonlyMap<string, { readonly id: string; readonly name: string }>,
       busy: ReadonlySet<string>,
+      captured?: ReturnType<typeof personal.of>,
     ) =>
       Effect.map(
         record.state === "complete"
-          ? personal.read("download", record.id, record.progress)
+          ? captured
+            ? captured.read("download", record.id, record.progress)
+            : personal.read("download", record.id, record.progress)
           : Effect.succeed(null),
         (progress): Download => ({
           id: record.id,
@@ -554,6 +563,7 @@ function make(deps: DownloadsDeps) {
     };
 
     const view = Effect.gen(function* () {
+      const admitted = yield* personal.admit;
       const owners = yield* accounts;
       const busy = yield* coordination.busy;
       const all = [...records.values()];
@@ -574,13 +584,14 @@ function make(deps: DownloadsDeps) {
       });
 
       return {
+        profile: admitted.owner,
         items: yield* Effect.all(
           [
             ...queue.filter(leads),
             ...queue.filter((record) => record.state === "queued" && !leads(record)),
             ...queue.filter((record) => record.state === "failed"),
             ...copies,
-          ].map((record) => downloadOf(record, owners, busy)),
+          ].map((record) => downloadOf(record, owners, busy, admitted)),
         ),
         storage: { path: selectedFolder, moving: [...moving.keys()] },
         series: seriesOf(all),
@@ -1539,15 +1550,17 @@ function make(deps: DownloadsDeps) {
           tell();
         }),
 
-      recordProgress: (id: string, position: number, duration: number) =>
-        Effect.suspend(() =>
-          records.get(id)?.state === "complete"
-            ? personal.write("download", id, position, duration)
-            : Effect.fail(notFound()),
-        ).pipe(Effect.tap(() => Effect.sync(tell))),
+      recordProgress: (id: string, position: number, duration: number, owner?: ActiveProfile) =>
+        Effect.gen(function* () {
+          const admitted = owner ? personal.of(owner) : yield* personal.admit;
 
-      copy: (id: string) =>
-        Effect.suspend(() => {
+          if (records.get(id)?.state !== "complete") return yield* notFound();
+          yield* admitted.write("download", id, position, duration);
+        }).pipe(Effect.tap(() => Effect.sync(tell))),
+
+      copy: (id: string, captured?: ActiveProfile) =>
+        Effect.gen(function* () {
+          const owner = captured ? personal.of(captured) : yield* personal.admit;
           const record = records.get(id);
 
           if (record?.state !== "complete" || !existsSync(mediaOf(record))) {
@@ -1556,18 +1569,19 @@ function make(deps: DownloadsDeps) {
               tell();
             }
 
-            return Effect.fail(
+            return yield* Effect.fail(
               new Failed({
                 error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
               }),
             );
           }
 
-          return personal.read("download", id, record.progress).pipe(
+          return yield* owner.read("download", id, record.progress).pipe(
             Effect.map(
               (progress) =>
                 ({
                   id: record.id,
+                  owner: owner.owner,
                   path: mediaOf(record),
                   container: record.container,
                   title: record.title,

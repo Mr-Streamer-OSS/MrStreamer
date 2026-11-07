@@ -165,6 +165,14 @@ describe("Save in a title's details", () => {
    */
   async function details(saved: WatchlistEntry | null) {
     ipc.reset();
+    ipc.always("output.status", {
+      owner: { id: "default", revision: 1 },
+      offers: [],
+      airplayRoutes: null,
+      scanning: false,
+      receivers: [],
+      output: { kind: "local" },
+    });
     const listed = ipc.hold("ondemand.titles");
     const progress = ipc.hold("viewing.progress");
     const membership = ipc.hold("watchlist.saved");
@@ -572,6 +580,14 @@ describe("a saved title the provider no longer lists", () => {
     // A series for adults the provider dropped, saved while Settings shows such titles.
     const afterDark = entry("e4", "series", "After Dark", 2022, null);
     ipc.reset();
+    ipc.always("output.status", {
+      owner: { id: "default", revision: 1 },
+      offers: [],
+      airplayRoutes: null,
+      scanning: false,
+      receivers: [],
+      output: { kind: "local" },
+    });
     ipc.always("liveBrowse.get", { kind: "all" });
     ipc.prefer({ adultTitles: true });
     useUi.setState({ ...useUi.getInitialState(), view: "watchlist" }, true);

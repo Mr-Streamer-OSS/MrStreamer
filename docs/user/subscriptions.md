@@ -127,6 +127,8 @@ Open its row and choose **Remove**. Mr. Streamer asks first, and says what happe
 - From 0.0.23, its recording schedules are removed and what it records stops, keeping what was recorded. Its recordings stay until you delete them.
 - Removing your only subscription returns to the Connect screen.
 
+From 0.0.24, **Also delete** applies to the source's viewing data in every viewing profile. If one profile cannot be erased, removal reports the failure and keeps the subscription available to retry. Data already erased from another profile stays erased. Finished local copies stay on the computer.
+
 ## Going back to an older version
 
 _Older versions show the first subscription you added and leave the rest untouched._

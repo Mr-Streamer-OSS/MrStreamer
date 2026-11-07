@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { readPreferences, updatePreferences } from "../lib/preferences.ts";
 import { appDiagnostic, streamDiagnostic } from "@mrstreamer/contracts/analytics";
 import {
@@ -78,7 +79,7 @@ import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { appError, describeError } from "../lib/errors.ts";
 import { t } from "@mrstreamer/core/i18n";
 import { flash, flashNote } from "../features/watch/flash-state.ts";
-import { call, listen } from "../lib/ipc.ts";
+import { call, callForProfile, listen, profileOwner, currentProfile } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import { isEngineError, type EngineError } from "./engine.ts";
 import { mediaClaim, video } from "./shared-media.ts";
@@ -139,6 +140,7 @@ export interface ProviderNow extends Shown {
 
 /** A downloaded copy, or a recording, from this computer, by its download's or recording's id. */
 export interface CopyNow extends Shown {
+  readonly owner?: ActiveProfile | null;
   readonly kind: "copy";
   readonly copy: string;
   /** The file it was made of, by the provider's ids: an episode's numbers say where it stands. */
@@ -347,6 +349,7 @@ const claim = mediaClaim(() => titlePlayer.close());
 
 /** The open session: its id and the address runs play from. */
 let session: { readonly id: string; readonly url: string } | null = null;
+let playOwner: ActiveProfile | null = null;
 
 /**
  * When the viewer began this play of the open title, epoch milliseconds. Its checkpoints bring
@@ -472,9 +475,16 @@ listen("viewing.changed", () => {
   if (store.getState().now?.kind === "provider") void refreshNext();
 });
 
+listen("profiles.viewingChanged", ({ owner }) => {
+  if (!currentProfile(owner) || !playOwner || !currentProfile(playOwner)) return;
+
+  if (store.getState().now?.kind === "provider") void refreshNext();
+});
+
 // What comes after an open copy follows main's list as it changes. A list read for a question,
 // which also looks for files gone, still answers it: what opens is decided on that.
 listen("downloads.changed", (list) => {
+  if (list.profile ? !currentProfile(list.profile) : profileOwner() !== null) return;
   const { now } = store.getState();
 
   if (now?.kind === "copy" && !now.recording) followCopies(now, list);
@@ -581,23 +591,21 @@ function followCopies(now: CopyNow, list: DownloadList): void {
  * Saves how far the title got, when there is a title and a length to measure it against. Once
  * an episode with none left after it is in its credits, finds out whether its series is
  * finished, after the progress is saved. Both say when this play began: an episode marked during
- * it keeps its mark.
+ * it keeps its mark. Answers whether main kept it, true when there was nothing to keep here.
  */
-function save(): void {
+function save(): Promise<boolean> {
   // What a receiver plays, the main process saves, from what the receiver confirmed.
-  if (receiver) return;
+  if (receiver) return Promise.resolve(true);
   const { now, position, duration, next } = store.getState();
 
-  if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought))) return;
+  if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought)))
+    return Promise.resolve(true);
 
   // A copy keeps its own, whatever its subscription's record says.
-  if (now.kind === "copy") {
-    void saveCopy(now, position, duration);
+  if (now.kind === "copy") return saveCopy(now, position, duration);
+  const owner = playOwner;
 
-    return;
-  }
-
-  let saved: Promise<unknown> = call("viewing.recordProgress", {
+  let saved: Promise<unknown> = callForProfile(owner, "viewing.recordProgress", {
     commandId: crypto.randomUUID(),
     title: now.title,
     position: Math.min(position, duration),
@@ -606,14 +614,18 @@ function save(): void {
   });
 
   if (next === null && isFinished(position, duration)) {
-    const mine = { play, since: openedAt };
+    const mine = { play, since: openedAt, owner };
     saved = saved.then(() => finishSeries(now, mine));
   }
 
-  saving = saved.then(
-    () => {},
-    () => {},
+  const kept = saved.then(
+    () => true,
+    () => false,
   );
+
+  saving = kept.then(() => {});
+
+  return kept;
 }
 
 /**
@@ -627,19 +639,33 @@ function saveCopy(
   duration: number,
   background = false,
 ): Promise<boolean> {
-  const progress = { id: now.copy, position: Math.min(position, duration), duration };
-  const key = `${now.recording ? "recording" : "download"}:${now.copy}`;
+  const owner = "owner" in now ? (now.owner ?? null) : playOwner;
+  const captured: CopyNow = { ...now, owner };
+
+  const progress = {
+    id: now.copy,
+    position: Math.min(position, duration),
+    duration,
+    ...defined({ owner: owner ?? undefined }),
+  };
+
+  const key = JSON.stringify([
+    owner?.id ?? null,
+    now.recording ? "recording" : "download",
+    now.copy,
+  ]);
+
   const previous = copySaves.get(key);
 
   if (previous?.timer) clearTimeout(previous.timer);
   const pending = { timer: null as ReturnType<typeof setTimeout> | null };
   copySaves.set(key, pending);
 
-  const kept = (
-    now.recording
-      ? call("recordings.recordProgress", progress)
-      : call("downloads.recordProgress", progress)
-  ).then(
+  const method = now.recording ? "recordings.recordProgress" : "downloads.recordProgress";
+
+  // The progress names its owner, so a retry after a switch still saves to that viewer. An
+  // unowned save from before the window had a profile goes only while there still is none.
+  const kept = (owner ? call(method, progress) : callForProfile(null, method, progress)).then(
     () => {
       if (copySaves.get(key) === pending) copySaves.delete(key);
 
@@ -665,7 +691,7 @@ function saveCopy(
                 return;
               }
 
-              void saveCopy(now, position, duration, true);
+              void saveCopy(captured, position, duration, true);
             }, retry);
           }, 10_000);
         };
@@ -690,8 +716,9 @@ function saveCopy(
  */
 async function finishSeries(
   now: ProviderNow,
-  mine: { readonly play: number; readonly since: number },
+  mine: { readonly play: number; readonly since: number; readonly owner: ActiveProfile | null },
 ): Promise<void> {
+  const { owner } = mine;
   const { series, title } = now;
 
   if (!series || title.kind !== "episode" || finishing === mine.play) return;
@@ -699,11 +726,11 @@ async function finishSeries(
   const { since } = mine;
 
   try {
-    const standing = await call("viewing.episodes", { series: seriesOf(title) });
+    const standing = await callForProfile(owner, "viewing.episodes", { series: seriesOf(title) });
 
     if (finishes(series, { ...title, since }, standing.progress, standing.marks)) {
       const versions = series.title.versions.map(ownedId);
-      await call("viewing.finishSeries", {
+      await callForProfile(owner, "viewing.finishSeries", {
         commandId: crypto.randomUUID(),
         series: versions,
         since,
@@ -1251,7 +1278,7 @@ function follow(media: RemoteMedia): void {
       // The main process saves how far it got. That its series is finished is said from here,
       // once the record was asked again what comes next and none does.
       const { now } = store.getState();
-      const mine = { play, since: openedAt };
+      const mine = { play, since: openedAt, owner: playOwner };
       void countDown(generation).then(() => {
         const after = store.getState();
 
@@ -1632,6 +1659,9 @@ export const titlePlayer = {
 
     if (!claim.take()) return;
     closeTitle(retry);
+    playOwner = profileOwner();
+
+    if (now.kind === "copy") now = { ...now, owner: playOwner };
     // Subtitle timing belongs to a file; a new title starts on time.
     setSubtitleDelay(video, 0);
 
@@ -1693,6 +1723,11 @@ export const titlePlayer = {
       // Where a copy was left, as main kept it: the window's list hears of a save only a moment
       // later. Watched to its end, it starts over.
       if ("copy" in opened) {
+        if (now.kind === "copy" && opened.owner) {
+          now = { ...now, owner: opened.owner };
+          store.setState({ now });
+        }
+
         const { progress } = opened;
         from =
           progress && !isFinished(progress.position, progress.duration)
@@ -1911,9 +1946,13 @@ export const titlePlayer = {
     store.setState({ audioId: id });
 
     if (track.language) {
-      void updatePreferences({ audioLanguage: track.language }).catch((cause: unknown) => {
-        flashNote(`${t("Sound")}: ${describeError(appError(cause))}`, true);
-      });
+      const owner = profileOwner();
+      void updatePreferences({ audioLanguage: track.language }, undefined, owner).catch(
+        (cause: unknown) => {
+          if (!currentProfile(owner)) return;
+          flashNote(`${t("Sound")}: ${describeError(appError(cause))}`, true);
+        },
+      );
     }
 
     // Another sound track is another load on a receiver, from where it is.
@@ -2175,6 +2214,7 @@ export const titlePlayer = {
     if (store.getState().now) return;
 
     if (!claim.take()) return;
+    playOwner = profileOwner();
     observation.adoptRemote();
     generation++;
     play++;
@@ -2197,6 +2237,15 @@ export const titlePlayer = {
     });
     void refreshNext();
     follow(media);
+  },
+
+  /** Persist the old viewer before asking main to select another; refusal keeps this play retryable. */
+  prepareProfileSwitch: save,
+
+  /** Cancels the old viewer's controller while retaining its explicitly owned save retries. */
+  clearForProfile(): void {
+    titlePlayer.close();
+    playOwner = null;
   },
 
   /**

@@ -1,3 +1,4 @@
+import type { Profiles } from "../platform/profile-store.ts";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { observeOpen } from "../analytics/playback.ts";
 import { streamsOf } from "./streams.ts";
@@ -18,7 +19,10 @@ export function outputHandlers({
   settings,
   analytics,
   pickList,
+  profiles,
 }: {
+  /** Whose viewing an open belongs to: the admitted owner, or the active one. */
+  readonly profiles: Pick<Profiles["Service"], "active">;
   readonly output: Pick<
     Output["Service"],
     | "status"
@@ -64,23 +68,26 @@ export function outputHandlers({
           ? measurement.control
           : undefined;
 
-      return observeOpen(
-        coordination,
-        () => analytics.playbackFailureObserver(token ?? undefined),
-        (turn) =>
-          Effect.gen(function* () {
-            const channel = yield* library.channel(named);
-            const variants = yield* streamsOf(settings, channel, variant);
+      return Effect.flatMap(profiles.active, (owner) =>
+        observeOpen(
+          coordination,
+          () => analytics.playbackFailureObserver(token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              const channel = yield* library.channel(named);
+              const variants = yield* streamsOf(settings, channel, variant);
 
-            return yield* output.playChannel(ownedId(channel), {
-              variants,
-              audio: audio ?? null,
-              audioLanguage: audioLanguage ?? null,
-              shown: { name },
-              turn,
-              measurement: control,
-            });
-          }),
+              return yield* output.playChannel(ownedId(channel), {
+                variants,
+                audio: audio ?? null,
+                audioLanguage: audioLanguage ?? null,
+                shown: { name },
+                turn,
+                owner,
+                measurement: control,
+              });
+            }),
+        ),
       );
     },
     "output.openTitle": ({ title, since, measurement }, frame) => {
@@ -91,21 +98,24 @@ export function outputHandlers({
           ? measurement.control
           : undefined;
 
-      return observeOpen(
-        coordination,
-        () => analytics.playbackFailureObserver(token ?? undefined),
-        (turn) =>
-          Effect.gen(function* () {
-            const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+      return Effect.flatMap(profiles.active, (owner) =>
+        observeOpen(
+          coordination,
+          () => analytics.playbackFailureObserver(token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              const { url, revision, headers, listingKey } = yield* onDemand.file(title);
 
-            return yield* output.openTitle(title, url, since, {
-              turn,
-              measurement: control,
-              revision,
-              headers,
-              listingKey,
-            });
-          }),
+              return yield* output.openTitle(title, url, since, {
+                turn,
+                owner,
+                measurement: control,
+                revision,
+                headers,
+                listingKey,
+              });
+            }),
+        ),
       );
     },
     "output.playTitle": (

@@ -27,6 +27,7 @@ import { useUi, type ChannelList } from "../../src/renderer/src/app/ui-store.ts"
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { SubscriptionSection } from "../../src/renderer/src/features/settings/SubscriptionSection.tsx";
+import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { queries, syncCustomLists } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
@@ -115,6 +116,16 @@ async function livePage(
   { app = false, settings = false } = {},
 ) {
   ipc.reset();
+
+  if (app) selectProfileOwner({ id: "default", revision: 1 });
+  ipc.always("output.status", {
+    owner: { id: "default", revision: 1 },
+    offers: [],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [],
+    output: { kind: "local" },
+  });
   useUi.setState({
     view: "live",
     list: shown,
@@ -240,7 +251,10 @@ async function livePage(
      */
     changed: async (lists: readonly CustomList[]) => {
       stored = lists;
-      await act(async () => ipc.emit("customLists.changed", null));
+      await act(async () => {
+        if (app) ipc.emit("profiles.listsChanged", { owner: { id: "default", revision: 1 } });
+        else ipc.emit("customLists.changed", null);
+      });
       await settled();
     },
     heading: () => container.querySelector("main h1")?.textContent,

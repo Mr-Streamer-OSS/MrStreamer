@@ -1,3 +1,5 @@
+import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
+import type { ProfileRequest } from "@mrstreamer/contracts/profiles";
 import type { Type } from "arktype";
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
 // recorded; a call the test holds answers when the test says, and a method the test gave a
@@ -117,6 +119,7 @@ export const ipc = {
   },
   /** Forgets the calls, held answers and saved preferences of the test before. */
   reset(): void {
+    selectProfileOwner(null);
     calls.length = 0;
     held.clear();
     standing.clear();
@@ -141,8 +144,17 @@ const checkOf = (method: IpcMethod) => {
 };
 
 const bridge = {
-  invoke(method: IpcMethod, args?: IpcInput<IpcMethod>): Promise<Result<unknown>> {
-    const input = checkOf(method)(args);
+  invoke(
+    method: IpcMethod,
+    args?: IpcInput<IpcMethod> | ProfileRequest<IpcInput<IpcMethod>>,
+  ): Promise<Result<unknown>> {
+    // Decode transport metadata only. Production admission/continuation checks stay in the modules under test.
+    const raw =
+      type.keywords.object.root.allows(args) && "__profile" in args && "input" in args
+        ? args.input
+        : args;
+
+    const input = checkOf(method)(raw);
 
     if (input instanceof type.errors) {
       return Promise.resolve({
@@ -151,7 +163,7 @@ const bridge = {
       });
     }
 
-    calls.push({ method, args });
+    calls.push({ method, args: input });
     const pending = held.get(method);
     const next = pending?.findIndex((each) => each.matches(input)) ?? -1;
     const answer = next >= 0 ? pending?.splice(next, 1)[0] : undefined;
@@ -163,6 +175,15 @@ const bridge = {
     const reply = replies.get(method);
 
     if (reply) return Promise.resolve({ ok: true, value: reply(input) });
+
+    if (method === "profiles.active")
+      return Promise.resolve({ ok: true, value: { id: "default", revision: 1 } });
+
+    if (method === "language.get")
+      return Promise.resolve({
+        ok: true,
+        value: { choice: "system", system: "en-US", locale: "en-US", formats: "en-US" },
+      });
 
     if (method === "playback.diagnostic") return Promise.resolve({ ok: true, value: null });
 

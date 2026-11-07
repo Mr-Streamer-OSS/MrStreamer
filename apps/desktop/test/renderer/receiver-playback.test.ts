@@ -35,6 +35,7 @@ const bedroom: Receiver = { id: "bedroom", kind: "cast", name: "Bedroom TV" };
 
 function status(output: Output): OutputStatus {
   return {
+    owner: { id: "default", revision: 1 },
     offers: ["cast"],
     airplayRoutes: null,
     scanning: false,
@@ -221,6 +222,7 @@ async function open(now: OutputStatus): Promise<void> {
   // What the window's status holds from its start, before any page shows.
   await emit(now);
   const subscribed = ipc.hold("subscription.list");
+  const initial = ipc.hold("output.status");
   const asked = ipc.hold("output.status");
   const root = createRoot(container);
   await act(async () =>
@@ -233,6 +235,7 @@ async function open(now: OutputStatus): Promise<void> {
     ),
   );
   unmount = () => act(() => root.unmount());
+  await act(async () => initial.resolve(now));
   await act(async () => subscribed.resolve([subscription]));
   await wait();
   await act(async () => asked.resolve(now));

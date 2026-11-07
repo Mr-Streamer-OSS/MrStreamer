@@ -1,20 +1,13 @@
 # Viewing profiles
 
-From 0.0.24, what you watch is kept in a viewing profile: a person's own viewing space on a shared installation. This release has one, **Default**, and it shows no profile controls yet.
+Use local viewing profiles to keep each viewer's lists, progress and preferences separate. Default keeps the personal state saved before profiles were introduced, in its original files.
 
-## What Default keeps
+Each profile keeps its own favourites, recent channels, channel lists, Watchlist, movie and episode progress, watched marks, downloaded-copy and recording progress, and viewing preferences. Subtitle selection, Off and visibility are personal too.
 
-Everything personal you saved before 0.0.24 belongs to Default, where it already was. Making it Default's moves, copies and changes none of it:
+Subscriptions, guides, downloaded files, recordings, subtitle timing and usage-statistics consent are shared by the installation. Switching stops interactive playback after saving its progress; household downloads and recordings continue.
 
-- favourites and recently watched channels, and your own channel lists
-- how far you got in movies and episodes, Continue watching and watched marks
-- the Watchlist
-- viewing preferences: volume, languages, subtitle look, Home rows and the like
+Use the profile avatar in the window bar. Choose **New profile**, enter a name and choose **Add**. Choose another profile to switch. To delete an inactive profile, choose its trash button and confirm. Default and the active profile cannot be deleted. Deleting removes that profile’s lists, progress and settings while keeping household media. A failed deletion stays visible with Retry.
 
-The household's subscriptions, guides, downloads and recordings are shared by the installation, not by a profile.
+If configuration or a named profile's preferences cannot be read, the error stays visible. Retry attempts the durably selected profile again; the profile menu also lets you select another viewer. Unreadable named-profile files are kept without exposing their contents or replacing them with defaults. Default retains its older-file compatibility behavior.
 
-Going back to an older release keeps working: it reads Default's viewing where it always did.
-
-## More profiles
-
-Further profiles, each with private progress, lists and preferences, come in a later release. They are offered only once everything personal is kept apart per profile, including how far a downloaded copy or recording got.
+Before returning to a release that supports only Default, switch to Default. A single-profile build that recognizes the registry refuses personal-copy progress when a named profile is active. Older builds read Default’s original files and cannot read another profile’s personal state. Installed downgrade compatibility after switching has not been verified.

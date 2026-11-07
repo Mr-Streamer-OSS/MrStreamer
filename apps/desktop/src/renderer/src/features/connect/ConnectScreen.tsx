@@ -6,6 +6,7 @@ import { openView, resetForAccount } from "../../app/ui-store.ts";
 import { Logo } from "../../components/Logo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { useDownloads } from "../../lib/downloads.ts";
+import { ProfileMenu } from "../profiles/ProfileMenu.tsx";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { player } from "../../player/player.ts";
 import { useRecordings } from "../recordings/recordings.ts";
@@ -17,7 +18,8 @@ import { defined } from "@mrstreamer/core/defined";
  * Settings, beside those there, and a subscription whose password or link the keychain lost is
  * asked for it again there too: Connect never stands in front of lists that can still show. While
  * a download is on this computer, Downloads at the top opens it, to play with no subscription;
- * Recordings beside it does the same for what was recorded.
+ * Recordings beside it does the same for what was recorded. The profile avatar ends the bar, so
+ * the viewer can switch before any subscription is saved.
  */
 export function ConnectScreen() {
   const client = useQueryClient();
@@ -46,6 +48,7 @@ export function ConnectScreen() {
             {t("Recordings")}
           </Button>
         )}
+        <ProfileMenu />
       </div>
       <div className="w-[26rem] py-12">
         <Logo className="mb-7 size-14" />

@@ -3,6 +3,7 @@
 // its lists fetched under it, and one that goes takes what was loaded from it with it. Each of
 // these touches the subscription it is about and no other: a stream of another subscription
 // plays on, and the others' lists stay as they are.
+import { ProfileSessions } from "./profiles.ts";
 import { Guide } from "@mrstreamer/core/guide/service";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { CatalogueStatus } from "@mrstreamer/contracts/library";
@@ -88,6 +89,7 @@ function make() {
     const playback = yield* Playback;
     const output = yield* Output;
     const guide = yield* Guide;
+    const profiles = yield* ProfileSessions;
     const viewing = yield* ViewingRecord;
     const recordings = yield* Recordings;
     const downloads = yield* Downloads;
@@ -202,7 +204,12 @@ function make() {
           // its login goes.
           yield* downloads.subscriptionGone(subscriptionId);
           yield* recordings.subscriptionGone(subscriptionId);
-          const forgetSettings = yield* settings.prepareForget(subscription);
+
+          const forgetSettings = yield* profiles.prepareForget(
+            subscription,
+            settings.prepareForget(subscription),
+          );
+
           // Erased as it goes, and not before: while the removal waits its turn the subscription
           // is saved still, and what is starred or saved for it then has to go with the rest.
           yield* subscriptions.remove(subscriptionId, {
@@ -212,7 +219,8 @@ function make() {
               yield* downloads.subscriptionGone(subscriptionId);
               yield* recordings.subscriptionGone(subscriptionId);
 
-              if (eraseViewing) yield* viewing.erase(subscription.key);
+              if (eraseViewing)
+                yield* profiles.eraseSource(subscription.key, viewing.erase(subscription.key));
             }),
             // After login deletion, each owner settles before the folder goes. Settings uses
             // its existing turn both as the write barrier and to update remembered discovery.

@@ -218,6 +218,14 @@ let unmount = () => {};
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
+  ipc.always("output.status", {
+    owner: { id: "default", revision: 1 },
+    offers: [],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [],
+    output: { kind: "local" },
+  });
   related = { a: [canyon, field], b: [meridian, harbour], c: [field], d: [] };
   forAdults = new Set();
   ipc.always("subscription.list", BOTH);

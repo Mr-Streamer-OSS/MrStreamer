@@ -2,6 +2,7 @@
 // sends it. The main process owns the receiver and what it plays; the UI shows the status it is
 // sent and asks for changes. A receiver plays from an address this computer serves on the local
 // network, so it never sees a provider address.
+import type { ActiveProfile } from "./profiles.ts";
 import type { TitleRef } from "./ondemand.ts";
 import type { AudioTrack, StreamFailure, SubtitleFormat, SubtitleTrack } from "./playback.ts";
 import type { OwnedId } from "./subscription.ts";
@@ -90,6 +91,8 @@ export type Output =
   | { readonly kind: "lost"; readonly receiver: Receiver; readonly failure: OutputFailure };
 
 export interface OutputStatus {
+  /** Immutable owner of this observation; absent only for standalone/older transports. */
+  readonly owner?: ActiveProfile;
   /** What this build sends to; empty where it can't reach any receiver. */
   readonly offers: readonly ReceiverKind[];
   /** Whether the system sees an AirPlay receiver; null where AirPlay isn't offered. */

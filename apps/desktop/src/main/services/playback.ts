@@ -1,4 +1,5 @@
 import type { LiveTimeline } from "@mrstreamer/contracts/playback";
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
@@ -297,6 +298,7 @@ const FEED_WAITING_BYTES = 2 * 1024 * 1024;
 const FAILED_STREAM_MS = 2 * 60_000;
 
 interface SessionBase {
+  readonly owner?: ActiveProfile | undefined;
   readonly id: string;
   readonly token: string;
   /** What the UI's player decodes. */
@@ -422,6 +424,7 @@ export type SubtitlePlayback = {
 
 /** A downloaded copy, as playback opens it: one exact file on this computer. */
 export interface LocalCopy {
+  readonly owner?: ActiveProfile | undefined;
   readonly id: string;
   /** Never leaves the main process. */
   readonly path: string;
@@ -591,6 +594,7 @@ export interface PlaybackDeps {
  */
 export interface Asked {
   readonly turn?: number | undefined;
+  readonly owner?: ActiveProfile | undefined;
   readonly revision?: number | undefined;
   /** Main-only headers returned with this exact provider file. */
   readonly headers?: Readonly<Record<string, string>> | undefined;
@@ -641,6 +645,7 @@ export class Playback extends Context.Service<
         readonly audioLanguage?: string | null;
         readonly preview?: boolean;
         readonly turn?: number | undefined;
+        readonly owner?: ActiveProfile | undefined;
       },
     ): Effect.Effect<StreamSession, Failed>;
     /**
@@ -691,6 +696,8 @@ export class Playback extends Context.Service<
     close(sessionId: string): Effect.Effect<void>;
     /** Closes every open stream, for example when the window closes. */
     readonly closeAll: Effect.Effect<void>;
+    /** Invalidates pending interactive opens before closing them, leaving household work alive. */
+    readonly closeForProfile: Effect.Effect<void>;
     /**
      * Closes what plays from one subscription, for when it goes, once any open under way has had
      * its turn. A stream of another subscription plays on.
@@ -735,6 +742,7 @@ export class Playback extends Context.Service<
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
         readonly turn?: number | undefined;
+        readonly owner?: ActiveProfile | undefined;
       },
     ): Effect.Effect<ReceiverStream, Failed>;
     /**
@@ -3885,6 +3893,7 @@ function make(deps: PlaybackDeps) {
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
         readonly turn?: number | undefined;
+        readonly owner?: ActiveProfile | undefined;
         /** A capture of the channel the session will read, as `readingOf` found. */
         readonly joining?: string;
       },
@@ -3955,6 +3964,7 @@ function make(deps: PlaybackDeps) {
         const token = randomBytes(18).toString("base64url");
 
         const session: LiveSession = {
+          owner: options.owner,
           kind: "live",
           id,
           token,
@@ -4027,11 +4037,13 @@ function make(deps: PlaybackDeps) {
       },
       decoders: readonly Codec[],
       receiver: ReceiverTarget | null,
+      owner?: ActiveProfile,
     ) =>
       Effect.gen(function* () {
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
 
         const session: TitleSessionState = {
+          owner,
           kind: "title",
           subtitleFileChanged: new AbortController(),
           id,
@@ -4149,6 +4161,7 @@ function make(deps: PlaybackDeps) {
           },
           decoders,
           receiver,
+          asked.owner,
         );
 
         const standing = Effect.andThen(
@@ -4255,6 +4268,8 @@ function make(deps: PlaybackDeps) {
               { discard: true },
             );
 
+            yield* coordination.whileAsked(turn);
+
             const { session, probe } = yield* fileSession(
               randomUUID(),
               { kind: "copy", copy: copy.id, file: subtitlesOfCopy(copy.id, copy.title) },
@@ -4268,11 +4283,17 @@ function make(deps: PlaybackDeps) {
               },
               decoders,
               null,
+              copy.owner,
             );
+
+            yield* coordination
+              .whileAsked(turn)
+              .pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
 
             return {
               sessionId: session.id,
               copy: copy.id,
+              ...defined({ owner: session.owner }),
               url: `${base}/title/${session.token}.mp4`,
               duration: probe.duration,
               audio: audioTracks(probe.audio),
@@ -4316,6 +4337,7 @@ function make(deps: PlaybackDeps) {
           readonly audioLanguage?: string | null;
           readonly preview?: boolean;
           readonly turn?: number | undefined;
+          readonly owner?: ActiveProfile | undefined;
         } = {},
       ) =>
         coordination.inTurn(
@@ -4397,6 +4419,7 @@ function make(deps: PlaybackDeps) {
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
           readonly turn?: number | undefined;
+          readonly owner?: ActiveProfile | undefined;
         } = {},
       ) =>
         coordination.inTurn(
@@ -4507,6 +4530,10 @@ function make(deps: PlaybackDeps) {
         }),
 
       closeAll,
+      closeForProfile: Effect.andThen(
+        coordination.begin,
+        Effect.andThen(closeAll, coordination.exclusive(closeAll)),
+      ),
 
       closeOf: (subscriptionId: string) =>
         coordination.exclusive(

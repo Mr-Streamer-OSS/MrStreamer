@@ -1,3 +1,4 @@
+import type { Profiles } from "../platform/profile-store.ts";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { Failed } from "@mrstreamer/core/failure";
 import { t } from "@mrstreamer/core/i18n";
@@ -25,7 +26,10 @@ export function playbackHandlers({
   output,
   settings,
   analytics,
+  profiles,
 }: {
+  /** Whose viewing an open belongs to: the admitted owner, or the active one. */
+  readonly profiles: Pick<Profiles["Service"], "active">;
   readonly playback: Playback["Service"];
   readonly coordination: Pick<PlaybackCoordination["Service"], "begin" | "passed">;
   readonly library: Pick<Library["Service"], "channel">;
@@ -53,74 +57,82 @@ export function playbackHandlers({
     ) => {
       const token = analytics.admitPlayback("live", preview ? undefined : measurement, frame);
 
-      return observeOpen(
-        coordination,
-        () => analytics.playbackFailureObserver(token ?? undefined),
-        (turn) =>
-          Effect.gen(function* () {
-            const channel = yield* library.channel(named);
-            const variants = yield* streamsOf(settings, channel, variant, archive);
+      return Effect.flatMap(profiles.active, (owner) =>
+        observeOpen(
+          coordination,
+          () => analytics.playbackFailureObserver(token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              const channel = yield* library.channel(named);
+              const variants = yield* streamsOf(settings, channel, variant, archive);
 
-            return yield* playback.open(ownedId(channel), decoders, {
-              variants,
-              archive: archive ?? null,
-              repair: repair ?? false,
-              audio: audio ?? null,
-              audioLanguage: audioLanguage ?? null,
-              preview: preview ?? false,
-              turn,
-            });
+              return yield* playback.open(ownedId(channel), decoders, {
+                variants,
+                owner,
+                archive: archive ?? null,
+                repair: repair ?? false,
+                audio: audio ?? null,
+                audioLanguage: audioLanguage ?? null,
+                preview: preview ?? false,
+                turn,
+              });
+            }),
+          Effect.gen(function* () {
+            // A page's preview never takes the provider's connection from a receiver. Refused
+            // here while one is the output, also one that is gone with nothing open; the playback
+            // service looks again when the open takes its turn, for one that began meanwhile.
+            if (preview && (yield* output.remote)) {
+              return yield* new Failed({
+                error: { kind: "unexpected", detail: t("A receiver has playback.") },
+              });
+            }
           }),
-        Effect.gen(function* () {
-          // A page's preview never takes the provider's connection from a receiver. Refused
-          // here while one is the output, also one that is gone with nothing open; the playback
-          // service looks again when the open takes its turn, for one that began meanwhile.
-          if (preview && (yield* output.remote)) {
-            return yield* new Failed({
-              error: { kind: "unexpected", detail: t("A receiver has playback.") },
-            });
-          }
-        }),
+        ),
       );
     },
     "playback.openTitle": ({ title, decoders, measurement }, frame) => {
       const token = analytics.admitPlayback("vod", measurement, frame);
 
-      return observeOpen(
-        coordination,
-        () => analytics.playbackFailureObserver(token ?? undefined),
-        (turn) =>
-          Effect.gen(function* () {
-            // What plays goes first, whichever subscription it is of, so no provider sees a
-            // connection beside the one about to open.
-            yield* playback.closeAll;
-            const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+      return Effect.flatMap(profiles.active, (owner) =>
+        observeOpen(
+          coordination,
+          () => analytics.playbackFailureObserver(token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              // What plays goes first, whichever subscription it is of, so no provider sees a
+              // connection beside the one about to open.
+              yield* playback.closeAll;
+              const { url, revision, headers, listingKey } = yield* onDemand.file(title);
 
-            return yield* playback.openTitle(title, url, decoders, {
-              turn,
-              revision,
-              headers,
-              listingKey,
-            });
-          }),
+              return yield* playback.openTitle(title, url, decoders, {
+                turn,
+                owner,
+                revision,
+                headers,
+                listingKey,
+              });
+            }),
+        ),
       );
     },
     "playback.openCopy": ({ copy, decoders, measurement }, frame) => {
       const token = analytics.admitPlayback("vod", measurement, frame);
 
-      return observeOpen(
-        coordination,
-        () => analytics.playbackFailureObserver(token ?? undefined),
-        (turn) =>
-          Effect.gen(function* () {
-            const recorded = yield* recordings.copy(copy);
+      return Effect.flatMap(profiles.active, (owner) =>
+        observeOpen(
+          coordination,
+          () => analytics.playbackFailureObserver(token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              const recorded = yield* recordings.copy(copy, owner);
 
-            return yield* playback.openCopy(
-              recorded ?? (yield* downloads.copy(copy)),
-              decoders,
-              turn,
-            );
-          }),
+              return yield* playback.openCopy(
+                recorded ?? (yield* downloads.copy(copy, owner)),
+                decoders,
+                turn,
+              );
+            }),
+        ),
       );
     },
     "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),

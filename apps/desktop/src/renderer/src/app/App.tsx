@@ -1,6 +1,8 @@
+import { syncProfiles, subscribeProfiles, profileStatus } from "../features/profiles/profiles.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { hasTitles, ownedKey } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
 import { DownloadsPage } from "../features/downloads/DownloadsPage.tsx";
 import { RecordingsPage } from "../features/recordings/RecordingsPage.tsx";
@@ -11,6 +13,7 @@ import { GuidePage } from "../features/live/GuidePage.tsx";
 import { ReminderBanners } from "../features/reminders/ReminderBanners.tsx";
 import { SearchPalette } from "../features/search/SearchPalette.tsx";
 import { WindowBar } from "../components/WindowBar.tsx";
+import { Button } from "../components/ui/button.tsx";
 import { SettingsPage } from "../features/settings/SettingsPage.tsx";
 import { TitlesPage } from "../features/titles/TitlesPage.tsx";
 import { UpdateReminder } from "../features/updates/UpdateReminder.tsx";
@@ -35,10 +38,28 @@ import { withoutTitles, useUi, type View } from "./ui-store.ts";
 
 /** The window, and the question Quit asks while a recording's time goes on, whatever it shows. */
 export function App() {
+  const client = useQueryClient();
+  const profile = useSyncExternalStore(subscribeProfiles, profileStatus);
+  // Retry configures the durable selection when known, then reloads its language and output.
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => syncProfiles(client), [client, attempt]);
+
   return (
     <>
-      <Screen />
-      <QuitDialog />
+      {profile.pending ? null : profile.error !== null ? (
+        <>
+          <WindowBar recovery />
+          <div className="flex items-center gap-4 p-10 text-sm" role="alert">
+            <p className="text-destructive">{describeError(appError(profile.error))}</p>
+            <Button size="sm" onClick={() => setAttempt((count) => count + 1)}>
+              {t("Retry")}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <Screen key={profile.owner ? `${profile.owner.id}:${profile.owner.revision}` : "initial"} />
+      )}
+      {!profile.pending && <QuitDialog />}
     </>
   );
 }

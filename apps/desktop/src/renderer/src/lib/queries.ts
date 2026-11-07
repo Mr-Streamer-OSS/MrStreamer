@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { isCallable } from "../../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 // React Query bindings for the IPC contract. Components read data through these hooks only.
@@ -37,7 +38,15 @@ import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { invalidateDetailsCatalogue } from "../app/ui-store.ts";
 import { player } from "../player/player.ts";
 import { hostOf } from "./format.ts";
-import { call, listen, searchCall } from "./ipc.ts";
+import {
+  call,
+  callForProfile,
+  listen,
+  searchCall,
+  profileOwner,
+  currentProfile,
+  currentProfileReply,
+} from "./ipc.ts";
 import { preferenceQuery } from "./preferences.ts";
 import { defined } from "@mrstreamer/core/defined";
 
@@ -112,6 +121,13 @@ export const queries = {
         }
       },
       structuralSharing: (previous, next) => {
+        if (
+          type.keywords.object.root.allows(next) &&
+          "sequence" in next &&
+          !currentProfileReply(next)
+        )
+          return previous;
+
         if (type.keywords.object.root.allows(next) && !isCallable(next)) {
           const read = viewingReads.get(next);
 
@@ -568,8 +584,14 @@ export async function updateSubscriptionPreferences(
   client: QueryClient,
   subscriptionId: string,
   patch: Partial<SubscriptionPreferences>,
+  owner: ActiveProfile | null = profileOwner(),
 ): Promise<void> {
-  const saved = await call("subscription.updatePreferences", { subscriptionId, patch });
+  const saved = await callForProfile(owner, "subscription.updatePreferences", {
+    subscriptionId,
+    patch,
+  });
+
+  if (!currentProfile(owner) || !currentProfileReply(saved)) return;
   client.setQueryData(queries.subscriptionPreferences(subscriptionId).queryKey, saved);
 }
 
@@ -582,9 +604,12 @@ export function useChooseQuality(): (channel: LiveChannel, variantId: string | n
 
   return useCallback(
     (channel: LiveChannel, variantId: string | null) => {
+      const owner = profileOwner();
       void (async () => {
         const { subscriptionId } = channel;
         const left = await client.fetchQuery(queries.subscriptionPreferences(subscriptionId));
+
+        if (!currentProfile(owner)) return;
 
         // A choice kept under another of the channel's streams' ids goes too.
         const others = Object.entries(left.channelVariants ?? {}).filter(
@@ -595,9 +620,9 @@ export function useChooseQuality(): (channel: LiveChannel, variantId: string | n
           variantId === null ? others : [...others, [channel.id, variantId]],
         );
 
-        await updateSubscriptionPreferences(client, subscriptionId, { channelVariants });
+        await updateSubscriptionPreferences(client, subscriptionId, { channelVariants }, owner);
 
-        if (sameOwned(player.current(), channel)) player.reopen();
+        if (currentProfile(owner) && sameOwned(player.current(), channel)) player.reopen();
       })().catch(() => {});
     },
     [client],
@@ -613,7 +638,7 @@ export function keepGuideStatus(client: QueryClient, status: GuideStatus): void 
 
 /** Keeps the latest viewing state: an answer can arrive after a later change's event. */
 export function keepViewing(client: QueryClient, viewing: Viewing, roster: string): void {
-  if (rosterOf(client) !== roster) return;
+  if (!currentProfileReply(viewing) || rosterOf(client) !== roster) return;
   const queryKey = queries.viewing().queryKey;
   const cached = client.getQueryData(queryKey);
 
@@ -920,7 +945,8 @@ export function syncGuideUpdates(client: QueryClient): () => void {
  * later change.
  */
 export function syncViewing(client: QueryClient): () => void {
-  return listen("viewing.changed", ({ sequence }) => {
+  const receive = ({ sequence }: { readonly sequence: number }) => {
+    const owner = profileOwner();
     const cached = client.getQueryData(queries.viewing().queryKey);
 
     if (cached && cached.sequence >= sequence) return;
@@ -933,19 +959,48 @@ export function syncViewing(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
     void pending?.then(
       () => {
-        if ((client.getQueryData(queries.viewing().queryKey)?.sequence ?? -1) < sequence)
+        if (
+          currentProfile(owner) &&
+          (client.getQueryData(queries.viewing().queryKey)?.sequence ?? -1) < sequence
+        )
           void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
       },
       () => {},
     );
+  };
+
+  const legacy = listen("viewing.changed", (change) => {
+    if (profileOwner() === null) receive(change);
   });
+
+  const owned = listen("profiles.viewingChanged", (change) => {
+    if (currentProfile(change.owner)) receive(change);
+  });
+
+  return () => {
+    legacy();
+    owned();
+  };
 }
 
 /** Reads the channel lists again once one was made, renamed, moved, deleted or changed. */
 export function syncCustomLists(client: QueryClient): () => void {
-  return listen("customLists.changed", () => {
+  const read = () => {
     void client.invalidateQueries({ queryKey: queries.customLists().queryKey });
+  };
+
+  const legacy = listen("customLists.changed", () => {
+    if (profileOwner() === null) read();
   });
+
+  const owned = listen("profiles.listsChanged", ({ owner }) => {
+    if (currentProfile(owner)) read();
+  });
+
+  return () => {
+    legacy();
+    owned();
+  };
 }
 
 /**
@@ -964,7 +1019,13 @@ export function syncWatchlist(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["watchlist"] });
   };
 
-  const stopChanges = listen("watchlist.changed", read);
+  const stopChanges = listen("watchlist.changed", () => {
+    if (profileOwner() === null) read();
+  });
+
+  const stopOwned = listen("profiles.watchlistChanged", ({ owner }) => {
+    if (currentProfile(owner)) read();
+  });
 
   const stopLists = listen("ondemand.updated", ({ markedForAdults }) => {
     if (!markedForAdults) return read();
@@ -981,6 +1042,7 @@ export function syncWatchlist(client: QueryClient): () => void {
 
   return () => {
     stopChanges();
+    stopOwned();
     stopLists();
   };
 }

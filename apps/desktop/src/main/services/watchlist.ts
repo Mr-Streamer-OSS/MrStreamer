@@ -1,3 +1,4 @@
+import { ViewingErasure } from "@mrstreamer/core/viewing/service";
 // The watchlist: movies and whole series the viewer saved to watch later. It is apart from the
 // viewing record: playing, finishing or leaving Continue watching changes no entry, and saving or
 // removing one changes nothing of how far a title got.
@@ -20,6 +21,8 @@
 //
 // Which title an entry is now, the lists say each time the watchlist is read, so an entry no
 // provider lists any more stays, without a title, and has one again when it is listed again.
+import { AdmittedSettings } from "./preferences.ts";
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { TitleKind, TitleListsStatus } from "@mrstreamer/contracts/ondemand";
 import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";
@@ -74,6 +77,7 @@ export class Watchlist extends Context.Service<
     remove(entry: OwnedId): Effect.Effect<void, Failed>;
     /** Says so after each title saved or removed. */
     readonly changes: Stream.Stream<void>;
+    readonly profileChanges?: Stream.Stream<ActiveProfile | null>;
   }
 >()("mrstreamer/Watchlist") {
   static readonly layer = Layer.effect(Watchlist, make());
@@ -85,6 +89,14 @@ function make() {
     const onDemand = yield* OnDemand;
     const store = yield* WatchlistStore;
     const changes = yield* PubSub.unbounded<void>();
+    const profileChanges = yield* PubSub.unbounded<ActiveProfile | null>();
+
+    const announce = Effect.gen(function* () {
+      const admitted = yield* Effect.serviceOption(AdmittedSettings);
+      yield* PubSub.publish(changes, undefined);
+      yield* PubSub.publish(profileChanges, admitted._tag === "Some" ? admitted.value.owner : null);
+    });
+
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
     /** The fetch of its lists each subscription's record was last brought in line with, by its id. */
     let alignedTo: ReadonlyMap<string, number> = new Map();
@@ -97,11 +109,16 @@ function make() {
 
     /** Those, when the one `named` belongs to is among them. */
     const savingWith = (named: OwnedId) =>
-      Effect.flatMap(saving, (found) =>
-        found.some((each) => each.id === named.subscriptionId)
-          ? Effect.succeed(found)
-          : Effect.fail(noSubscription),
-      );
+      Effect.gen(function* () {
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+        const found = yield* saving;
+        const source = found.find((each) => each.id === named.subscriptionId);
+
+        if (!source || (erasure._tag === "Some" && !erasure.value.current(source.key)))
+          return yield* noSubscription;
+
+        return found;
+      });
 
     /**
      * Brings what `source` saved in line with its lists, once for each fetch of them: a title's
@@ -111,6 +128,9 @@ function make() {
      */
     const align = (found: readonly SavedSubscription[], source: SavedSubscription) =>
       Effect.gen(function* () {
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+
+        if (erasure._tag === "Some" && !erasure.value.current(source.key)) return false;
         const entries = yield* store.entries([source.key]);
 
         if (entries.length === 0) return true;
@@ -119,7 +139,13 @@ function make() {
         // The lists went meanwhile, or the subscription did, or its login was stored anew: what
         // was worked out for it is no longer its own. Check again in the write transaction.
         if (!titles || !(yield* subscriptions.stands(source))) return false;
-        yield* store.adopt(source.key, titles, () => subscriptions.standsNow(source));
+        yield* store.adopt(
+          source.key,
+          titles,
+          () =>
+            subscriptions.standsNow(source) &&
+            (erasure._tag === "None" || erasure.value.current(source.key)),
+        );
 
         return true;
       }).pipe(
@@ -224,6 +250,7 @@ function make() {
 
       save: (kind: TitleKind, version: OwnedId) =>
         Effect.gen(function* () {
+          const erasure = yield* Effect.serviceOption(ViewingErasure);
           const before = yield* savingWith(version);
           yield* aligned(before);
           const missing = new Failed({ error: { kind: "title-not-found", titleId: version.id } });
@@ -251,12 +278,16 @@ function make() {
               title.versions.every(({ subscriptionId }) => {
                 const source = before.find((each) => each.id === subscriptionId);
 
-                return source !== undefined && subscriptions.standsNow(source);
+                return (
+                  source !== undefined &&
+                  subscriptions.standsNow(source) &&
+                  (erasure._tag === "None" || erasure.value.current(source.key))
+                );
               }),
           });
 
           if (!first) return yield* missing;
-          yield* PubSub.publish(changes, undefined);
+          yield* announce;
 
           return yield* entryOf(found, first);
         }),
@@ -265,21 +296,31 @@ function make() {
         Effect.gen(function* () {
           // What a subscription that went kept is no longer the viewer's to change. The
           // transaction checks the named owner and selects the other accounts still saved.
+          const erasure = yield* Effect.serviceOption(ViewingErasure);
           const found = yield* saving;
           const owner = found.find((each) => each.id === entry.subscriptionId);
 
           if (!owner) return yield* noSubscription;
           yield* store.remove({
             accounts: () =>
-              found.filter((each) => subscriptions.standsNow(each)).map((each) => each.key),
+              found
+                .filter(
+                  (each) =>
+                    subscriptions.standsNow(each) &&
+                    (erasure._tag === "None" || erasure.value.current(each.key)),
+                )
+                .map((each) => each.key),
             account: owner.key,
             id: entry.id,
-            stands: () => subscriptions.standsNow(owner),
+            stands: () =>
+              subscriptions.standsNow(owner) &&
+              (erasure._tag === "None" || erasure.value.current(owner.key)),
           });
-          yield* PubSub.publish(changes, undefined);
+          yield* announce;
         }),
 
       changes: Stream.fromPubSub(changes),
+      profileChanges: Stream.fromPubSub(profileChanges),
     };
   });
 }

@@ -806,11 +806,13 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
     titles: (account, filter) => attempt(() => titlesOf(account, filter)),
     marks: (account, keys) => attempt(() => look.marks(account, keys)),
     marksIn: (account, seriesIds) => attempt(() => look.marksIn(account, seriesIds)),
-    commit: ({ accounts, commandId, at, decide }) =>
+    commit: ({ accounts, commandId, at, decide, current }) =>
       attempt(() => {
         let favouriteAdded = false;
         const added = usage?.action("favourite_added");
         written(() => {
+          if (current && !current()) throw new Failed({ error: { kind: "no-subscription" } });
+
           if (statements.done.get(commandId)) return [];
           const events = decide(read(accounts), look);
 

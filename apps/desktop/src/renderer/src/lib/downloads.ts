@@ -10,7 +10,7 @@ import { formatBytes, formatPercent, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../app/ui-store.ts";
 import { copyNow, titlePlayer } from "../player/title-player.ts";
 import { describeError } from "./errors.ts";
-import { call, listen } from "./ipc.ts";
+import { call, listen, currentProfile, profileOwner } from "./ipc.ts";
 import { minutesLeft } from "./format.ts";
 
 export const downloadsQuery = () =>
@@ -23,6 +23,7 @@ export const downloadsQuery = () =>
 /** Keeps the list current: every change, and a transfer's progress, arrives as an event. */
 export function syncDownloads(client: QueryClient): () => void {
   return listen("downloads.changed", (list) => {
+    if (list.profile ? !currentProfile(list.profile) : profileOwner() !== null) return;
     // A read still under way holds an older list than this: it must not land after it.
     void client.cancelQueries({ queryKey: downloadsQuery().queryKey, exact: true });
     client.setQueryData(downloadsQuery().queryKey, list);

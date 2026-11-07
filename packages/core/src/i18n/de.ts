@@ -3,6 +3,47 @@
 import type { Translation } from "../i18n.ts";
 
 export const de: Translation = {
+  "Viewing preferences could not be read. Repair the file or switch profiles.":
+    "Die Wiedergabeeinstellungen konnten nicht gelesen werden. Repariere die Datei oder wechsle das Profil.",
+  "This viewing profile is unavailable or being deleted.":
+    "Dieses Profil ist nicht verfügbar oder wird gelöscht.",
+  "This viewing profile is being deleted.": "Dieses Profil wird gelöscht.",
+  "Profile switching requires the installation consent owner.":
+    "Der Profilwechsel benötigt die Zustimmungseinstellungen dieser Installation.",
+  "Viewing profile changed; retry this request.":
+    "Das Profil wurde gewechselt. Bitte erneut versuchen.",
+  "Viewing profile configuration did not finish; select the profile again to retry.":
+    "Die Profileinrichtung ist unvollständig. Bitte erneut auswählen.",
+  "This profile admission has ended; retry the operation.":
+    "Diese Profilanfrage ist abgelaufen. Bitte erneut versuchen.",
+  "A profile name must contain 1 to 80 characters.":
+    "Ein Profilname muss 1 bis 80 Zeichen enthalten.",
+  "Profile switching is not enabled until interactive isolation is ready.":
+    "Der Profilwechsel ist noch nicht verfügbar.",
+  "Finish deleting the pending profile before erasing a source.":
+    "Schließe das Löschen des Profils ab, bevor du eine Quelle löschst.",
+  "Profile isolation is not ready.": "Profile sind noch nicht verfügbar.",
+  "Viewing profile changed; retry this subtitle choice.":
+    "Das Profil wurde gewechselt. Wähle die Untertitel erneut.",
+
+  "Playback could not be saved. Try again.":
+    "Die Wiedergabe konnte nicht gespeichert werden. Versuche es erneut.",
+  "Viewing profile changed. Try again.": "Das Profil wurde gewechselt. Versuche es erneut.",
+  Default: "Standard",
+  Profiles: "Profile",
+  "Profile: {name}": "Profil: {name}",
+  "Profile name": "Profilname",
+  "New profile": "Neues Profil",
+  "Adding…": "Wird hinzugefügt…",
+  "Switching…": "Wird gewechselt…",
+  "Deleting…": "Wird gelöscht…",
+  "Delete {name}": "{name} löschen",
+  "Retry deleting {name}": "{name} erneut löschen",
+  "Deleting didn't finish": "Löschen wurde nicht abgeschlossen",
+  "Delete {name}? Their lists, progress and settings go. Recordings and downloads stay.":
+    "{name} löschen? Listen, Fortschritt und Einstellungen werden entfernt. Aufnahmen und Downloads bleiben.",
+  "Recordings and downloads are shared. Lists, progress and favourites stay with each profile.":
+    "Aufnahmen und Downloads sind gemeinsam. Listen, Fortschritt und Favoriten bleiben bei jedem Profil.",
   "Update to {version}": "Auf {version} aktualisieren",
   "You have {version}": "Du hast {version}",
   "Find a setting": "Einstellung suchen",

@@ -1,3 +1,4 @@
+import { ViewingErasure } from "@mrstreamer/core/viewing/service";
 // The viewer's channel lists: named, in an order of the viewer's, each holding exact channels of
 // any saved subscriptions in an order of its own. Nothing joins two subscriptions' channels, and
 // no channel is ever found by its name.
@@ -22,6 +23,7 @@
 // it went is stored for none. That is asked in the change's own transaction, so a removal that
 // erases the account comes wholly before or after it. Each change is told to the UI after it is
 // stored. Nothing here logs the name of a list or a channel.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { CustomList, CustomListMember } from "@mrstreamer/contracts/custom-lists";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import type { CatalogueStatus, LiveChannel } from "@mrstreamer/contracts/library";
@@ -40,7 +42,7 @@ import {
   type StoredMember,
 } from "../platform/custom-lists-store.ts";
 import { Library } from "./library.ts";
-import { Settings } from "./preferences.ts";
+import { Settings, AdmittedSettings } from "./preferences.ts";
 import { sameSource, Subscriptions, type SavedSubscription } from "./subscription.ts";
 
 export class CustomLists extends Context.Service<
@@ -94,6 +96,7 @@ export class CustomLists extends Context.Service<
     }): Effect.Effect<readonly CustomList[], Failed>;
     /** Says so after each change of a list. */
     readonly changes: Stream.Stream<void>;
+    readonly profileChanges?: Stream.Stream<ActiveProfile | null>;
   }
 >()("mrstreamer/CustomLists") {
   static readonly layer = Layer.effect(CustomLists, make());
@@ -180,6 +183,14 @@ function make() {
     const settings = yield* Settings;
     const store = yield* CustomListStore;
     const changes = yield* PubSub.unbounded<void>();
+    const profileChanges = yield* PubSub.unbounded<ActiveProfile | null>();
+
+    const announce = Effect.gen(function* () {
+      const admitted = yield* Effect.serviceOption(AdmittedSettings);
+      yield* PubSub.publish(changes, undefined);
+      yield* PubSub.publish(profileChanges, admitted._tag === "Some" ? admitted.value.owner : null);
+    });
+
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
     const listChanged = new Failed({ error: { kind: "list-changed" } });
     /** The fetch of its channels each subscription's channels in lists were last aligned to. */
@@ -209,12 +220,16 @@ function make() {
      */
     const align = (subscription: SavedSubscription) =>
       Effect.gen(function* () {
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+
+        if (erasure._tag === "Some" && !erasure.value.current(subscription.key)) return false;
         const channelOf = yield* library.lookup(subscription.id);
 
         // Its catalogue went meanwhile, or the subscription did: asked last, with nothing waiting
         // after.
         if (!(yield* subscriptions.stands(subscription))) return false;
         yield* store.align(subscription.key, (stored) => {
+          if (erasure._tag === "Some" && !erasure.value.current(subscription.key)) return null;
           const resolved = resolve(channelOf, stored);
 
           if (!resolved) return null;
@@ -227,7 +242,7 @@ function make() {
           };
         });
 
-        return true;
+        return erasure._tag === "None" || erasure.value.current(subscription.key);
       }).pipe(
         Effect.catchTag("Failed", (failed) =>
           Effect.as(
@@ -270,8 +285,7 @@ function make() {
     });
 
     /** Answers the lists after a change, told to the UI once stored when it changed anything. */
-    const after = (changed: boolean) =>
-      Effect.andThen(changed ? PubSub.publish(changes, undefined) : Effect.void, lists);
+    const after = (changed: boolean) => Effect.andThen(changed ? announce : Effect.void, lists);
 
     const nameOf = (name: string) => {
       const trimmed = name.trim();
@@ -294,11 +308,14 @@ function make() {
      */
     const listedOf = (named: OwnedId) =>
       Effect.gen(function* () {
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+
         const subscription = (yield* subscriptions.saved).find(
           (each) => each.id === named.subscriptionId,
         );
 
-        if (!subscription) return yield* noSubscription;
+        if (!subscription || (erasure._tag === "Some" && !erasure.value.current(subscription.key)))
+          return yield* noSubscription;
         const channelOf = yield* library.lookup(subscription.id);
         const channel = channelOf(named.id);
 
@@ -315,7 +332,9 @@ function make() {
           streams: streamsOf(channel),
           name: channel.title,
           adult: channel.adult === true,
-          stands: () => subscriptions.standsNow(subscription),
+          stands: () =>
+            subscriptions.standsNow(subscription) &&
+            (erasure._tag === "None" || erasure.value.current(subscription.key)),
         };
 
         return { subscription, channelOf, channel, listed };
@@ -362,10 +381,23 @@ function make() {
           return yield* after(changed);
         }),
 
-      removeMember: (list, member) => Effect.flatMap(store.removeMember(list, member), after),
+      removeMember: (list, member) =>
+        Effect.gen(function* () {
+          const erasure = yield* Effect.serviceOption(ViewingErasure);
+
+          return yield* Effect.flatMap(
+            store.removeMember(
+              list,
+              member,
+              erasure._tag === "Some" ? erasure.value.current : undefined,
+            ),
+            after,
+          );
+        }),
 
       arrange: ({ list, revision, order }) =>
         Effect.gen(function* () {
+          const erasure = yield* Effect.serviceOption(ViewingErasure);
           const found = yield* catalogued;
           const shown = yield* adults;
           // The order was made from the channels of the subscriptions saved then.
@@ -382,18 +414,29 @@ function make() {
             list,
             revision,
             order,
-            shown: (members) =>
-              new Set(
+            shown: (members) => {
+              if (
+                erasure._tag === "Some" &&
+                members.some(
+                  (member) =>
+                    order.includes(member.member) && !erasure.value.current(member.account),
+                )
+              )
+                throw noSubscription;
+
+              return new Set(
                 shownOf(found, shown, { id: list, name: "", revision, members }).members.flatMap(
                   (each) => (each.kind === "listed" ? [each.member] : []),
                 ),
-              ),
+              );
+            },
           });
 
           return yield* after(changed);
         }),
 
       changes: Stream.fromPubSub(changes),
+      profileChanges: Stream.fromPubSub(profileChanges),
     };
 
     return service;

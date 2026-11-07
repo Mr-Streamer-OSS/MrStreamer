@@ -20,6 +20,7 @@ import { resetForAccount, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
 import { movieNow, playTitle } from "../../src/renderer/src/lib/titles.ts";
 import { episodeNow, titlePlayer } from "../../src/renderer/src/player/title-player.ts";
+import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
 vi.mock(
@@ -447,6 +448,23 @@ describe("the next episode, with some watched already", () => {
     expect(text()).not.toContain("Low Tide");
     await wait(10_000);
     expect(opened()).toEqual(["e13", "e22"]);
+  });
+
+  it("updates the offered episode only for the playing profile revision", async () => {
+    const owner = { id: "private", revision: 2 };
+    selectProfileOwner(owner);
+    await playToEnd(pilotHouse, "s1");
+    expect(titlePlayer.state().next?.id).toBe("e21");
+    marked(watched(2, 1));
+    await act(async () =>
+      ipc.emit("profiles.viewingChanged", {
+        owner: { ...owner, revision: 1 },
+        sequence: 2,
+      }),
+    );
+    expect(titlePlayer.state().next?.id).toBe("e21");
+    await act(async () => ipc.emit("profiles.viewingChanged", { owner, sequence: 3 }));
+    expect(titlePlayer.state().next?.id).toBe("e22");
   });
 
   it("passes over one finished in another version of the series, by its numbers", async () => {

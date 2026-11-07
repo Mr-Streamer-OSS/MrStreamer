@@ -4,6 +4,7 @@
 //
 // The two player controllers follow it: with a receiver connected, what they are asked to play
 // goes there and their state is the receiver's. Nothing here plays or stops anything by itself.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { createStore, useStore } from "zustand";
 import type {
   Output,
@@ -14,7 +15,16 @@ import type {
 } from "@mrstreamer/contracts/output";
 import { t } from "@mrstreamer/core/i18n";
 import { appError } from "../lib/errors.ts";
-import { call, listen } from "../lib/ipc.ts";
+import {
+  call,
+  callForProfile,
+  listen,
+  profileOwner,
+  currentProfile,
+  currentProfileReply,
+  ownProfileReply,
+  profileChanged,
+} from "../lib/ipc.ts";
 
 export interface OutputState {
   readonly status: OutputStatus;
@@ -83,7 +93,10 @@ function receiverOf(output: Output): Receiver | null {
   return output.kind === "receiver" || output.kind === "lost" ? output.receiver : null;
 }
 
-function take(status: OutputStatus): void {
+function take(status: OutputStatus): boolean {
+  if (status.owner ? !currentProfile(status.owner) : profileOwner() !== null) return false;
+
+  if (!currentProfileReply(status)) return false;
   const before = store.getState().status;
   const connecting = status.output.kind === "connecting";
   store.setState((state) => ({
@@ -93,9 +106,14 @@ function take(status: OutputStatus): void {
   }));
 
   for (const listener of listeners) listener(status, before);
+
+  return true;
 }
 
-listen("output.changed", take);
+listen("output.changed", (snapshot) => {
+  if (snapshot.owner && !ownProfileReply(snapshot, snapshot.owner)) return;
+  take(snapshot);
+});
 
 void call("output.status")
   .then(take)
@@ -103,7 +121,10 @@ void call("output.status")
 
 /** Keeps why a connect to `receiver` reached nothing, for the views to say. */
 function refused(receiver: Pick<Receiver, "id" | "kind" | "name">) {
+  const owner = profileOwner();
+
   return (cause: unknown) => {
+    if (!currentProfile(owner)) return;
     const error = appError(cause);
 
     if (error.kind !== "output") return;
@@ -155,6 +176,22 @@ export function positionOf(media: RemoteMedia, now = Date.now()): number {
 }
 
 export const outputs = {
+  /** The backend already stopped the old interactive output; keep only shared receiver facts. */
+  clearForProfile(owner: ActiveProfile): void {
+    const previous = store.getState().status;
+    views.clear();
+    store.setState({ connectingSince: null, connectingFrom: null, choosing: false, refused: null });
+    const next: OutputStatus = { ...previous, owner, scanning: false, output: { kind: "local" } };
+
+    if (ownProfileReply(next, owner)) take(next);
+  },
+  /** A switch uses an explicit read: refusal stays visible, never an empty output fallback. */
+  async refreshForProfile(): Promise<void> {
+    const owner = profileOwner();
+    const snapshot = await callForProfile(owner, "output.status");
+
+    if (!currentProfile(owner) || !take(snapshot)) throw profileChanged();
+  },
   status: (): OutputStatus => store.getState().status,
   /** The receiver that has playback, or had it until its connection broke; null when it plays here. */
   receiver: (): Receiver | null => receiverOf(store.getState().status.output),
@@ -214,12 +251,16 @@ export const outputs = {
    * where no view shows the button, the list is the window's alone.
    */
   pick(): void {
+    const owner = profileOwner();
     store.setState({ refused: null });
     const view = [...views].at(-1);
     // A name of its own for each list, so the main process takes down this one and none asked
     // for since.
     const request = crypto.randomUUID();
-    const close = () => void call("output.closePicker", { request }).catch(() => {});
+
+    const close = () =>
+      void callForProfile(owner, "output.closePicker", { request }).catch(() => {});
+
     view?.addEventListener("abort", close, { once: true });
     void call("output.pick", { anchor: listAnchor(), request })
       .catch(refused({ id: "airplay", kind: "airplay", name: null }))

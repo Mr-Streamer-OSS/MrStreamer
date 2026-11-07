@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../../src/renderer/src/app/App.tsx";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
+import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
@@ -20,6 +21,14 @@ let cleanup = () => {};
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
+  ipc.always("output.status", {
+    owner: { id: "default", revision: 1 },
+    offers: [],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [],
+    output: { kind: "local" },
+  });
   useUi.setState(useUi.getInitialState(), true);
   ipc.always("subscription.list", [SAVED]);
   ipc.always("library.categories", [
@@ -47,7 +56,11 @@ afterEach(() => {
 async function mount(cached = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-  if (cached) client.setQueryData(queries.rememberedLiveBrowse().queryKey, remembered);
+  if (cached) {
+    selectProfileOwner({ id: "default", revision: 1 });
+    client.setQueryData(queries.rememberedLiveBrowse().queryKey, remembered);
+  }
+
   const mounted = queryView(client);
   cleanup = mounted.unmount;
   await mounted.render(createElement(TooltipProvider, null, createElement(App)));
