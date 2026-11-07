@@ -145,3 +145,11 @@ For a channel, a small line under the message adds what Mr. Streamer observed: t
 - **Can't play this title**: the file uses a format Mr. Streamer can't play or convert. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its name and the details shown.
 - **Not available**: the provider has no file for that movie or episode right now; some providers list titles whose files are gone.
 - **… didn't answer**, **… connection lost**, **… got no stream** or **… can't play this**, with your TV's name: see [Playing on a TV](troubleshooting.md#playing-on-a-tv).
+
+## Keyboard shortcuts
+
+Playback commands use the active viewing profile's saved keyboard bindings. The defaults below apply until you change them. A remap replaces every default key for that command in both Live TV and movies or series; resetting restores the defaults. Subtitle timing still uses Shift for a larger adjustment.
+
+Typing fields, editable text, open player menus and focused sliders keep their own keys. Space and Enter activate a focused button. A held key repeats seeking, volume and timing adjustments, but does not repeatedly pause, mute or open a menu.
+
+Escape and Live TV navigation remain fixed. Command, Control and Alt combinations are reserved for the app and operating system, including search, Settings, window controls and native media keys. A shortcut change does not remap those commands.

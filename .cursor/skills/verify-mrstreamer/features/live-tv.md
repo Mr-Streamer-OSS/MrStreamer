@@ -19,3 +19,5 @@ Read only the area needed for the changed path.
 - For clear muxed MPEG-TS HLS, read [Clear muxed MPEG-TS HLS](live-tv/hls.md).
 - For android Explore app, read [Android Explore app](live-tv/android.md).
 - For local live rewind and retained timeline, read [Local retained timeline service](live-tv/timeline.md).
+
+Desktop playback command defaults and overrides share `apps/desktop/src/renderer/src/app/shortcuts.ts` with title playback. Channel digits and list navigation remain fixed; the active profile's committed preferences control remappable commands. Verify a remap and reset on an advancing rewind-capable live fixture, including unchanged menu/text/button input and held-key behavior. See [Shared viewing preferences](preferences.md) for profile/restart and failed-save acceptance. Renderer shortcut resolution covers the live surface; actual built-app live dispatch remains a separate proof.

@@ -16,7 +16,12 @@ export function hasModifier(event: KeyboardEvent): boolean {
 export function isTyping(event: KeyboardEvent): boolean {
   const target = event.target;
 
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+  return (
+    target instanceof Element &&
+    !!target.closest(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+    )
+  );
 }
 
 /** How long to wait for the window's word on full screen before going on without it. */

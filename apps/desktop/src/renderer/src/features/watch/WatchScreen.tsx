@@ -26,7 +26,8 @@ import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
-import { hasModifier, isTyping } from "../../app/platform.ts";
+import { blocksPlayerShortcut, resolveShortcut } from "../../app/shortcuts.ts";
+import { currentPreferences } from "../../lib/preferences.ts";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { closeWatch, useUi, type ChannelList } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
@@ -287,8 +288,7 @@ export function WatchScreen() {
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
 
-      if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
-        return;
+      if (blocksPlayerShortcut(event)) return;
 
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.watching) return;
       const now = latest.current;
@@ -330,24 +330,19 @@ export function WatchScreen() {
         return;
       }
 
-      switch (event.key) {
-        case " ":
-        case "k":
-        case "K":
-          // A focused button takes Space itself.
-          if (event.key === " " && event.target instanceof HTMLButtonElement) return;
+      const command = resolveShortcut(event, "live", currentPreferences()?.keyboardShortcuts);
 
-          if (event.repeat || !rewinds()) break;
+      switch (command ?? event.key) {
+        case "pause":
+          if (!rewinds()) break;
           wake();
           player.togglePause();
           break;
-        case "j":
-        case "J":
-        case "l":
-        case "L":
+        case "seekBack":
+        case "seekForward":
           if (!rewinds()) break;
           wake();
-          void player.skip(event.key.toLowerCase() === "j" ? -SKIP_MS : SKIP_MS);
+          void player.skip(command === "seekBack" ? -SKIP_MS : SKIP_MS);
           break;
         case "Escape":
           if (numberEntry.active()) numberEntry.cancel();
@@ -417,52 +412,46 @@ export function WatchScreen() {
             if (!now.picker.back()) setPicking(false);
           } else player.back();
           break;
-        case "f":
+        case "fullscreen":
           if (miniPlayer.on()) void miniPlayer.leave(true);
           else toggleFullscreen();
           break;
-        case "p":
-        case "P":
+        case "miniPlayer":
           if (player.onReceiver()) flash(t(MINI_NEEDS_PICTURE));
           else void miniPlayer.toggle();
           break;
-        case "o":
-        case "O":
+        case "output":
           wake();
           void openChooser(() => {
             keyboardMenu.current = true;
             setMenu("output");
           }, view.signal);
           break;
-        case "m":
+        case "mute":
           if (!player.toggleMute()) flash(t("TV remote sets volume"));
           break;
-        case "c":
+        case "subtitles":
           if (player.onReceiver()) flash(t("Live subtitles play here only"));
           else player.toggleSubtitles();
           break;
-        case "g":
-        case "G":
-        case "h":
-        case "H":
+        case "subtitlesEarlier":
+        case "subtitlesLater":
           if (player.onReceiver()) flash(t("Subtitle timing plays here only"));
-          else nudgeSubtitles(player.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
+          else nudgeSubtitles(player.state().subtitle, command === "subtitlesEarlier" ? -1 : 1);
           break;
-        case "i":
+        case "info":
           wake();
           break;
-        case "s":
-        case "S":
+        case "favourite":
           if (now.channel) toggleFavourite(now.channel);
           break;
-        case "q":
+        case "quality":
           if ((now.channel?.variants.length ?? 0) < 2) return;
           openQuality(true);
           break;
-        case "r":
-        case "R":
+        case "retry":
           // Only a failed channel that Retry can help: nothing while it plays or reconnects.
-          if (event.repeat || !retryFailed()) return;
+          if (!retryFailed()) return;
           break;
         default:
           return;

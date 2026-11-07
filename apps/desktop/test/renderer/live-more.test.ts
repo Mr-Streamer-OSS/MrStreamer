@@ -362,6 +362,10 @@ it("wheel over the Live picture zaps once per gesture and leaves menu, list, dia
   await roll(120);
   expect(ipc.argsOf("playback.open")).toHaveLength(twice);
   await pressKey("Escape");
+  // Enter on More activates that button; focus the picture to use list navigation.
+  await act(async () => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
   await pressKey("Enter");
   now += 800;
   await roll(120);
