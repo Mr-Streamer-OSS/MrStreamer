@@ -1407,6 +1407,8 @@ it.each(["released", "lost"] as const)(
       await app.runtime.dispose();
     }
   },
+  // Both profile lifecycles include real media probing and durable checkpoints.
+  15_000,
 );
 
 it.each(["media-failed", "stopped"] as const)(
