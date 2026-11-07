@@ -1783,6 +1783,24 @@ export const es: Translation = {
   "Turn on rule": "Activar la regla",
   "Stop following": "Dejar de seguir",
   "{count} more": { one: "{count} más", many: "{count} más", other: "{count} más" },
+  // Recording priority.
+  Priority: "Prioridad",
+  "Priority {priority}": "Prioridad {priority}",
+  "The only rule": "La única regla",
+  "{rank} of {total}, first": "{rank} de {total}, la primera",
+  "{rank} of {total}, level with {names}": "{rank} de {total}, igual que {names}",
+  "{rank} of {total}, after {names}": "{rank} de {total}, después de {names}",
+  "{rank} of {total}, after {names}, level with {level}":
+    "{rank} de {total}, después de {names}, igual que {level}",
+  "Connection free": "Conexión libre",
+  "From {time}, after {holders}": "Desde las {time}, después de {holders}",
+  "From {time}": "Desde las {time}",
+  "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
+    one: "{count} emisión coincide con otra. La prioridad más alta va primero, y no se detiene nada de lo que ya está en marcha.",
+    many: "{count} de emisiones coinciden con otras. La prioridad más alta va primero, y no se detiene nada de lo que ya está en marcha.",
+    other:
+      "{count} emisiones coinciden con otras. La prioridad más alta va primero, y no se detiene nada de lo que ya está en marcha.",
+  },
   "A rule following {title} records this. Its padding is the rule's.":
     "Una regla que sigue {title} graba esto. Su margen es el de la regla.",
   "From a rule": "Por una regla",

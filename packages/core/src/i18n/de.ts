@@ -1728,6 +1728,23 @@ export const de: Translation = {
   "Turn on rule": "Regel einschalten",
   "Stop following": "Nicht mehr folgen",
   "{count} more": { one: "{count} weitere", other: "{count} weitere" },
+  // Recording priority.
+  Priority: "Priorität",
+  "Priority {priority}": "Priorität {priority}",
+  "The only rule": "Die einzige Regel",
+  "{rank} of {total}, first": "{rank} von {total}, zuerst",
+  "{rank} of {total}, level with {names}": "{rank} von {total}, gleichauf mit {names}",
+  "{rank} of {total}, after {names}": "{rank} von {total}, nach {names}",
+  "{rank} of {total}, after {names}, level with {level}":
+    "{rank} von {total}, nach {names}, gleichauf mit {level}",
+  "Connection free": "Verbindung frei",
+  "From {time}, after {holders}": "Ab {time}, nach {holders}",
+  "From {time}": "Ab {time}",
+  "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
+    one: "{count} Ausstrahlung überschneidet sich. Höhere Priorität geht vor, und nichts, was schon läuft, wird gestoppt.",
+    other:
+      "{count} Ausstrahlungen überschneiden sich. Höhere Priorität geht vor, und nichts, was schon läuft, wird gestoppt.",
+  },
   "A rule following {title} records this. Its padding is the rule's.":
     "Eine Regel, die {title} folgt, nimmt das auf. Der Puffer ist der der Regel.",
   "From a rule": "Über eine Regel",

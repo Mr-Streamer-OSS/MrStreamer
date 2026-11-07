@@ -169,6 +169,12 @@ export interface Provider {
    */
   liveStream(channelId: string, signal?: AbortSignal): Promise<LiveStream>;
   /**
+   * Main-only stream from the currently admitted playback snapshot, without network reads or
+   * import inspection. Undefined when no snapshot or channel is present; never refreshes a miss.
+   * Contains credentials and stays in the main process, as liveStream does.
+   */
+  currentLiveStream?(channelId: string): LiveStream | undefined;
+  /**
    * Upstream location of a channel's recorded past in `window`, from the provider's catch-up
    * archive. Some addresses name no end, and the provider then sends on past the window: playback
    * stops it there. Contains credentials, so it stays in the main process. Whether

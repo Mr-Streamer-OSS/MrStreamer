@@ -1674,6 +1674,23 @@ export const en = {
   "Turn on rule": "Turn on rule",
   "Stop following": "Stop following",
   "{count} more": { one: "{count} more", other: "{count} more" },
+  // Recording priority.
+  Priority: "Priority",
+  "Priority {priority}": "Priority {priority}",
+  "The only rule": "The only rule",
+  "{rank} of {total}, first": "{rank} of {total}, first",
+  "{rank} of {total}, level with {names}": "{rank} of {total}, level with {names}",
+  "{rank} of {total}, after {names}": "{rank} of {total}, after {names}",
+  "{rank} of {total}, after {names}, level with {level}":
+    "{rank} of {total}, after {names}, level with {level}",
+  "Connection free": "Connection free",
+  "From {time}, after {holders}": "From {time}, after {holders}",
+  "From {time}": "From {time}",
+  "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
+    one: "{count} airing clashes. Higher priority goes first, and nothing already running is stopped.",
+    other:
+      "{count} airings clash. Higher priority goes first, and nothing already running is stopped.",
+  },
   "A rule following {title} records this. Its padding is the rule's.":
     "A rule following {title} records this. Its padding is the rule's.",
   "From a rule": "From a rule",

@@ -1787,6 +1787,24 @@ export const fr: Translation = {
   "Turn on rule": "Activer la règle",
   "Stop following": "Ne plus suivre",
   "{count} more": { one: "{count} de plus", many: "{count} de plus", other: "{count} de plus" },
+  // Recording priority.
+  Priority: "Priorité",
+  "Priority {priority}": "Priorité {priority}",
+  "The only rule": "La seule règle",
+  "{rank} of {total}, first": "{rank} sur {total}, en premier",
+  "{rank} of {total}, level with {names}": "{rank} sur {total}, à égalité avec {names}",
+  "{rank} of {total}, after {names}": "{rank} sur {total}, après {names}",
+  "{rank} of {total}, after {names}, level with {level}":
+    "{rank} sur {total}, après {names}, à égalité avec {level}",
+  "Connection free": "Connexion libre",
+  "From {time}, after {holders}": "À partir de {time}, après {holders}",
+  "From {time}": "À partir de {time}",
+  "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
+    one: "{count} diffusion en conflit. La priorité la plus haute passe d'abord, et rien de ce qui tourne déjà n'est arrêté.",
+    many: "{count} de diffusions en conflit. La priorité la plus haute passe d'abord, et rien de ce qui tourne déjà n'est arrêté.",
+    other:
+      "{count} diffusions en conflit. La priorité la plus haute passe d'abord, et rien de ce qui tourne déjà n'est arrêté.",
+  },
   "A rule following {title} records this. Its padding is the rule's.":
     "Une règle qui suit {title} enregistre ceci. Sa marge est celle de la règle.",
   "From a rule": "Par une règle",

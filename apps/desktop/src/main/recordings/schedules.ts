@@ -6,7 +6,11 @@
 // daylight saving moves it. A slot records at a time of day in this computer's time zone as it is
 // on each of its days: a start the clocks skip falls as JavaScript's Date places it, an hour later;
 // one they repeat is the first. Its length is in minutes of real time.
-import type { ConnectionHolder, RecordingPlan } from "@mrstreamer/contracts/recordings";
+import type {
+  ConnectionHolder,
+  RecordingCapacity,
+  RecordingPlan,
+} from "@mrstreamer/contracts/recordings";
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -77,29 +81,88 @@ export function nextOccurrence(plan: RecordingPlan, now: number): Occurrence | n
   return occurrences(plan, now, to)[0] ?? null;
 }
 
-/** Something that holds a connection over a time, as a conflict counts it. */
-export interface Holding {
-  readonly holder: Extract<ConnectionHolder, { readonly until: number }>;
-  readonly start: number;
-  /** Comes before one of the same start: it takes the connection first. */
-  readonly first: boolean;
+/** Pending work is ordered only when a connection becomes free. Nothing already admitted moves. */
+export interface PendingCapture extends Occurrence {
+  readonly id: string;
+  readonly channel: string;
+  readonly title: string;
+  readonly priority: number;
+  readonly created: number;
 }
 
-/**
- * What holds every connection as `occurrence` starts, of `holdings` that take the connection
- * before it: those that started earlier, or together with it and first. Empty while one is free
- * then, as far as they tell. One that starts later within it waits for it instead.
- */
-export function conflictOf(
-  occurrence: Occurrence,
-  holdings: readonly Holding[],
-  limit: number,
-): readonly ConnectionHolder[] {
-  const holding = holdings.filter(
-    (each) =>
-      each.holder.until > occurrence.start &&
-      (each.start < occurrence.start || (each.start === occurrence.start && each.first)),
+export function comparePending(a: PendingCapture, b: PendingCapture): number {
+  return (
+    b.priority - a.priority ||
+    a.start - b.start ||
+    a.created - b.created ||
+    a.id.localeCompare(b.id)
   );
+}
 
-  return holding.length >= limit ? holding.map((each) => each.holder) : [];
+/** A connection held now, on the source `channel` names, through `until`. */
+export interface Holding {
+  readonly channel: string;
+  readonly until: number;
+  readonly holder: ConnectionHolder;
+}
+
+/** Forecast bounded pending work at starts/releases, sharing a channel's connection. Watch and
+ * downloads have no known end, so callers hold them with an `until` of Infinity. */
+export function forecastCapacity(
+  pending: readonly PendingCapture[],
+  protectedUses: readonly Holding[],
+  limit: number,
+  now: number,
+): ReadonlyMap<string, RecordingCapacity> {
+  const running = [...protectedUses];
+  const waiting = new Set(pending);
+  const result = new Map<string, RecordingCapacity>();
+  const blockers = new Map<string, readonly ConnectionHolder[]>();
+
+  const times = [
+    ...new Set([
+      now,
+      ...pending.flatMap((each) => [Math.max(now, each.start), each.stop]),
+      ...protectedUses.map((each) => each.until),
+    ]),
+  ]
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+
+  for (const time of times) {
+    if (time < now) continue;
+
+    for (let i = running.length - 1; i >= 0; i--)
+      if (running[i]!.until <= time) running.splice(i, 1);
+
+    for (const each of [...waiting]
+      .filter((each) => each.start <= time && each.stop > time)
+      .sort(comparePending)) {
+      const channels = new Set(running.map((use) => use.channel));
+
+      if (channels.has(each.channel) || channels.size < limit) {
+        const start = Math.max(now, each.start);
+        result.set(each.id, {
+          kind: time > start ? "partial" : "available",
+          start: time,
+          holders: blockers.get(each.id) ?? [],
+        });
+        running.push({
+          channel: each.channel,
+          until: each.stop,
+          holder: { kind: "schedule", title: each.title, until: each.stop },
+        });
+        waiting.delete(each);
+      } else if (!blockers.has(each.id))
+        blockers.set(
+          each.id,
+          running.map((use) => use.holder),
+        );
+    }
+  }
+
+  for (const each of waiting)
+    result.set(each.id, { kind: "missed", start: null, holders: blockers.get(each.id) ?? [] });
+
+  return result;
 }

@@ -315,6 +315,10 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
 
     liveStream: streamOf,
 
+    currentLiveStream(channelId) {
+      return last?.snapshot.live.streams.get(channelId);
+    },
+
     async archiveStream(channelId, window, signal) {
       const stream = await streamOf(channelId, signal);
       const recording = stream.catchup && archiveAddress(stream.catchup, window, Date.now());

@@ -5,6 +5,9 @@ import type { Json } from "../../../../packages/contracts/src/json.ts";
 // a missed and a late row. Those two are written into recordings.json while the app is closed, as
 // the Recordings service writes them (apps/desktop/test/recordings.test.ts proves the service
 // does). Each state is captured at 1280 × 800, 960 × 600, with a quarter larger text, and in German.
+//   First, a rule followed from a programme while a schedule on the channel below holds that
+// connection: its airing clashes until Priority puts the rule ahead, and the schedule then shows
+// the connection in use by the rule.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Driver } from "./language.ts";
@@ -386,12 +389,31 @@ async function ruleJourney(d: Driver) {
       "!!document.querySelector('[data-view=watch]') && (document.querySelector('video')?.currentTime ?? 0) >= 1",
     ),
   );
+  // Stopped, nothing playing in this window holds the connection the rule and schedule share.
+  await d.click(
+    "Stop playing",
+    "document.querySelector('[data-view=watch] button[aria-label=Stop]')",
+  );
+  await d.wait(
+    async () =>
+      !(await d.exists("document.querySelector('[data-view=watch] button[aria-label=Stop]')")),
+  );
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists("document.querySelector('[data-view=watch]')")));
   await grid(d);
+  // The channel below's next programme, scheduled once, holds the one connection at that time.
+  await d.key("ArrowDown", 40);
   await d.key("ArrowRight", 39);
   await d.wait(() => d.exists(DETAILS));
   const record = named("[role=grid] [role=region] button", "Record");
+  await d.click("Record below", record);
+  await d.wait(async () => (await text(d, PANEL)).includes("A connection is free then."));
+  await d.click("Schedule below", named("button", "Schedule", PANEL));
+  await d.wait(async () => !(await d.exists(PANEL)));
+  await d.wait(() => d.exists(named("[role=grid] [role=region] button", "Scheduled")));
+  const below = await selected(d);
+  await d.key("ArrowUp", 38);
+  await d.wait(async () => (await selected(d)) !== below && (await d.exists(record)));
   await d.click("Record the next programme", record);
   await d.wait(() => d.exists(PANEL));
   await d.click("Follow programme", `${PANEL}.querySelector('[data-repeat=follow]')`);
@@ -410,6 +432,44 @@ async function ruleJourney(d: Driver) {
     `[...${PANEL}.querySelectorAll('button[aria-pressed]')].map(e => ({ name: e.textContent, pressed: e.getAttribute('aria-pressed') }))`,
   );
   await d.capture("r1-guide-follow");
+
+  // Level with the schedule below and saved after it, the rule's airing clashes; Priority 1
+  // puts it first, and the keys stay in the panel.
+  const capacity = () =>
+    d.evaluate<string | null>(
+      `${PANEL}.querySelector('section li[data-capacity]')?.dataset.capacity ?? null`,
+    );
+
+  await d.wait(async () => ["missed", "partial"].includes((await capacity()) ?? ""));
+  d.observed["clash"] = await text(d, PANEL);
+  expect(
+    String(d.observed["clash"]).includes("1 airing clashes.") &&
+      String(d.observed["clash"]).includes("The only rule"),
+    "The clash or the rule's standing isn't shown",
+    d.observed["clash"],
+  );
+  await d.capture("r1a-guide-follow-clash");
+  const ranked = await selected(d);
+  await d.evaluate(`${PANEL}.querySelector('[role=spinbutton][aria-label=Priority]').focus()`);
+  await d.key("ArrowUp", 38);
+  await d.wait(async () => (await capacity()) === "available");
+  d.observed["prioritised"] = await text(d, PANEL);
+  d.observed["priorityValue"] = await d.evaluate<string>(
+    `${PANEL}.querySelector('[role=spinbutton][aria-label=Priority]').getAttribute('aria-valuenow')`,
+  );
+  expect(
+    d.observed["priorityValue"] === "1",
+    "Priority didn't step to 1",
+    d.observed["priorityValue"],
+  );
+  expect(
+    String(d.observed["prioritised"]).includes("Connection free") &&
+      !String(d.observed["prioritised"]).includes("clash"),
+    "Priority 1 left the airing clashing",
+    d.observed["prioritised"],
+  );
+  expect((await selected(d)) === ranked, "Priority keys moved the grid");
+  await d.capture("r1b-guide-follow-priority");
 
   // Keys stay in the panel: the Record radios and padding move, the grid doesn't.
   const before = await selected(d);
@@ -450,6 +510,12 @@ async function ruleJourney(d: Driver) {
     ),
   );
   d.observed["page"] = await text(d, "document.querySelector('#root')");
+  // The rule's priority is on its row, and the schedule below now waits for the rule.
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "document.querySelector('section[aria-label=Rules] li')?.textContent.includes('Priority 1') && [...document.querySelectorAll('section[aria-label=Scheduled] li')].some(row => !row.textContent.includes('From a rule') && row.textContent.includes('Every connection is in use then'))",
+    ),
+  );
   d.observed["occurrenceEdit"] = await d.evaluate<boolean>(
     "[...document.querySelectorAll('section[aria-label=Scheduled] li')].some(row => row.textContent.includes('From a rule') && row.querySelector('button[aria-label^=Edit]'))",
   );
@@ -543,4 +609,14 @@ async function ruleJourney(d: Driver) {
   );
   d.observed["afterStop"] = await text(d, "document.querySelector('#root')");
   await d.capture("r11-lang-de-stopped");
+
+  // The schedule below goes too, so the scenario after this starts with nothing scheduled.
+  await d.click(
+    "Open the schedule's menu",
+    "document.querySelector('section[aria-label=Geplant] button[aria-label^=\"Mehr zu\"]')",
+  );
+  await d.click("Planung aufheben", named("[role=menuitem]", "Planung aufheben"));
+  await d.wait(
+    async () => !(await d.exists("document.querySelector('section[aria-label=Geplant] li')")),
+  );
 }

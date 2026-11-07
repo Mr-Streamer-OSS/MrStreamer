@@ -277,10 +277,10 @@ export function useRules() {
 }
 
 /** What a rule as edited would record now, as `recordings.previewRule` plans it, saving nothing. */
-export const rulePreviewQuery = (plan: RecordingRulePlan) =>
+export const rulePreviewQuery = (plan: RecordingRulePlan, id?: string) =>
   queryOptions({
-    queryKey: ["rules", "preview", plan],
-    queryFn: () => call("recordings.previewRule", { plan }),
+    queryKey: ["rules", "preview", plan, id],
+    queryFn: () => call("recordings.previewRule", { plan, ...defined({ id }) }),
     enabled: plan.channels.length > 0,
   });
 

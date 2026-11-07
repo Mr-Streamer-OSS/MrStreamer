@@ -49,6 +49,7 @@ import type {
   ConnectionHolder,
   Recording,
   RecordingConnections,
+  RecordingCapacity,
   RecordingCut,
   RecordingGap,
   RecordingGapReason,
@@ -67,6 +68,7 @@ import {
   DEFAULT_KEEP_FREE,
   RECORDING_MAX_MS,
   RECORDING_RULE_LIMITS,
+  RECORDING_PRIORITY_DEFAULT,
 } from "@mrstreamer/contracts/recordings";
 import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -84,10 +86,12 @@ import * as Stream from "effect/Stream";
 import { SavedSubtitles, subtitlesOfCopy } from "../platform/saved-subtitles.ts";
 import { CaptureFailure, startCapture, type CaptureEnd } from "../recordings/capture.ts";
 import {
-  conflictOf,
+  comparePending,
+  forecastCapacity,
+  type Holding,
+  type PendingCapture,
   nextOccurrence,
   occurrences,
-  type Holding,
   type Occurrence,
 } from "../recordings/schedules.ts";
 import {
@@ -275,7 +279,7 @@ export class Recordings extends Context.Service<
     readonly changes: Stream.Stream<readonly Recording[]>;
     /** Lists saved rules; a refused startup inventory stays refused until the next start. */
     readonly rules: Effect.Effect<readonly RecordingRule[], Failed>;
-    previewRule(plan: RecordingRulePlan): Effect.Effect<RecordingRulePreview, Failed>;
+    previewRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRulePreview, Failed>;
     saveRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRule, Failed>;
     cancelRule(id: string): Effect.Effect<void, Failed>;
     /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
@@ -308,6 +312,7 @@ const gone: Hold = { kind: "gone" };
 
 /** A recording that captures now. */
 interface Active {
+  readonly key: string | null;
   readonly controller: AbortController;
   readonly bytes: () => number;
   /** When it last wrote: a gap after it begins there. */
@@ -1231,6 +1236,7 @@ function make(deps: RecordingsDeps) {
         const asked = controller.signal.reason === "stopped" ? "stopped" : null;
 
         const live: Active = {
+          key: tried[capture.source]!.key,
           controller,
           bytes: capture.bytes,
           lastWrite: capture.lastWrite,
@@ -1472,8 +1478,9 @@ function make(deps: RecordingsDeps) {
     /** One check, or change of the schedules, at a time. */
     const scheduling = (yield* Semaphore.make(1)).withPermits(1);
     const scheduleChanges = yield* PubSub.sliding<readonly ScheduledRecording[]>(4);
-    /** What the window was last told, so a check that changed nothing tells nothing. */
+    /** Last snapshot; publish again when schedules or connection owners change. */
     let shownSchedules: readonly ScheduledRecording[] = [];
+    let ownersChanged = false;
     /** What holds each schedule back, as the last check found; null for nothing. */
     let holds = new Map<string, Hold | null>();
     /**
@@ -1529,7 +1536,7 @@ function make(deps: RecordingsDeps) {
     const ruleErrors = new Map<string, string>();
     const blockedRules = new Set<string>();
 
-    const previewRule = (plan: RecordingRulePlan, status: readonly GuideStatus[]) =>
+    const findRuleMatches = (plan: RecordingRulePlan, status: readonly GuideStatus[]) =>
       Effect.gen(function* () {
         yield* rulesUsable;
         const matches = [];
@@ -1560,6 +1567,88 @@ function make(deps: RecordingsDeps) {
         }
 
         return planRule(plan, matches, Date.now(), limited);
+      });
+
+    /** Preview and reconciliation must retain the same airing identity after guide shifts. */
+    const existingAiring = (
+      occurrences: KeptRule["occurrences"],
+      preview: RecordingRulePreview,
+      match: RecordingRulePreview["matches"][number],
+    ) => {
+      const shifted = occurrences.filter((each) => {
+        const interval = each.observed ?? each.plan;
+
+        return (
+          ownedKey(each.plan.channel) === ownedKey(match.plan.channel) &&
+          (each.settled ||
+            recordingOf(each.id) ||
+            startsOf.has(each.id) ||
+            !preview.matches.some((candidate) => candidate.identity === each.identity)) &&
+          interval.start < match.plan.stop &&
+          match.plan.start < interval.stop &&
+          (!each.episodeIdentity ||
+            !match.episodeIdentity ||
+            each.episodeIdentity === match.episodeIdentity ||
+            each.settled ||
+            recordingOf(each.id) ||
+            startsOf.has(each.id))
+        );
+      });
+
+      return (
+        occurrences.find((each) => each.identity === match.identity) ??
+        (shifted.length === 1 ? shifted[0] : shifted.length > 0 ? null : undefined)
+      );
+    };
+
+    const previewRule = (plan: RecordingRulePlan, status: readonly GuideStatus[], id?: string) =>
+      Effect.gen(function* () {
+        const preview = yield* findRuleMatches(plan, status);
+        const now = Date.now();
+
+        const candidates = preview.matches.map((match, i) => {
+          const occurrence = existingAiring(
+            rules?.find((rule) => rule.id === id)?.occurrences ?? [],
+            preview,
+            match,
+          );
+
+          if (occurrence === null || occurrence?.settled) return undefined;
+
+          const saved = occurrence && schedules.get(occurrence.id);
+
+          return {
+            id: saved?.id ?? `preview:${i}`,
+            plan: match.plan,
+            channelName: match.channelName,
+            created: saved?.created ?? now,
+            through: saved?.through ?? now,
+            priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT,
+          };
+        });
+
+        const kept = [...schedules.values()].filter(
+          (each) =>
+            id === undefined ||
+            ruleOf(each.id) !== id ||
+            recordingOf(each.id) ||
+            startsOf.has(each.id),
+        );
+
+        const capacity = yield* capacityOf(
+          [...kept, ...candidates.filter((each) => each !== undefined)],
+          now,
+        );
+
+        return {
+          ...preview,
+          matches: preview.matches.map((match, i) => {
+            const candidate = candidates[i];
+            const forecast = candidate && capacity.get(candidate.id);
+
+            return { ...match, ...(forecast && { capacity: forecast }) };
+          }),
+        };
       });
 
     /** Durable identities precede schedules and capture. Settled identities never expire into
@@ -1598,7 +1687,7 @@ function make(deps: RecordingsDeps) {
       const status = yield* guide.status;
 
       for (const rule of retained) {
-        const checked = yield* Effect.result(previewRule(rule.plan, status));
+        const checked = yield* Effect.result(findRuleMatches(rule.plan, status));
         const occurrences = rule.occurrences;
 
         if (checked._tag === "Failure") {
@@ -1630,29 +1719,7 @@ function make(deps: RecordingsDeps) {
           // Retain overlapping observations separately from the immutable capture plan.
           // The guide can carry clipped old slots alongside a replacement; settled/active
           // intervals keep their union so those old slots cannot erase suppression history.
-          const shifted = occurrences.filter((each) => {
-            const interval = each.observed ?? each.plan;
-
-            return (
-              ownedKey(each.plan.channel) === ownedKey(match.plan.channel) &&
-              (each.settled ||
-                recordingOf(each.id) ||
-                startsOf.has(each.id) ||
-                !preview.matches.some((candidate) => candidate.identity === each.identity)) &&
-              interval.start < match.plan.stop &&
-              match.plan.start < interval.stop &&
-              (!each.episodeIdentity ||
-                !match.episodeIdentity ||
-                each.episodeIdentity === match.episodeIdentity ||
-                each.settled ||
-                recordingOf(each.id) ||
-                startsOf.has(each.id))
-            );
-          });
-
-          const was =
-            occurrences.find((each) => each.identity === match.identity) ??
-            (shifted.length === 1 ? shifted[0] : undefined);
+          const was = existingAiring(occurrences, preview, match);
 
           if (was) {
             was.identity = match.identity;
@@ -1669,7 +1736,7 @@ function make(deps: RecordingsDeps) {
               was.plan = match.plan;
               was.channelName = match.channelName;
             }
-          } else if (shifted.length > 0) {
+          } else if (was === null) {
             // Ambiguous overlap cannot safely revive a settled or active airing.
             continue;
           } else if (
@@ -1810,14 +1877,178 @@ function make(deps: RecordingsDeps) {
         ...uses.flatMap((use) => (use === "recording" ? [] : [{ kind: use }])),
       ]);
 
-    const recordingHoldings = (subscriptionId: string): Holding[] =>
-      [...active.keys()].flatMap((id) => {
+    const priorityOf = (id: string) =>
+      rules?.find((rule) => rule.id === ruleOf(id))?.plan.priority ?? RECORDING_PRIORITY_DEFAULT;
+
+    /** A schedule's occurrence in the priority queue; a previewed one brings its own priority. */
+    const pendingOf = (
+      schedule: KeptSchedule & { readonly priority?: number },
+      occurrence: Occurrence,
+    ): PendingCapture => ({
+      ...occurrence,
+      id: schedule.id,
+      channel: ownedKey(schedule.plan.channel),
+      title: schedule.plan.title,
+      priority: schedule.priority ?? priorityOf(schedule.id),
+      created: schedule.created,
+    });
+
+    /** Shares the displayed next unsettled occurrence with the forecast horizon. */
+    const nextPending = (schedule: KeptSchedule, now: number) => {
+      const on = nextOccurrence(schedule.plan, now);
+
+      return on && (recordOf(schedule.id, on) || on.stop <= schedule.through)
+        ? nextOccurrence(schedule.plan, on.stop)
+        : on;
+    };
+
+    /** Keep current owners protected; only unstarted occurrences enter the priority queue. */
+    const capacityOf = (
+      kept: readonly (KeptSchedule & { readonly priority?: number })[],
+      now: number,
+    ) =>
+      Effect.gen(function* () {
+        const result = new Map<string, RecordingCapacity>();
+
+        for (const subscriptionId of new Set(
+          kept.map((each) => each.plan.channel.subscriptionId),
+        )) {
+          const own = kept.filter((each) => each.plan.channel.subscriptionId === subscriptionId);
+
+          const horizon = Math.max(
+            now + 1,
+            ...own.map((each) => nextPending(each, now)?.stop ?? now),
+          );
+
+          const pending = own.flatMap((each) => {
+            if (holds.get(each.id)) return [];
+
+            return occurrences(each.plan, now, horizon)
+              .filter(
+                (occurrence) => !recordOf(each.id, occurrence) && occurrence.stop > each.through,
+              )
+              .map((occurrence, i) => ({
+                ...pendingOf(each, occurrence),
+                id: i === 0 ? each.id : occurrenceKey(each.id, occurrence),
+              }));
+          });
+
+          const watching = yield* coordination.watching(subscriptionId);
+
+          const protectedUses: Holding[] = recordingHoldings(subscriptionId).map((holding) =>
+            watching.has(holding.channel)
+              ? { ...holding, until: Infinity, holder: { kind: "watch" } }
+              : holding,
+          );
+
+          const uses = yield* coordination.uses(subscriptionId);
+          // Match current source keys, not just channel IDs: a replaced login or a different
+          // variant must not promise sharing with a capture of the old source.
+          const selected = new Map<string, string>();
+
+          if (uses.includes("watch") || protectedUses.length > 0) {
+            yield* Effect.gen(function* () {
+              const source = yield* subscriptions.sourceOf(subscriptionId);
+
+              const lookup = yield* library.lookup(subscriptionId);
+
+              const preferences = {
+                ...(yield* settings.get),
+                ...(yield* settings.ofSubscription(subscriptionId)),
+              };
+
+              // A playlist's playback snapshot has no mapping inspection or refresh-on-miss.
+              // Undefined from that read means no known sharing, never a network fallback.
+              for (const schedule of own) {
+                const listed = lookup(schedule.plan.channel.id);
+
+                if (!listed) continue;
+
+                for (const variant of streamsToPlay(listed, preferences, undefined)) {
+                  const stream = yield* Effect.tryPromise({
+                    try: () =>
+                      source.provider.currentLiveStream
+                        ? Promise.resolve(source.provider.currentLiveStream(variant.id) ?? null)
+                        : source.provider.liveStream(variant.id),
+                    catch: (cause) =>
+                      cause instanceof Failed
+                        ? cause
+                        : new Failed({
+                            error: {
+                              kind: "stream",
+                              failure: { kind: "network", detail: String(cause) },
+                            },
+                          }),
+                  });
+
+                  const key = streamKey(
+                    subscriptionId,
+                    source.revision,
+                    listed.id,
+                    variant.id,
+                    stream,
+                  );
+
+                  const channel = ownedKey(schedule.plan.channel);
+
+                  if (key !== null) {
+                    if (!selected.has(channel) || captures.reading(key)) selected.set(channel, key);
+                  }
+                }
+              }
+            }).pipe(
+              Effect.catch(() =>
+                Effect.sync(() => {
+                  // Failed source reads retain current owners and promise no sharing.
+                  selected.clear();
+                }),
+              ),
+            );
+          }
+
+          for (const connection of watching) {
+            if (protectedUses.some((use) => use.channel === connection)) continue;
+
+            protectedUses.push({ channel: connection, until: Infinity, holder: { kind: "watch" } });
+          }
+
+          if (uses.includes("download")) {
+            protectedUses.push({
+              channel: "occupied:download",
+              until: Infinity,
+              holder: { kind: "download" },
+            });
+          }
+
+          for (const [id, capacity] of forecastCapacity(
+            pending.map((each) => ({
+              ...each,
+              channel: selected.get(each.channel) ?? each.channel,
+            })),
+            protectedUses,
+            yield* limitOf(subscriptionId),
+            now,
+          ))
+            result.set(id, capacity);
+        }
+
+        return result;
+      });
+
+    /** What each of the subscription's captures holds now: the source it reads, until it ends. */
+    const recordingHoldings = (subscriptionId: string) =>
+      [...active.entries()].flatMap(([id, capture]) => {
         const record = records.get(id);
 
-        if (record?.channel.subscriptionId !== subscriptionId) return [];
-        const holder = { kind: "recording", title: record.title, until: record.stop } as const;
-
-        return [{ holder, start: record.start, first: true }];
+        return record?.channel.subscriptionId === subscriptionId
+          ? [
+              {
+                channel: capture.key ?? `recording:${id}`,
+                until: record.stop,
+                holder: { kind: "recording", title: record.title, until: record.stop } as const,
+              },
+            ]
+          : [];
       });
 
     /**
@@ -1829,6 +2060,7 @@ function make(deps: RecordingsDeps) {
       kept: readonly KeptSchedule[],
       now: number,
       hold = holds.get(schedule.id),
+      forecast?: ReadonlyMap<string, RecordingCapacity>,
     ) =>
       Effect.gen(function* () {
         const { plan } = schedule;
@@ -1858,10 +2090,7 @@ function make(deps: RecordingsDeps) {
 
         // A time on now that it recorded, stopped or cut short, or a change settled, records no
         // more: the one after it is next.
-        const next =
-          on && (recordOf(schedule.id, on) || on.stop <= schedule.through)
-            ? nextOccurrence(plan, on.stop)
-            : on;
+        const next = nextPending(schedule, now);
 
         if (hold) return as(hold, next);
 
@@ -1875,49 +2104,36 @@ function make(deps: RecordingsDeps) {
         if (reason === "stream" || reason === "disk")
           return as({ kind: "retrying", why: reason }, next);
 
-        const holdings = [
-          ...recordingHoldings(subscriptionId),
-          ...kept.flatMap((other): Holding[] => {
-            if (other.id === schedule.id || other.plan.channel.subscriptionId !== subscriptionId)
-              return [];
+        const capacity = (
+          forecast ??
+          (yield* capacityOf([...kept.filter((each) => each.id !== schedule.id), schedule], now))
+        ).get(schedule.id);
 
-            if (holds.get(other.id)) return [];
-
-            // Each of its times within this one, but one it records now, which counts above.
-            return occurrences(other.plan, next.start, next.stop).flatMap((theirs) => {
-              // One recording counts above as what it holds; one that recorded, or was settled,
-              // holds nothing more.
-              if (recordOf(other.id, theirs) || theirs.stop <= other.through) return [];
-
-              const holder = {
-                kind: "schedule",
-                title: other.plan.title,
-                until: theirs.stop,
-              } as const;
-
-              return [{ holder, start: theirs.start, first: other.created < schedule.created }];
-            });
-          }),
-        ];
-
-        const holders = conflictOf(next, holdings, yield* limitOf(subscriptionId));
-
-        return as(holders.length > 0 ? { kind: "conflict", holders } : { kind: "planned" }, next);
+        return as(
+          capacity && capacity.kind !== "available"
+            ? { kind: "conflict", holders: capacity.holders }
+            : { kind: "planned" },
+          next,
+        );
       });
 
     /** Every schedule kept, by when it records next. */
     const standings = (now: number) => {
       const kept = [...schedules.values()];
 
-      return Effect.map(
-        Effect.forEach(kept, (schedule) => standingOf(schedule, kept, now)),
-        (list) =>
-          list.toSorted(
-            (a, b) =>
-              (a.next?.start ?? Infinity) - (b.next?.start ?? Infinity) ||
-              a.channelName.localeCompare(b.channelName),
-          ),
-      );
+      return Effect.gen(function* () {
+        const forecast = yield* capacityOf(kept, now);
+
+        const list = yield* Effect.forEach(kept, (schedule) =>
+          standingOf(schedule, kept, now, holds.get(schedule.id), forecast),
+        );
+
+        return list.toSorted(
+          (a, b) =>
+            (a.next?.start ?? Infinity) - (b.next?.start ?? Infinity) ||
+            a.channelName.localeCompare(b.channelName),
+        );
+      });
     };
 
     /**
@@ -2207,7 +2423,8 @@ function make(deps: RecordingsDeps) {
       // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
       // wakes the next check.
       if (schedules.size === 0 && !rules?.length && !unsaved.recordings && !unsaved.schedules) {
-        if (shownSchedules.length > 0) {
+        if (shownSchedules.length > 0 || ownersChanged) {
+          ownersChanged = false;
           shownSchedules = [];
           yield* PubSub.publish(scheduleChanges, shownSchedules);
         }
@@ -2234,7 +2451,12 @@ function make(deps: RecordingsDeps) {
       const inLine = (each: KeptSchedule) => nextOccurrence(each.plan, now)?.start ?? Infinity;
 
       const ordered = [...schedules.values()].toSorted(
-        (a, b) => inLine(a) - inLine(b) || a.created - b.created,
+        (a, b) =>
+          Math.max(now, inLine(a)) - Math.max(now, inLine(b)) ||
+          comparePending(
+            pendingOf(a, { start: inLine(a), stop: Infinity }),
+            pendingOf(b, { start: inLine(b), stop: Infinity }),
+          ),
       );
 
       for (const schedule of ordered) {
@@ -2364,12 +2586,22 @@ function make(deps: RecordingsDeps) {
         retry = true;
       }
 
-      const list = yield* standings(now);
+      const forecast = yield* Effect.result(standings(now));
+
+      if (forecast._tag === "Failure") {
+        yield* Effect.logWarning("[recordings] capacity could not be checked; trying again");
+
+        return now + RETRY_MS;
+      }
+
+      const list = forecast.success;
 
       if (
+        ownersChanged ||
         !isDeepStrictEqual(list, shownSchedules) ||
         !isDeepStrictEqual(previousErrors, ruleErrors)
       ) {
+        ownersChanged = false;
         shownSchedules = list;
         yield* PubSub.publish(scheduleChanges, list);
       }
@@ -2409,6 +2641,18 @@ function make(deps: RecordingsDeps) {
       Stream.runForEach(guide.changes.pipe(Stream.debounce(GUIDE_SETTLE)), () => wake),
     );
     yield* Effect.forkScoped(Stream.runForEach(library.changes, () => wake));
+    // Ownership changes can alter an open rule preview even with no saved schedules.
+    // The normal check publishes once; reading that snapshot never changes ownership.
+    yield* Effect.forkScoped(
+      Stream.runForEach(coordination.busyChanged, () =>
+        Effect.andThen(
+          Effect.sync(() => {
+            ownersChanged = true;
+          }),
+          wake,
+        ),
+      ),
+    );
 
     /**
      * Runs `turn` in a turn once `id`'s start under way, if any, answered, waiting for it outside
@@ -2930,14 +3174,14 @@ function make(deps: RecordingsDeps) {
           ),
         ),
       ),
-      previewRule: (plan: RecordingRulePlan) =>
-        scheduling(Effect.flatMap(guide.status, (status) => previewRule(plan, status))),
+      previewRule: (plan: RecordingRulePlan, id?: string) =>
+        scheduling(Effect.flatMap(guide.status, (status) => previewRule(plan, status, id))),
       saveRule: (plan: RecordingRulePlan, id?: string) =>
         Effect.tap(
           scheduling(
             Effect.gen(function* () {
               // Fails as the preview does: rules unread, or a channel's subscription not saved.
-              yield* previewRule(plan, yield* guide.status);
+              yield* findRuleMatches(plan, yield* guide.status);
               const was = rules?.find((each) => each.id === id);
 
               if (id && !was) return yield* ruleFailure("This recording rule is no longer there.");
@@ -2947,7 +3191,11 @@ function make(deps: RecordingsDeps) {
 
               const rule: KeptRule = {
                 id: id ?? randomUUID(),
-                plan: { ...plan, mode: plan.mode ?? "every" },
+                plan: {
+                  ...plan,
+                  mode: plan.mode ?? "every",
+                  priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT,
+                },
                 occurrences: was?.occurrences ?? [],
               };
 

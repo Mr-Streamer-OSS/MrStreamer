@@ -8,7 +8,8 @@
 // often it records, how its next time stands, and offers Edit, the schedule's controls in a
 // popover, and Cancel schedule in its menu; one a rule made has no Edit, as the rule sets its
 // padding, and cancelling it lets that one airing go. Rules, after them, are each a programme
-// followed on its channels: what it records, Edit in a popover and Stop following in its menu.
+// followed on its channels: what it records, its padding and priority, Edit in a popover and Stop
+// following in its menu.
 // An action that fails says so in place of the reason.
 // Narrower windows put the size, or a schedule's repeat, in the row's second line and the outcome
 // under the bar, and the heading keeps only the room left. A recording's outcome and why wrap
@@ -21,11 +22,12 @@ import { useMutation, useMutationState, useQuery, useQueryClient } from "@tansta
 import { Ellipsis, Play, Repeat2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type {
-  Recording,
-  RecordingRule,
-  RecordingStorage,
-  ScheduledRecording,
+import {
+  RECORDING_PRIORITY_DEFAULT,
+  type Recording,
+  type RecordingRule,
+  type RecordingStorage,
+  type ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatBytes, formatDate, formatList, formatNumber, t } from "@mrstreamer/core/i18n";
@@ -603,8 +605,9 @@ function ScheduleRow({
 }
 
 /**
- * One rule, in the recordings' lanes: the first channel's logo, the title with its channels and
- * padding, what it records where the bar is, then Edit with its menu, which has Stop following.
+ * One rule, in the recordings' lanes: the first channel's logo, the title with its channels,
+ * padding and priority, what it records where the bar is, then Edit with its menu, which has Stop
+ * following.
  */
 function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly LiveChannel[] }) {
   const client = useQueryClient();
@@ -625,6 +628,7 @@ function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly L
   const padding = [
     t("{minutes} min early", { minutes: plan.padding.before }),
     t("{minutes} min late", { minutes: plan.padding.after }),
+    t("Priority {priority}", { priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT }),
   ].join(", ");
 
   const mode = plan.mode === "new-only" ? t("New episodes only") : t("Every match");
