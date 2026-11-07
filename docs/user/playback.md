@@ -145,3 +145,11 @@ For a channel, a small line under the message adds what Mr. Streamer observed: t
 - **Can't play this title**: the file uses a format Mr. Streamer can't play or convert. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its name and the details shown.
 - **Not available**: the provider has no file for that movie or episode right now; some providers list titles whose files are gone.
 - **… didn't answer**, **… connection lost**, **… got no stream** or **… can't play this**, with your TV's name: see [Playing on a TV](troubleshooting.md#playing-on-a-tv).
+
+## Keyboard shortcuts
+
+**Settings > Playback > Keyboard shortcuts** lists each playback command with its keys in Live TV and in movies and series, for the active viewing profile. Select a command's keys and press the new key: it replaces every key for that command in both. Escape cancels, and a key another command uses or a reserved key is refused with the reason. **Reset** restores one command's defaults, but refuses if a restored key conflicts with another saved binding. Free the key by resetting or remapping that command first, or use **Reset all** to restore every command's defaults. If a change can't be saved, the old keys keep working and **Try again** saves it again. Downloaded-title text subtitle timing uses Shift for a larger adjustment; live and embedded subtitle timing use the same step with or without Shift.
+
+Typing fields, editable text, open player menus and focused sliders keep their own keys. Space and Enter activate a focused button. A held key repeats seeking, volume and timing adjustments, but does not repeatedly pause, mute or open a menu.
+
+Escape and Live TV navigation remain fixed. Command, Control and Alt combinations are reserved for the app and operating system, including search, Settings, window controls and native media keys. A shortcut change does not remap those commands.

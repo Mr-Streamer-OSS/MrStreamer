@@ -28,6 +28,12 @@ const SETTINGS_CONTROLS = [
   },
   { id: "audio", section: "playback", label: "Audio in", synonyms: "settings.search.audio" },
   {
+    id: "keyboard-shortcuts",
+    section: "playback",
+    label: "Keyboard shortcuts",
+    synonyms: "Keyboard shortcuts",
+  },
+  {
     id: "autoplay",
     section: "playback",
     label: "Next episode",

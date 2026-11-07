@@ -92,6 +92,7 @@ describe("public document pages without JavaScript", () => {
       "playing-on-a-tv",
       "known-limits",
       "when-something-wont-play",
+      "keyboard-shortcuts",
     ]);
     expect(sections.some((section) => section.hasAttribute("open"))).toBe(false);
     expect(sections[0]?.querySelector(".dek")?.textContent).toBe(

@@ -16,3 +16,5 @@ Read only the area needed for the changed path.
 - For category compatibility, read [Category compatibility](titles/categories.md).
 - For main-process harness observations, read [Main-process harness observations](titles/harness.md).
 - For android subtitles, read [Android subtitles](titles/android-subtitles.md).
+
+Desktop title commands resolve through the same shortcut catalog and profile preferences as Live TV. Renderer `shortcuts.test.ts` drives an actual TitleWatch/controller with a stand-in media engine: a remap retires Space, the new key pauses, held Pause does not toggle again, a failed save retains the committed binding and reset restores Space. This is controller/input proof, not decoded playback or disk persistence. Use [Shared viewing preferences](preferences.md) for the isolated built-app remap/profile/restart/failure/focus journey, and preserve the scrubber's native arrow keys.
