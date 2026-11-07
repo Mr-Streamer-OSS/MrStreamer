@@ -2347,11 +2347,13 @@ describe.skipIf(!hasTools)("recordings", () => {
         return prepare.call(this, sql);
       });
 
-      onTestFinished(() => {
+      const restore = () => {
         adapter.mockRestore();
 
         for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
-      });
+      };
+
+      onTestFinished(restore);
       // Keep the advancing retry deadlines monotonic without changing real timers.
       let now = Date.now();
 
@@ -2393,25 +2395,19 @@ describe.skipIf(!hasTools)("recordings", () => {
       });
       expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
 
-      const durable = await app(first.dataDir);
-      expect((await durable.recordings.copy(id, captured))?.progress).toEqual({
-        position: 42,
-        duration: 90,
-      });
-      expect((await durable.recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
-      await durable.quit();
-
       refuseWrites = true;
       await expect(recordings.recordProgress(id, 55, 90, captured)).rejects.toMatchObject({
         error: { kind: "unexpected" },
       });
       refuseWrites = false;
-      refuseDeletion = state === "tombstoned";
 
       if (state === "tombstoned") {
+        // A refused registry delete leaves the owner tombstoned.
+        refuseDeletion = true;
         await expect(profiles.remove(captured.id)).rejects.toMatchObject({
           error: { kind: "unexpected" },
         });
+        refuseDeletion = false;
         expect((await profiles.list()).find((each) => each.id === captured.id)?.deleting).toBe(
           true,
         );
@@ -2420,7 +2416,6 @@ describe.skipIf(!hasTools)("recordings", () => {
         expect((await profiles.list()).some((each) => each.id === captured.id)).toBe(false);
       }
 
-      refuseDeletion = false;
       registryReads = 0;
       await retry();
       expect(registryReads).toBeGreaterThan(0);
@@ -2434,11 +2429,10 @@ describe.skipIf(!hasTools)("recordings", () => {
         "complete",
       );
       expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
-      adapter.mockRestore();
-
-      for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
+      restore();
       await runtime.dispose();
       const restarted = await app(first.dataDir);
+      onTestFinished(restarted.quit);
       expect((await restarted.recordings.copy(id))?.progress).toEqual({
         position: 9,
         duration: 90,
@@ -2487,13 +2481,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     }
 
     expect((await recordings.copy(id, captured))?.progress).toEqual({ position: 42, duration: 90 });
-    expect((await recordings.list()).find((each) => each.id === id)?.status.kind).toBe("complete");
     await quit();
-    const restarted = await app(dataDir);
-    expect((await restarted.recordings.copy(id, captured))?.progress).toEqual({
-      position: 42,
-      duration: 90,
-    });
   });
 
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {

@@ -65,6 +65,7 @@ export const copyProgress = Effect.gen(function* () {
 
   const of = (owner: ActiveProfile) => ({
     owner,
+    /** False only when the registry definitively lacks or tombstones the owner; never writes. */
     available:
       "failure" in opened
         ? unavailable(opened.failure)
