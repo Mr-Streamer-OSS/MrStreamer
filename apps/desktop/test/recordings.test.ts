@@ -2455,6 +2455,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("retries captured-owner recording progress without a profile registry", async () => {
     const { dataDir, runtime, recordings, channel, quit } = await connected();
+    onTestFinished(quit);
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
 
     if (answer.kind !== "started") throw new Error("Not started");
@@ -2831,7 +2832,6 @@ describe.skipIf(!hasTools)("recordings", () => {
     await before.quit();
 
     const { recordings, quit } = await app(dataDir);
-    onTestFinished(quit);
     onTestFinished(quit);
     held = answer.promise;
     const starting = recordings.start({ subscriptionId, id: channel.id }, Date.now() + 60_000, {});
