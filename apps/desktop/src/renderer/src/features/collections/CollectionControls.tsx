@@ -19,6 +19,7 @@ import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { menuItem, menuSurface } from "../../components/ui/menu.ts";
 import { cn } from "../../lib/utils.ts";
+import { describeError } from "../../lib/errors.ts";
 
 /** A collection as the viewer may see it, with how many of its members they may see. */
 export interface CollectionSummary extends PersonalCollection {
@@ -68,18 +69,12 @@ function useCommit(commit: CommitCollection) {
         const actionable =
           typed.kind === "list-name-taken" ||
           typed.kind === "no-list" ||
-          typed.kind === "list-changed";
+          typed.kind === "list-changed" ||
+          typed.kind === "title-not-found";
 
         setFailed(change);
         setProblem({
-          text:
-            typed.kind === "list-name-taken"
-              ? t("Another list has this name.")
-              : typed.kind === "no-list"
-                ? t("This list is no longer there.")
-                : typed.kind === "list-changed"
-                  ? t("This list changed.")
-                  : t("Couldn't save."),
+          text: actionable ? describeError(typed) : t("Couldn't save."),
           retry: !actionable,
         });
       }

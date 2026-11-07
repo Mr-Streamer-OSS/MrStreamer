@@ -82,7 +82,12 @@ async function seed(
   await run(service.change(context, { kind: "create", id, name: id }));
 
   for (const title of [movie, other, series])
-    await run(service.change(context, { kind: "member", id, title, present: true }));
+    await run(
+      service.change(
+        { ...context, catalogue: [title] },
+        { kind: "member", id, title, present: true },
+      ),
+    );
 }
 
 describe("personal collections", () => {
@@ -147,18 +152,58 @@ describe("personal collections", () => {
     const { service, context } = await fixture().open();
     await seed(service, context);
     await run(
-      service.change(context, {
-        kind: "member",
-        id: "one",
-        title: { ...movie, adult: true },
-        present: true,
-      }),
+      service.change(
+        { ...context, catalogue: [{ ...movie, adult: true }] },
+        {
+          kind: "member",
+          id: "one",
+          title: { ...movie, adult: true },
+          present: true,
+        },
+      ),
     );
     expect(await run(service.page({ ...context, adult: false }, "one"))).toEqual({
       total: 2,
       members: [other, series].map((title) => ({ ...title, available: false })),
     });
     expect((await run(service.list({ ...context, adult: false })))[0]?.total).toBe(2);
+  });
+
+  it("refuses command-supplied adult downgrades and requires admitted facts for additions", async () => {
+    const { service, context } = await fixture().open();
+    await seed(service, context);
+    const adult = { ...movie, adult: true };
+    await run(
+      service.change(
+        { ...context, catalogue: [adult] },
+        {
+          kind: "member",
+          id: "one",
+          title: adult,
+          present: true,
+        },
+      ),
+    );
+    const hidden = { ...context, adult: false };
+    const add = { kind: "member", id: "one", title: movie, present: true } as const;
+    const { adult: _, ...unknown } = movie;
+
+    for (const catalogue of [[], [adult], [unknown]]) {
+      const result = await run(Effect.result(service.change({ ...hidden, catalogue }, add)));
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { error: { kind: "title-not-found" } },
+      });
+    }
+
+    expect((await run(service.page(hidden, "one"))).total).toBe(2);
+    expect(
+      (await run(service.page({ ...hidden, catalogue: [{ ...other, adult: true }] }, "one"))).total,
+    ).toBe(1);
+    await run(service.change({ ...context, catalogue: [unknown] }, { ...add, title: unknown }));
+    expect((await run(service.page(hidden, "one"))).total).toBe(2);
+    await run(service.change(context, { ...add, present: false }));
+    expect((await run(service.page(context, "one"))).total).toBe(2);
   });
 
   it("maps persisted account identity to a reconnected subscription without crossing accounts", async () => {

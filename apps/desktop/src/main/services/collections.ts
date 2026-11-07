@@ -151,18 +151,28 @@ export function makeCollections(
         // Snapshot command data too; queued callers cannot retarget a member across an await.
         const command = structuredClone(change);
 
+        if (command.kind === "member" && !captured.allows(command.title))
+          return yield* new Failed({
+            error: { kind: "title-not-found", titleId: command.title.titleId },
+          });
+
         if (
-          (command.kind === "member" && !captured.allows(command.title)) ||
-          (command.kind === "order-members" &&
-            command.titles.some((title) => !captured.allows(title)))
+          command.kind === "order-members" &&
+          command.titles.some((title) => !captured.allows(title))
         )
-          return yield* refused();
+          return yield* new Failed({ error: { kind: "list-changed" } });
 
         // The store checks the guard inside its transaction; once committed, the change is stored.
         if (command.kind === "member") {
-          const title = captured.catalogue.get(collectionKey(command.title)) ?? command.title;
+          const known = captured.catalogue.get(collectionKey(command.title));
 
-          if (!captured.adult && title.adult !== false) return yield* refused();
+          // Display fields in a command cannot authorize or lower a saved restriction.
+          if (command.present && (!known || (!captured.adult && known.adult !== false)))
+            return yield* new Failed({
+              error: { kind: "title-not-found", titleId: command.title.titleId },
+            });
+
+          const title = known ?? command.title;
           yield* store.change(
             {
               ...command,

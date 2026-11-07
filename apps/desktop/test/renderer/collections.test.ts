@@ -2,6 +2,7 @@
 // The viewer's collections column and a title's collections menu, driven as the viewer drives
 // them: each sends one change and shows it once stored, a refused one says so and sends the same
 // change again, and a title goes in a collection as the exact source version it was given.
+import "./support.ts";
 import { act, createElement, useState } from "react";
 import { bareView } from "./mount.ts";
 import { afterEach, expect, it, vi } from "vitest";
