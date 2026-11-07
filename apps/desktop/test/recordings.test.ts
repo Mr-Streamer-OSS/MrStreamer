@@ -26,7 +26,7 @@ import { ownedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { Deferred, Effect, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import { installingOnceStopsKept } from "../src/main/recordings/restart.ts";
 import { occurrences } from "../src/main/recordings/schedules.ts";
@@ -3528,6 +3528,75 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     );
     expect(events.at(-1)).toEqual([]);
     expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
+  });
+
+  it("refreshes an observed new-rule preview when a real download starts and pauses with no saved inventory", async () => {
+    const { recordings, runtime, downloads, onDemand, provider, subscriptionId, listing, channel } =
+      await scheduling();
+
+    const { next } = await listing();
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    };
+
+    await onDemand.refresh(subscriptionId);
+
+    const film = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Two sound tracks and subtitles"),
+    )!;
+
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    await recordings.check();
+    expect(await recordings.rules()).toEqual([]);
+    expect(await recordings.schedules()).toEqual([]);
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
+
+    await runtime.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const scheduleChanged = yield* Stream.toPull(recordings.scheduleChanges);
+          const downloadChanged = yield* Stream.toPull(downloads.changes);
+          const acquired = yield* Effect.forkScoped(scheduleChanged, { startImmediately: true });
+
+          const queued = yield* Effect.promise(() =>
+            downloads.add({ kind: "movie", subscriptionId, id: String(film.id) }),
+          );
+
+          yield* Effect.addFinalizer(() => Effect.promise(() => downloads.pause(queued.id)));
+
+          // Observe the real transfer, then refresh the unchanged preview only on its public event.
+          for (;;) {
+            const lists = yield* downloadChanged;
+
+            if (
+              lists.some((list) =>
+                list.items.some(
+                  (item) => item.id === queued.id && item.status.kind === "transferring",
+                ),
+              )
+            )
+              break;
+          }
+
+          expect(yield* Fiber.join(acquired).pipe(Effect.timeout("1500 millis"))).toEqual([[]]);
+          expect(
+            (yield* Effect.promise(() => recordings.previewRule(plan))).matches[0]?.capacity,
+          ).toMatchObject({ kind: "missed", holders: [{ kind: "download" }] });
+
+          const released = yield* Effect.forkScoped(scheduleChanged, { startImmediately: true });
+          yield* Effect.promise(() => downloads.pause(queued.id));
+          expect(yield* Fiber.join(released).pipe(Effect.timeout("1500 millis"))).toEqual([[]]);
+          expect(
+            (yield* Effect.promise(() => recordings.previewRule(plan))).matches[0]?.capacity?.kind,
+          ).toBe("available");
+          expect(yield* Effect.promise(() => recordings.rules())).toEqual([]);
+          expect(yield* Effect.promise(() => recordings.schedules())).toEqual([]);
+        }),
+      ).pipe(Effect.timeout("3 seconds")),
+    );
   });
 
   it("an older saved rule retains tie order in edit preview", async () => {

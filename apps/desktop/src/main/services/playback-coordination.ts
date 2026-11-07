@@ -223,11 +223,16 @@ export class PlaybackCoordination extends Context.Service<
               const { promise: released, resolve } = Promise.withResolvers<void>();
               const lease = { controller, released };
               lent.set(subscriptionId, lease);
+              PubSub.publishUnsafe(changed, undefined);
 
               return {
                 signal: controller.signal,
                 release: () => {
-                  if (lent.get(subscriptionId) === lease) lent.delete(subscriptionId);
+                  if (lent.get(subscriptionId) === lease) {
+                    lent.delete(subscriptionId);
+                    PubSub.publishUnsafe(changed, undefined);
+                  }
+
                   resolve();
                 },
               };
