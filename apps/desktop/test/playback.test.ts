@@ -900,7 +900,10 @@ async function bytesIn(folder: string) {
 async function mostIn(folder: string, until: Promise<unknown>) {
   let most = 0;
   let done = false;
-  void until.finally(() => (done = true));
+  void until.then(
+    () => (done = true),
+    () => (done = true),
+  );
 
   while (!done) {
     most = Math.max(most, await bytesIn(folder));
