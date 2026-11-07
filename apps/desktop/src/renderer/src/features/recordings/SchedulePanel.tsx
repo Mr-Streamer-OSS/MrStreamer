@@ -649,36 +649,44 @@ function RuleFields({
       <div className="flex flex-wrap gap-x-10 gap-y-3">
         <div className="flex min-w-0 flex-[1_1_28rem] flex-col">
           <Field label={t("Channels")}>
-            <div role="group" aria-label={t("Channels")} className="flex flex-wrap gap-1.5 py-1">
-              {offered.map(({ owned, name }) => {
-                const key = ownedKey(owned);
-                const on = selected.has(key);
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 py-1">
+              <div role="group" aria-label={t("Channels")} className="flex flex-wrap gap-1.5">
+                {offered.map(({ owned, name }) => {
+                  const key = ownedKey(owned);
+                  const on = selected.has(key);
 
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={on}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      const next = new Set(selected);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={on}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        const next = new Set(selected);
 
-                      if (on) next.delete(key);
-                      // RecordingRulePlan accepts at most 100 selected channels.
-                      else if (next.size < 100) next.add(key);
-                      setSelected(next);
-                    }}
-                    className={cn(
-                      "flex h-7 items-center rounded-full px-3 text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      on
-                        ? "bg-foreground font-semibold text-black"
-                        : "bg-white/8 font-medium text-muted-foreground hover:bg-white/12 hover:text-foreground",
-                    )}
-                  >
-                    {name}
-                  </button>
-                );
-              })}
+                        if (on) next.delete(key);
+                        // RecordingRulePlan accepts at most 100 selected channels.
+                        else if (next.size < 100) next.add(key);
+                        setSelected(next);
+                      }}
+                      className={cn(
+                        "flex h-7 items-center rounded-full px-3 text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        on
+                          ? "bg-foreground font-semibold text-black"
+                          : "bg-white/8 font-medium text-muted-foreground hover:bg-white/12 hover:text-foreground",
+                      )}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Discovery stopped at its page budget; the selected-channel cap is separate. */}
+              {found.data?.limited && (
+                <span className="text-xs text-muted-foreground">
+                  {t("More channels may match. The guide search limit was reached.")}
+                </span>
+              )}
             </div>
           </Field>
           <Field label={t("Record")}>
