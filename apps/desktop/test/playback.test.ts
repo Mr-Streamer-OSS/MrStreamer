@@ -1,6 +1,21 @@
+import {
+  fileRequest,
+  type RecordingExtent,
+  type RecordingFile,
+} from "../src/main/playback/file-source.ts";
 import { spawnSync } from "node:child_process";
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  appendFile,
+  mkdtemp,
+  rename,
+  rm,
+  truncate,
+  mkdir,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
@@ -2181,4 +2196,264 @@ describe.skipIf(!hasFfmpeg)("live history", () => {
     expect(Number.parseInt(result.stdout, 10)).toBeGreaterThan(0);
     await history.close();
   });
+});
+
+// These tests exercise opt-in main-only sources. Recordings.copy still refuses active capture.
+describe("growing copy readers", () => {
+  async function growing(bytes: Buffer = Buffer.from("first")) {
+    const scratch = resolve(import.meta.dirname, "../../../.local/798");
+    await mkdir(scratch, { recursive: true });
+    const root = await mkdtemp(join(scratch, "reader-"));
+    const path = join(root, "capture.ts");
+    await writeFile(path, bytes);
+    const found = await stat(path);
+
+    let extent: RecordingExtent = {
+      revision: 0,
+      device: found.dev,
+      inode: found.ino,
+      bytes: bytes.length,
+      status: { kind: "recording" },
+      final: false,
+      duration: null,
+      seekable: [],
+      gaps: [],
+    };
+
+    const listeners = new Set<() => void>();
+    const waiting = Promise.withResolvers<void>();
+    const cancelled = Promise.withResolvers<void>();
+
+    const source: RecordingFile = {
+      read: async () => extent,
+      wait: async (revision, signal) => {
+        signal.throwIfAborted();
+
+        if (extent.revision > revision) return extent;
+        waiting.resolve();
+        await new Promise<void>((resolve, reject) => {
+          const done = () => {
+            listeners.delete(done);
+            signal.removeEventListener("abort", abort);
+            resolve();
+          };
+
+          const abort = () => {
+            listeners.delete(done);
+            cancelled.resolve();
+            reject(signal.reason);
+          };
+
+          listeners.add(done);
+          signal.addEventListener("abort", abort, { once: true });
+        });
+
+        return extent;
+      },
+    };
+
+    return {
+      path,
+      root,
+      source,
+      waiting: waiting.promise,
+      cancelled: cancelled.promise,
+      update: (patch: Partial<RecordingExtent>) => {
+        extent = { ...extent, ...patch, revision: extent.revision + 1 };
+
+        for (const done of listeners) done();
+      },
+      clean: () => rm(root, { recursive: true, force: true }),
+    };
+  }
+
+  it("bounds probes, follows append at temporary EOF and drains at final EOF", async () => {
+    const file = await growing();
+
+    try {
+      const probe = fileRequest(file.path, "ts", file.source, "snapshot");
+      expect(await (await probe("")).text()).toBe("first");
+      const follow = await fileRequest(file.path, "ts", file.source, "follow")("");
+      expect(follow.headers.has("content-length")).toBe(false);
+      const body = follow.body!.getReader();
+      expect(Buffer.from((await body.read()).value!).toString()).toBe("first");
+      const pending = body.read();
+      await file.waiting;
+      await appendFile(file.path, "second");
+      file.update({ bytes: 11 });
+      expect(Buffer.from((await pending).value!).toString()).toBe("second");
+      file.update({ final: true, status: { kind: "complete" } });
+      expect((await body.read()).done).toBe(true);
+      expect(await (await probe("")).text()).toBe("first");
+      expect(
+        (
+          await fileRequest(
+            file.path,
+            "ts",
+            file.source,
+            "follow",
+          )("", { headers: { range: "bytes=11-" } })
+        ).status,
+      ).toBe(416);
+    } finally {
+      await file.clean();
+    }
+  });
+
+  it.each(["missing", "replaced", "truncated"])(
+    "refuses a %s file after opening",
+    async (change) => {
+      const file = await growing();
+
+      try {
+        const request = fileRequest(file.path, "ts", file.source, "follow");
+        expect(await (await request("", { headers: { range: "bytes=0-0" } })).text()).toBe("f");
+
+        if (change === "truncated") await truncate(file.path, 1);
+        else {
+          await rename(file.path, `${file.path}.old`);
+
+          if (change === "replaced") await writeFile(file.path, "other");
+        }
+
+        await expect(request("")).rejects.toThrow();
+      } finally {
+        await file.clean();
+      }
+    },
+  );
+
+  it("cancels EOF waits on abort and reader cancellation without finalizing capture", async () => {
+    for (const abort of [false, true]) {
+      const file = await growing(Buffer.alloc(0));
+      const controller = new AbortController();
+
+      try {
+        const answer = await fileRequest(
+          file.path,
+          "ts",
+          file.source,
+          "follow",
+        )("", { signal: controller.signal });
+
+        const reader = answer.body!.getReader();
+        const pending = reader.read();
+        await file.waiting;
+
+        if (abort) {
+          controller.abort();
+          await expect(pending).rejects.toThrow();
+        } else {
+          await reader.cancel();
+          expect((await pending).done).toBe(true);
+        }
+
+        expect((await file.source.read()).final).toBe(false);
+      } finally {
+        await file.clean();
+      }
+    }
+  });
+
+  it.skipIf(!hasFfmpeg)(
+    "binds state to the exact session owner and recording identity, retaining unknown media facts",
+    async () => {
+      const file = await growing(fixture("h264-aac.mpegts"));
+
+      const runtime = runtimeFor(
+        Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE }).pipe(
+          Layer.provideMerge(PlaybackCoordination.layer),
+          Layer.provideMerge(
+            Subscriptions.layer({
+              dataDir: file.root,
+              secrets: testSecrets,
+              providerOptions: { userAgent },
+            }),
+          ),
+        ),
+      );
+
+      const local = await promised(runtime, Playback);
+      const changed = await collect(runtime, local.copyChanged);
+
+      try {
+        const copy = await local.openCopy(
+          {
+            id: "kept-recording",
+            kind: "recording",
+            owner: { id: "captured-owner", revision: 7 },
+            path: file.path,
+            container: "ts",
+            title: { kind: "movie", id: "kept-recording" },
+            progress: null,
+            recording: file.source,
+          },
+          LINUX,
+        );
+
+        const state = await local.copyState(copy.sessionId);
+        expect(state).toMatchObject({
+          kind: "recording",
+          copy: "kept-recording",
+          owner: { id: "captured-owner", revision: 7 },
+          duration: null,
+          recording: { revision: 0, final: false, seekable: [], gaps: [] },
+        });
+        expect(state?.audio.length).toBeGreaterThan(0);
+        expect(state?.recording).not.toHaveProperty("bytes");
+        await file.waiting;
+        file.update({
+          status: { kind: "paused", why: "stream" },
+          gaps: [{ from: 1000, to: null, why: "stream" }],
+        });
+        await expect.poll(() => changed.includes(copy.sessionId)).toBe(true);
+        expect(await local.copyState(copy.sessionId)).toMatchObject({
+          duration: null,
+          recording: {
+            revision: 1,
+            final: false,
+            seekable: [],
+            gaps: [{ from: 1000, to: null, why: "stream" }],
+          },
+        });
+        await local.closeCopy("kept-recording", "download");
+        expect(await local.copyState(copy.sessionId)).not.toBeNull();
+        await local.closeCopy("kept-recording", "recording");
+        await file.cancelled;
+        expect((await file.source.read()).final).toBe(false);
+        expect(await local.copyState(copy.sessionId)).toBeNull();
+        file.update({
+          duration: 5,
+          gaps: [{ from: 1000, to: 2000, why: "stream" }],
+          seekable: [{ from: 0, to: 5 }],
+          final: true,
+          status: { kind: "complete" },
+        });
+
+        const finished = await local.openCopy(
+          {
+            id: "kept-recording",
+            kind: "recording",
+            path: file.path,
+            container: "ts",
+            title: { kind: "movie", id: "kept-recording" },
+            progress: null,
+            recording: file.source,
+          },
+          LINUX,
+        );
+
+        expect(await local.copyState(finished.sessionId)).toMatchObject({
+          duration: 5,
+          recording: { final: true, seekable: [{ from: 0, to: 5 }] },
+        });
+        await local.close(finished.sessionId);
+        expect(await local.copyState(finished.sessionId)).toBeNull();
+        expect(await local.copyState("unknown-session")).toBeNull();
+      } finally {
+        await runtime.dispose();
+        await file.clean();
+      }
+    },
+  );
 });

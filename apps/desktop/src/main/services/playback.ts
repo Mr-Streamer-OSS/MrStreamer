@@ -70,7 +70,7 @@ import { liveDiagnostic, titleDiagnostic, lastLine } from "../playback/diagnosti
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
-import type { CopySession } from "@mrstreamer/contracts/downloads";
+import type { CopySession, CopyState } from "@mrstreamer/contracts/downloads";
 import type { RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { PlaybackFailureSelector } from "@mrstreamer/contracts/ipc";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
@@ -99,7 +99,7 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import { VerifiedFiles } from "../platform/verified-files.ts";
 import { SavedSubtitles, subtitlesOfCopy, type SubtitleFile } from "../platform/saved-subtitles.ts";
-import { fileRequest } from "../playback/file-source.ts";
+import { fileRequest, recordingFile, type RecordingFile } from "../playback/file-source.ts";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { createCleanStart } from "../playback/clean-start.ts";
@@ -424,6 +424,8 @@ export type SubtitlePlayback = {
 
 /** A downloaded copy, as playback opens it: one exact file on this computer. */
 export interface LocalCopy {
+  readonly kind?: "download" | "recording";
+  readonly recording?: RecordingFile;
   readonly owner?: ActiveProfile | undefined;
   readonly id: string;
   /** Never leaves the main process. */
@@ -446,7 +448,13 @@ interface Verified {
 /** Whose file a title session plays: a provider's, through its subscription, or a copy's. */
 type TitleOrigin =
   | { readonly kind: "provider"; readonly title: TitleRef; readonly verified: Verified | null }
-  | { readonly kind: "copy"; readonly copy: string; readonly file: SubtitleFile };
+  | {
+      readonly kind: "copy";
+      readonly copy: string;
+      readonly copyKind: "download" | "recording";
+      readonly file: SubtitleFile;
+      readonly recording?: RecordingFile | undefined;
+    };
 
 interface TitleSessionState extends SessionBase {
   readonly subtitleFileChanged: AbortController;
@@ -670,7 +678,9 @@ export class Playback extends Context.Service<
       turn?: number,
     ): Effect.Effect<CopySession, Failed>;
     /** Closes what plays a copy, as before it is deleted. */
-    closeCopy(copyId: string): Effect.Effect<void>;
+    closeCopy(copyId: string, kind?: "download" | "recording"): Effect.Effect<void>;
+    copyState(sessionId: string): Effect.Effect<CopyState | null, Failed>;
+    readonly copyChanged: Stream.Stream<string>;
     /** The current local title only, with no provider address or request headers. */
     subtitleContext(sessionId: string): Effect.Effect<SubtitlePlayback | null, Failed>;
     /**
@@ -790,6 +800,7 @@ function make(deps: PlaybackDeps) {
     // The app provides storage; standalone playback ports can run without a database.
     const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
     const savedSubtitles = Option.getOrNull(yield* Effect.serviceOption(SavedSubtitles));
+    const copyChanged = yield* PubSub.unbounded<string>();
     const replaced = yield* PubSub.unbounded<string>();
     const readingAhead = yield* PubSub.unbounded<string>();
     const tracksChanged = yield* PubSub.unbounded<string>();
@@ -4021,6 +4032,44 @@ function make(deps: PlaybackDeps) {
         return session;
       });
 
+    const stateOfCopy = (session: TitleSessionState) =>
+      Effect.gen(function* () {
+        const origin = session.origin;
+
+        if (origin.kind !== "copy" || !session.probe)
+          return yield* new Failed({
+            error: { kind: "unexpected", detail: "Copy session is unavailable." },
+          });
+
+        const source = origin.recording;
+
+        const extent = source
+          ? yield* Effect.tryPromise({ try: (signal) => source.read(signal), catch: failedWith })
+          : undefined;
+
+        // Keep byte extents and disk identity in main, including when source facts grow later.
+        const recording = extent
+          ? {
+              revision: extent.revision,
+              status: extent.status,
+              final: extent.final,
+              duration: extent.duration,
+              seekable: extent.seekable,
+              gaps: extent.gaps,
+            }
+          : undefined;
+
+        return {
+          sessionId: session.id,
+          copy: origin.copy,
+          kind: origin.copyKind,
+          ...defined({ owner: session.owner, recording }),
+          duration: extent ? extent.duration : session.probe.duration,
+          audio: audioTracks(session.probe.audio),
+          subtitles: subtitleTracks(session.probe.subtitles),
+        } satisfies CopyState;
+      });
+
     /**
      * A title session of `origin`'s file, read through `request`, and what its file holds as
      * ffprobe read it. Whatever has to close first has closed. A file that can't be read closes the
@@ -4034,6 +4083,7 @@ function make(deps: PlaybackDeps) {
         readonly headers: Headers;
         readonly request: Provider["request"];
         readonly probeKey: string;
+        readonly probeRequest?: Provider["request"] | undefined;
       },
       decoders: readonly Codec[],
       receiver: ReceiverTarget | null,
@@ -4041,6 +4091,8 @@ function make(deps: PlaybackDeps) {
     ) =>
       Effect.gen(function* () {
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
+
+        let probing = true;
 
         const session: TitleSessionState = {
           owner,
@@ -4052,7 +4104,8 @@ function make(deps: PlaybackDeps) {
           upstreamUrl: file.url,
           headers: file.headers,
           probeKey: file.probeKey,
-          request: file.request,
+          request: (...args) =>
+            (probing ? (file.probeRequest ?? file.request) : file.request)(...args),
           decoders: new Set(decoders),
           closed,
           scope: forked,
@@ -4096,6 +4149,7 @@ function make(deps: PlaybackDeps) {
           catch: failedWith,
         }).pipe(Effect.tapError(() => Scope.close(forked, Exit.void)));
 
+        probing = false;
         session.probe = probe;
         session.probed = session.identity.generation;
 
@@ -4270,15 +4324,34 @@ function make(deps: PlaybackDeps) {
 
             yield* coordination.whileAsked(turn);
 
-            const { session, probe } = yield* fileSession(
+            const recording = copy.recording ? recordingFile(copy.path, copy.recording) : undefined;
+
+            const { session } = yield* fileSession(
               randomUUID(),
-              { kind: "copy", copy: copy.id, file: subtitlesOfCopy(copy.id, copy.title) },
+              {
+                kind: "copy",
+                copy: copy.id,
+                copyKind: copy.kind ?? "download",
+                file: subtitlesOfCopy(copy.id, copy.title),
+                recording,
+              },
               {
                 url: `copy:${copy.id}`,
                 headers: new Headers(),
-                request: fileRequest(copy.path, copy.container),
+                request: fileRequest(copy.path, copy.container, recording, "follow"),
+                probeRequest: recording
+                  ? fileRequest(copy.path, copy.container, recording, "snapshot")
+                  : undefined,
                 probeKey: createHash("sha256")
-                  .update(JSON.stringify(["copy", copy.id, copy.path]))
+                  .update(
+                    JSON.stringify([
+                      "copy",
+                      copy.kind ?? "download",
+                      copy.id,
+                      copy.path,
+                      recording ? randomUUID() : null,
+                    ]),
+                  )
                   .digest("hex"),
               },
               decoders,
@@ -4286,31 +4359,73 @@ function make(deps: PlaybackDeps) {
               copy.owner,
             );
 
+            const state = yield* stateOfCopy(session).pipe(
+              Effect.tapError(() => Scope.close(session.scope, Exit.void)),
+            );
+
             yield* coordination
               .whileAsked(turn)
               .pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
 
+            if (recording) {
+              // A revision notification carries only session identity. No probe per append.
+              yield* Effect.forkIn(
+                Effect.gen(function* () {
+                  let extent = yield* Effect.tryPromise({
+                    try: () => recording.read(),
+                    catch: failedWith,
+                  });
+
+                  while (!extent.final) {
+                    extent = yield* Effect.tryPromise({
+                      try: (signal) =>
+                        recording.wait(
+                          extent.revision,
+                          AbortSignal.any([signal, session.closed.signal]),
+                        ),
+                      catch: failedWith,
+                    });
+                    yield* PubSub.publish(copyChanged, session.id);
+                  }
+                }).pipe(Effect.catch(() => PubSub.publish(copyChanged, session.id))),
+                session.scope,
+              );
+            }
+
             return {
-              sessionId: session.id,
-              copy: copy.id,
-              ...defined({ owner: session.owner }),
+              ...state,
               url: `${base}/title/${session.token}.mp4`,
-              duration: probe.duration,
-              audio: audioTracks(probe.audio),
-              subtitles: subtitleTracks(probe.subtitles),
               progress: copy.progress,
             } satisfies CopySession;
           }),
         ),
 
-      closeCopy: (copyId: string) =>
+      copyState: (sessionId: string) =>
+        Effect.suspend(() => {
+          const session = sessions.get(sessionId);
+
+          return session?.kind === "title" &&
+            session.origin.kind === "copy" &&
+            !session.closed.signal.aborted
+            ? stateOfCopy(session).pipe(
+                Effect.map((state) =>
+                  sessions.get(sessionId) === session && !session.closed.signal.aborted
+                    ? state
+                    : null,
+                ),
+              )
+            : Effect.succeed(null);
+        }),
+      copyChanged: Stream.fromPubSub(copyChanged),
+      closeCopy: (copyId: string, kind?: "download" | "recording") =>
         Effect.suspend(() =>
           Effect.forEach(
             [...sessions.values()].filter(
               (session) =>
                 session.kind === "title" &&
                 session.origin.kind === "copy" &&
-                session.origin.copy === copyId,
+                session.origin.copy === copyId &&
+                (kind === undefined || session.origin.copyKind === kind),
             ),
             (session) => Scope.close(session.scope, Exit.void),
             { discard: true },

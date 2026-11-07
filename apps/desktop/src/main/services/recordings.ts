@@ -3047,6 +3047,7 @@ function make(deps: RecordingsDeps) {
 
           return {
             id,
+            kind: "recording",
             owner: owner.owner,
             path: fileOf(record),
             container: "ts",

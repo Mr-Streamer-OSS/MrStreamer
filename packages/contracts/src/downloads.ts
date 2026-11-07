@@ -2,6 +2,7 @@
 // provider file it was made from, but a finished copy needs no subscription: it plays from disk,
 // with its own details, artwork and progress, after its subscription expired or was removed. Media paths,
 // addresses and logins stay in the main process; artwork comes through the app's own scheme.
+import type { RecordingGap, RecordingStatus } from "./recordings.ts";
 import type { ActiveProfile } from "./profiles.ts";
 import type { AppError } from "./errors.ts";
 import type { RawTitleRef } from "./ondemand.ts";
@@ -129,8 +130,25 @@ export interface DownloadList {
   readonly ended: number;
 }
 
+/** Verified recording facts. Unknown media mapping stays null/empty, never wall-clock duration. */
+export interface RecordingCopyState {
+  readonly revision: number;
+  readonly status: RecordingStatus;
+  readonly final: boolean;
+  readonly duration: number | null;
+  readonly seekable: readonly { readonly from: number; readonly to: number }[];
+  readonly gaps: readonly RecordingGap[];
+}
+
+/** State of one exact open copy session; authorization must use its captured owner and kind/id. */
+export type CopyState = Pick<
+  CopySession,
+  "sessionId" | "copy" | "owner" | "duration" | "audio" | "subtitles" | "recording"
+> & { readonly kind: "download" | "recording" };
+
 /** What plays a downloaded copy: like a title session, of a file on this computer. */
 export interface CopySession {
+  readonly recording?: RecordingCopyState;
   /** Captured when the copy was opened; old clients may omit it. */
   readonly owner?: ActiveProfile;
   readonly sessionId: string;
