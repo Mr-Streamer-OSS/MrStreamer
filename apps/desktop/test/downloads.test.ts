@@ -3324,7 +3324,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       cause: new Error("Settlement could not be saved"),
       error: {
         kind: "unexpected",
-        detail: "Error: Settlement could not be saved",
+        detail: "Settlement could not be saved",
       } satisfies AppError,
     },
     {
