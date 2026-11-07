@@ -17,6 +17,7 @@ import {
   type ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
 import type { IpcInput } from "@mrstreamer/contracts/ipc";
+import type { GuideSearchPageInput } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, formatList, t, type PlainKey } from "@mrstreamer/core/i18n";
@@ -283,32 +284,57 @@ export const rulePreviewQuery = (plan: RecordingRulePlan) =>
     enabled: plan.channels.length > 0,
   });
 
+/** Guide search pages channel discovery reads per subscription before it reports `limited`. */
+const DISCOVERY_PAGES = 10;
+
 /**
  * The channels of `subscriptions` whose guide lists `title` from `from` on, for a rule to choose
- * from: one page of each subscription's guide search, as many as the rule planner reads.
+ * from. Reads at most `DISCOVERY_PAGES` pages of `RECORDING_RULE_LIMITS.matches` results per
+ * subscription; `limited` means at least one guide still had a continuation. Channel identity
+ * includes its subscription.
  */
 export const titleChannelsQuery = (title: string, subscriptions: readonly string[], from: number) =>
   queryOptions({
-    queryKey: ["rules", "channels", title, subscriptions],
+    queryKey: ["rules", "channels", title, subscriptions, from],
     queryFn: async ({ signal }) => {
       const found = new Map<string, LiveChannel>();
+      let limited = false;
 
       for (const subscriptionId of subscriptions) {
-        const page = await searchCall(
-          "guide.searchPage",
-          { subscriptionId, query: title, from, limit: RECORDING_RULE_LIMITS.matches },
-          signal,
-          "recording-rule",
-        );
+        let after: GuideSearchPageInput["after"];
 
-        for (const { channel, programme } of page.matches)
-          if (sameProgrammeTitle(programme.title, title)) found.set(ownedKey(channel), channel);
+        for (let read = 0; read < DISCOVERY_PAGES; read++) {
+          const page = await searchCall(
+            "guide.searchPage",
+            {
+              subscriptionId,
+              query: title,
+              from,
+              limit: RECORDING_RULE_LIMITS.matches,
+              ...defined({ after }),
+            },
+            signal,
+            "recording-rule",
+          );
+
+          for (const { channel, programme } of page.matches)
+            if (sameProgrammeTitle(programme.title, title)) found.set(ownedKey(channel), channel);
+
+          after = page.next ?? undefined;
+
+          if (!after) break;
+        }
+
+        limited ||= after !== undefined;
       }
 
-      return [...found.values()].map((channel) => ({
-        owned: ownedId(channel),
-        name: channel.title,
-      }));
+      return {
+        channels: [...found.values()].map((channel) => ({
+          owned: ownedId(channel),
+          name: channel.title,
+        })),
+        limited,
+      };
     },
     staleTime: 5 * MINUTE_MS,
   });

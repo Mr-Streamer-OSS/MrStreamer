@@ -1751,6 +1751,8 @@ export const es: Translation = {
   },
   "The guide lists more airings than one check reads. Later ones follow as these pass.":
     "La guía muestra más emisiones de las que lee una comprobación. Las siguientes llegan a medida que pasan estas.",
+  "More channels may match. The guide search limit was reached.":
+    "Puede que coincidan más canales. Se alcanzó el límite de búsqueda de la guía.",
   "Turn on rule": "Activar la regla",
   "Stop following": "Dejar de seguir",
   "{count} more": { one: "{count} más", many: "{count} más", other: "{count} más" },
