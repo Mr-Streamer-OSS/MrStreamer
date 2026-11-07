@@ -17,6 +17,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import {
   DEFAULT_PADDING,
   PADDING_MAX,
+  RECORDING_RULE_LIMITS,
   type ConnectionHolder,
   type RecordingPadding,
   type RecordingRule,
@@ -660,14 +661,14 @@ function RuleFields({
                       key={key}
                       type="button"
                       aria-pressed={on}
-                      disabled={!on && selected.size >= 100}
+                      disabled={!on && selected.size >= RECORDING_RULE_LIMITS.matches}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         const next = new Set(selected);
 
                         if (on) next.delete(key);
-                        // RecordingRulePlan accepts at most 100 selected channels.
-                        else if (next.size < 100) next.add(key);
+                        // Keep selection within the shared recording-rule limit.
+                        else if (next.size < RECORDING_RULE_LIMITS.matches) next.add(key);
                         setSelected(next);
                       }}
                       className={cn(

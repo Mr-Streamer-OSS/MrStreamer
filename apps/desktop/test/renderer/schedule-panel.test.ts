@@ -305,6 +305,30 @@ it("keeps at most 100 selected channels and saves the same bounded plan it previ
   expect(plan.channels).not.toContainEqual(channel);
 });
 
+it("explains the channel cap and how to replace a selection through the Channels description", async () => {
+  await discover(() => ({
+    matches: Array.from({ length: 100 }, (_, i) => discoveryMatch(`choice${i}`)),
+    next: null,
+  }));
+  await vi.waitFor(() => expect(channelButtons()).toHaveLength(101));
+
+  for (const button of channelButtons().slice(1, 100)) await act(async () => button.click());
+
+  const group = document.querySelector('[role="group"][aria-label="Channels"]');
+
+  const description =
+    group?.getAttribute("aria-description") ??
+    (group?.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+
+  expect(description).toMatch(/\b100\b/);
+  expect(description).toMatch(/deselect|remove|unselect/i);
+  expect(description).toMatch(/another|replace/i);
+  expect(document.body.textContent).not.toContain(LIMIT_WARNING);
+});
+
 it("stops discovery after ten guide pages and reports that more channels may match", async () => {
   await discover(({ after }) => {
     const page = after ? after.start + 1 : 1;
