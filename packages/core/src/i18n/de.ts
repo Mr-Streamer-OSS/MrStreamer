@@ -3,6 +3,13 @@
 import type { Translation } from "../i18n.ts";
 
 export const de: Translation = {
+  "Collection admission has ended; retry the request.":
+    "Der Zugriff auf Sammlungen ist abgelaufen. Versuche es erneut.",
+  "Collection catalogue is unavailable; retry the request.":
+    "Der Sammlungskatalog ist nicht verfügbar. Versuche es erneut.",
+  "Collection admission is required; retry the request.":
+    "Zugriff auf Sammlungen ist erforderlich. Versuche es erneut.",
+
   "Kids policy could not be read or saved. Try again.":
     "Die Kinderregeln konnten nicht gelesen oder gespeichert werden. Erneut versuchen.",
   "Kids policy: enter the correct PIN.": "Kinderregeln: die richtige PIN eingeben.",

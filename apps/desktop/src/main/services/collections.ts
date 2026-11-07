@@ -7,6 +7,7 @@ import * as Stream from "effect/Stream";
 import { defined } from "@mrstreamer/core/defined";
 import { ViewingErasure } from "@mrstreamer/core/viewing/service";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import { t } from "@mrstreamer/core/i18n";
 import { Failed } from "@mrstreamer/core/failure";
 import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import {
@@ -53,7 +54,10 @@ export function makeCollections(
 
   const refused = () =>
     new Failed({
-      error: { kind: "unexpected", detail: "Collection admission has ended; retry the request." },
+      error: {
+        kind: "unexpected",
+        detail: t("Collection admission has ended; retry the request."),
+      },
     });
 
   const check = (visibility: CollectionVisibility) => {
@@ -251,7 +255,7 @@ export class Collections extends Context.Service<
         new Failed({
           error: {
             kind: "unexpected",
-            detail: "Collection catalogue is unavailable; retry the request.",
+            detail: t("Collection catalogue is unavailable; retry the request."),
           },
         });
 
@@ -317,7 +321,7 @@ export class Collections extends Context.Service<
               (status) => status.subscriptionId === identity.sourceId,
             );
 
-            if (!status || status.fetchedAt === null || status.failure) return yield* unavailable();
+            if (!status || status.fetchedAt === null) return yield* unavailable();
 
             const titles = yield* onDemand
               .titles(identity.kind, [{ subscriptionId: identity.sourceId, id: identity.titleId }])

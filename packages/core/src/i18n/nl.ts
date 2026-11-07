@@ -3,6 +3,13 @@
 import type { Translation } from "../i18n.ts";
 
 export const nl: Translation = {
+  "Collection admission has ended; retry the request.":
+    "De toegang tot collecties is verlopen. Probeer opnieuw.",
+  "Collection catalogue is unavailable; retry the request.":
+    "De collectiecatalogus is niet beschikbaar. Probeer opnieuw.",
+  "Collection admission is required; retry the request.":
+    "Toegang tot collecties is vereist. Probeer opnieuw.",
+
   "Kids policy could not be read or saved. Try again.":
     "Het kinderbeleid kon niet worden gelezen of opgeslagen. Probeer opnieuw.",
   "Kids policy: enter the correct PIN.": "Kinderbeleid: voer de juiste pincode in.",

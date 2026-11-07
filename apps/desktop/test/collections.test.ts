@@ -1,3 +1,4 @@
+import { setLanguage } from "@mrstreamer/core/i18n";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -439,5 +440,21 @@ it("does not resurrect collection members after an older build erases their view
   expect(await run(reopened.service.page(reopened.context, "one"))).toMatchObject({
     total: 1,
     members: [{ sourceId: "source-b" }],
+  });
+});
+
+it("reports ended collection admission in the interface language", async () => {
+  const f = await fixture().open();
+  await f.close();
+  onTestFinished(() => setLanguage({ locale: "en-US", formats: "en-GB" }));
+  setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+  const result = await Effect.runPromise(Effect.result(f.service.list(f.context)));
+  expect(result).toMatchObject({
+    failure: {
+      error: {
+        kind: "unexpected",
+        detail: "De toegang tot collecties is verlopen. Probeer opnieuw.",
+      },
+    },
   });
 });

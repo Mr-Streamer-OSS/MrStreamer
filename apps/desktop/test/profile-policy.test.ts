@@ -1576,6 +1576,222 @@ it("publishes only the captured collection owner and refuses missing admitted co
   expect(changes).toEqual([{ kind: "collections", owner: f.adult }]);
 });
 
+it("keeps exact retained collection facts usable after a source refresh fails", async () => {
+  const f = await fixture();
+  const other = await fakeProvider();
+  const roster = await f.app.runPromise(Roster);
+  const source = await f.app.runPromise(roster.add(demoLogin(other)));
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  const movies = (await f.app.runPromise(f.onDemand.search("TEST"))).movies;
+
+  const first = movies.find((movie) =>
+    movie.versions.some((version) => version.subscriptionId === f.source.id),
+  )!;
+
+  const second = movies.find((movie) =>
+    movie.versions.some((version) => version.subscriptionId === source.id),
+  )!;
+
+  expect(
+    await f.call(f.adult, "collections.change", {
+      kind: "create",
+      id: "retained",
+      name: "Retained",
+    }),
+  ).toMatchObject({ ok: true });
+
+  for (const [movie, sourceId] of [
+    [first, f.source.id],
+    [second, source.id],
+  ] as const) {
+    const version = movie.versions.find((version) => version.subscriptionId === sourceId)!;
+    expect(
+      await f.call(f.adult, "collections.change", {
+        kind: "member",
+        id: "retained",
+        title: {
+          sourceId,
+          kind: movie.kind,
+          titleId: version.id,
+          name: "Forged",
+          year: null,
+          adult: false,
+        },
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  }
+
+  other.failTitles(503);
+  await f.app.runPromiseExit(f.onDemand.refresh(source.id));
+  const status = await f.app.runPromise(f.onDemand.status);
+  expect(status.lists.find((each) => each.subscriptionId === source.id)).toMatchObject({
+    failure: expect.anything(),
+    fetchedAt: expect.any(Number),
+  });
+
+  const result = await f.call(f.adult, "collections.page", {
+    id: "retained",
+    offset: 0,
+    limit: 48,
+  });
+
+  expect(result).toMatchObject({
+    ok: true,
+    value: {
+      total: 2,
+      members: expect.arrayContaining([
+        expect.objectContaining({ sourceId: f.source.id, available: true }),
+        expect.objectContaining({ sourceId: source.id, available: true }),
+      ]),
+    },
+  });
+
+  if (result.ok)
+    expect(
+      type({ members: type({ name: "string", adult: "boolean" }).array() })
+        .assert(result.value)
+        .members.every((member) => member.name !== "Forged" && member.adult === false),
+    ).toBe(true);
+});
+
+it("refuses absent initial collection lists and failed exact reads instead of empty success", async () => {
+  const f = await fixture();
+  const movie = (await f.app.runPromise(f.onDemand.search("TEST"))).movies[0]!;
+  expect(
+    await f.call(f.adult, "collections.change", { kind: "create", id: "initial", name: "Initial" }),
+  ).toMatchObject({ ok: true });
+
+  const command = {
+    kind: "member" as const,
+    id: "initial",
+    title: {
+      sourceId: f.source.id,
+      kind: movie.kind,
+      titleId: movie.id,
+      name: movie.title,
+      year: movie.year,
+      adult: false,
+    },
+    present: true,
+  };
+
+  const status = f.onDemand.status;
+  onTestFinished(() => {
+    Object.defineProperty(f.onDemand, "status", { value: status, configurable: true });
+  });
+  Object.defineProperty(f.onDemand, "status", {
+    value: Effect.map(status, (answer) => ({
+      ...answer,
+      lists: answer.lists.map((list) => ({ ...list, fetchedAt: null })),
+    })),
+    configurable: true,
+  });
+  expect(await f.call(f.adult, "collections.change", command)).toMatchObject({ ok: false });
+  Object.defineProperty(f.onDemand, "status", { value: status, configurable: true });
+  const titles = f.onDemand.titles;
+  onTestFinished(() => {
+    f.onDemand.titles = titles;
+  });
+  f.onDemand.titles = () =>
+    Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Read failed" } }));
+  expect(await f.call(f.adult, "collections.change", command)).toMatchObject({ ok: false });
+  f.onDemand.titles = titles;
+  expect(await f.call(f.adult, "collections.change", command)).toMatchObject({ ok: true });
+  expect(
+    await f.call(f.adult, "collections.page", { id: "initial", offset: 0, limit: 48 }),
+  ).toMatchObject({ ok: true, value: { total: 1 } });
+  f.onDemand.titles = () =>
+    Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Read failed" } }));
+  expect(
+    await f.call(f.adult, "collections.page", { id: "initial", offset: 0, limit: 48 }),
+  ).toMatchObject({ ok: false });
+  f.onDemand.titles = titles;
+  expect(
+    await f.call(f.adult, "collections.page", { id: "initial", offset: 0, limit: 48 }),
+  ).toMatchObject({ ok: true, value: { total: 1 } });
+});
+
+it("filters retained exact kids facts after adult reclassification and a failed refresh", async () => {
+  const f = await fixture({
+    titlesOf: (built) => {
+      const base = built.movies.find((movie) => !movie.adult)!;
+
+      return {
+        ...built,
+        movies: [
+          { ...base, id: 90101, name: "Kept safe", tmdb: "90101" },
+          { ...base, id: 90102, name: "Kept restricted", tmdb: "90102" },
+        ],
+      };
+    },
+  });
+
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: ["90101", "90102"].map((id) => ({
+            kind: "movie",
+            subscriptionId: f.source.id,
+            id,
+          })),
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(
+    await f.call(kid, "collections.change", { kind: "create", id: "safe", name: "Safe" }),
+  ).toMatchObject({ ok: true });
+
+  for (const titleId of ["90101", "90102"])
+    expect(
+      await f.call(kid, "collections.change", {
+        kind: "member",
+        id: "safe",
+        title: {
+          sourceId: f.source.id,
+          kind: "movie",
+          titleId,
+          name: "Forged",
+          year: null,
+          adult: false,
+        },
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  const restricted = f.provider.titles.movies.find((movie) => movie.id === 90102)!;
+  Object.assign(restricted, { adult: true, categoryId: "505" });
+  await f.app.runPromise(f.onDemand.refresh(f.source.id));
+  f.provider.failTitles(503);
+  await f.app.runPromiseExit(f.onDemand.refresh(f.source.id));
+  const page = await f.call(kid, "collections.page", { id: "safe", offset: 0, limit: 48 });
+  expect(page).toMatchObject({
+    ok: true,
+    value: { total: 1, members: [{ titleId: "90101", name: "Kept safe", adult: false }] },
+  });
+  expect(JSON.stringify(page)).not.toContain("Kept restricted");
+  expect(
+    await f.call(kid, "collections.change", {
+      kind: "member",
+      id: "safe",
+      title: {
+        sourceId: f.source.id,
+        kind: "movie",
+        titleId: "90102",
+        name: "Forged",
+        year: null,
+        adult: false,
+      },
+      present: true,
+    }),
+  ).toMatchObject({ ok: false });
+});
+
 it("keeps configured metadata available without exposing household progress to kids", async () => {
   const tmdb = await startFakeTmdb();
   onTestFinished(() => tmdb.close());

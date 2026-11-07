@@ -8,7 +8,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import {
   collectionKey,
@@ -106,6 +106,27 @@ function Members({
   const error = loaded.find((each) => each.error)?.error ?? null;
   const [picked, setPicked] = useState<ReadonlyMap<string, CollectionMember>>(new Map());
 
+  // Keep only current admitted page members, including their latest display facts.
+  const admitted = new Map(
+    [...byPage.values()]
+      .flatMap((page) => page?.members ?? [])
+      .map((member) => [collectionKey(member), member]),
+  );
+
+  const selected = [...picked.keys()].flatMap((key) => {
+    const member = admitted.get(key);
+
+    return member ? [member] : [];
+  });
+
+  useEffect(() => {
+    if (
+      selected.length !== picked.size ||
+      selected.some((member) => picked.get(collectionKey(member)) !== member)
+    )
+      setPicked(new Map(selected.map((member) => [collectionKey(member), member])));
+  });
+
   const pick = (member: CollectionMember) =>
     setPicked((now) => {
       const next = new Map(now);
@@ -128,11 +149,12 @@ function Members({
           </span>
         )}
       </div>
-      {picked.size > 0 && (
+      {selected.length > 0 && (
         <Picked
+          key={JSON.stringify(selected)}
           collection={collection}
           others={others}
-          picked={[...picked.values()]}
+          picked={selected}
           commit={commit}
           onDone={() => setPicked(new Map())}
         />

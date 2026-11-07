@@ -1358,7 +1358,7 @@ async function start(): Promise<void> {
           new Failed({
             error: {
               kind: "unexpected",
-              detail: "Collection admission is required; retry the request.",
+              detail: t("Collection admission is required; retry the request."),
             },
           }),
         ),

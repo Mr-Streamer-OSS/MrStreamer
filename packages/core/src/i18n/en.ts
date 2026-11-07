@@ -4,6 +4,13 @@
 import type { Plural } from "../i18n.ts";
 
 export const en = {
+  "Collection admission has ended; retry the request.":
+    "Collection admission has ended; retry the request.",
+  "Collection catalogue is unavailable; retry the request.":
+    "Collection catalogue is unavailable; retry the request.",
+  "Collection admission is required; retry the request.":
+    "Collection admission is required; retry the request.",
+
   "Kids policy could not be read or saved. Try again.":
     "Kids policy could not be read or saved. Try again.",
   "Kids policy: enter the correct PIN.": "Kids policy: enter the correct PIN.",

@@ -4,6 +4,8 @@
 // change again, and a title goes in a collection as the exact source version it was given. Then
 // the same, mounted: the Collections tab's grid and picks, and the menu in a title's details.
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement, useState } from "react";
 import { bareView, queryView } from "./mount.ts";
@@ -724,4 +726,57 @@ describe("a title's collections menu in its details", () => {
       expect(document.querySelector("[aria-label='Collections for Night Harbour']")).toBeTruthy(),
     );
   });
+});
+
+it("clears selected members and failed retry payloads on an adult privacy reset", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  mainCollections([{ name: "Privacy films", members: [member(kite)] }]);
+  await mountTab();
+  await poster("Kite Season, Movie, 2022");
+  await pick("Kite Season");
+  const failed = ipc.hold("collections.change");
+  await act(async () => button("Remove from Privacy films").click());
+  await act(async () => failed.reject({ kind: "unexpected", detail: "disk" }));
+  await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
+  const reread = ipc.hold("collections.page");
+  await act(async () =>
+    ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+  );
+  await vi.waitFor(() => expect(document.querySelector("[data-index]")).toBeNull());
+  expect(document.querySelector("[aria-label='1 selected']")).toBeNull();
+  expect(() => button("Retry")).toThrow();
+  await act(async () => reread.resolve({ total: 0, members: [] }));
+  await vi.waitFor(() => expect(document.body.textContent).toContain("0 titles"));
+  expect(document.querySelector("[aria-label='1 selected']")).toBeNull();
+  expect(() => button("Remove from Privacy films")).toThrow();
+});
+
+it("discards cached adult collection content before a delayed preference reread", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  selectProfileOwner(null);
+  mainCollections([{ name: "Adult collection", members: [member({ ...kite, adult: true })] }]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  acceptPreferences(client, {
+    revision: 1,
+    preferences: { ...defaultPreferences, adultTitles: true },
+  });
+  const view = queryView(client);
+  unmount = view.unmount;
+  await view.render(createElement(CollectionsPage, { active: true }));
+  await poster("Kite Season, Movie, 2022");
+  const reread = ipc.hold("collections.page");
+  await act(async () => {
+    acceptPreferences(client, {
+      revision: 2,
+      preferences: { ...defaultPreferences, adultTitles: false },
+    });
+  });
+  expect(client.getQueryData(["collections", "page", "c0", 0, 48])).toBeUndefined();
+  await vi.waitFor(() => expect(document.querySelector("[data-index]")).toBeNull());
+  expect(document.body.textContent).not.toContain("1 title");
+  expect(document.body.textContent).not.toContain("Kite Season");
+  await act(async () => reread.resolve({ total: 0, members: [] }));
+  await vi.waitFor(() => expect(document.body.textContent).toContain("0 titles"));
 });
