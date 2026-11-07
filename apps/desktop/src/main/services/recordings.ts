@@ -2400,6 +2400,15 @@ function make(deps: RecordingsDeps) {
         if (Date.now() < progress.retryAt) continue;
         progress.retryAt = Date.now() + RETRY_MS;
 
+        const available = yield* Effect.result(progress.owner.available);
+
+        if (available._tag === "Failure") continue;
+
+        if (!available.success) {
+          pendingProgress.delete(id);
+          continue;
+        }
+
         const saved = yield* Effect.result(
           progress.owner.write("recording", progress.id, progress.position, progress.duration),
         );
