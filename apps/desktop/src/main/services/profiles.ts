@@ -374,8 +374,8 @@ export function makeProfiles({
           return yield* Effect.fail(failedWith(Cause.squash(catalogue.cause)));
 
         // Configuration holds the lifecycle lock: the captured owner and Settings cannot change
-        // before this completes. Failure keeps admissions closed for the existing retry path; a
-        // typed Failed keeps its advice and a thrown callback becomes Failed.
+        // before this completes. Failure keeps admissions closed for the existing retry path.
+        // Failed in the error channel keeps its advice; a thrown callback becomes Failed.
         if (configured)
           yield* Effect.suspend(() =>
             configured(Context.get(context, Settings), { ...owner }),
