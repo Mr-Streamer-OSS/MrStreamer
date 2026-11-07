@@ -296,18 +296,9 @@ export function WatchScreen() {
       // The menu's own keys: Escape closes it, and focus goes back to its button.
       if (now.menu) return;
 
-      // What a failed channel offers takes Enter itself once Tab reached it, and a message's
-      // cross and the bar's word on the downloads take Enter and Space. Everywhere else Enter
-      // opens the list, also with another control of the bar in focus.
-      if (
-        pressesClose(event) ||
-        pressesDownloads(event) ||
-        (event.key === "Enter" &&
-          event.target instanceof HTMLButtonElement &&
-          event.target.closest("[data-playback-state]"))
-      ) {
-        return;
-      }
+      // The shared guard leaves Enter and Space to focused buttons. Message close and
+      // Downloads keep their own activation; elsewhere Enter opens the channel list.
+      if (pressesClose(event) || pressesDownloads(event)) return;
 
       const {
         switchBy,

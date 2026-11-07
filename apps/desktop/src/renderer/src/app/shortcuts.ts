@@ -6,7 +6,7 @@ export type ShortcutOverrides = NonNullable<Preferences["keyboardShortcuts"]>;
 export type ShortcutSurface = "live" | "title";
 
 // Commands share identity across both players; navigation retains its own fixed keys.
-// A `shift` command also runs with Shift held on a letter or Space it is bound to, remapped or
+// A `shift` command also runs with Shift held on a letter, Space or arrow it is bound to, remapped or
 // not; title subtitle timing reads that Shift as its larger step.
 export const shortcutCommands = [
   {
@@ -72,13 +72,13 @@ export const shortcutCommands = [
   },
   { id: "quality", label: "Choose quality", live: ["q"], title: [], shift: false, repeat: false },
   { id: "retry", label: "Retry channel", live: ["r"], title: [], shift: true, repeat: false },
-  { id: "volumeUp", label: "Volume up", live: [], title: ["ArrowUp"], shift: false, repeat: true },
+  { id: "volumeUp", label: "Volume up", live: [], title: ["ArrowUp"], shift: true, repeat: true },
   {
     id: "volumeDown",
     label: "Volume down",
     live: [],
     title: ["ArrowDown"],
-    shift: false,
+    shift: true,
     repeat: true,
   },
   { id: "nextEpisode", label: "Next episode", live: [], title: ["n"], shift: false, repeat: false },
@@ -107,16 +107,18 @@ export function shortcutBinding(
 const definitionOf = (command: ShortcutCommand) =>
   shortcutCommands.find((entry) => entry.id === command)!;
 
-/** A `shift` command's letters and Space also run with Shift held. */
+/** A `shift` command's letters, Space and arrows also run with Shift held. */
 function withShift(command: ShortcutCommand, bindings: readonly string[]): readonly string[] {
   if (!definitionOf(command).shift) return bindings;
 
   return bindings.flatMap((binding) =>
-    /^(?:[a-z]|Space)$/.test(binding) ? [binding, `Shift+${binding}`] : [binding],
+    /^(?:[a-z]|Space|ArrowLeft|ArrowRight|ArrowUp|ArrowDown)$/.test(binding)
+      ? [binding, `Shift+${binding}`]
+      : [binding],
   );
 }
 
-export function shortcutBindings(
+function rawShortcutBindings(
   command: ShortcutCommand,
   surface: ShortcutSurface,
   overrides: ShortcutOverrides = {},
@@ -164,13 +166,41 @@ export function validateShortcut(
     for (const surface of ["live", "title"] as const) {
       if (
         definition[surface].length &&
-        shortcutBindings(other.id, surface, overrides).some((taken) => candidates.includes(taken))
+        rawShortcutBindings(other.id, surface, overrides).some((taken) =>
+          candidates.includes(taken),
+        )
       )
         return { kind: "conflict", command: other.id };
     }
   }
 
   return null;
+}
+
+/** Validate the complete resulting configuration, including defaults restored by a reset. */
+export function shortcutProblem(overrides: ShortcutOverrides) {
+  for (const command of shortcutCommands) {
+    const bindings = overrides[command.id] ?? [...command.live, ...command.title];
+
+    for (const binding of bindings) {
+      const problem = validateShortcut(command.id, binding, overrides);
+
+      // Title seek defaults use arrows that Live commands cannot accept as remaps.
+      if (problem && (overrides[command.id] || problem.kind === "conflict"))
+        return { binding, problem };
+    }
+  }
+
+  return null;
+}
+
+/** Reference and dispatch share effective keys; stored overrides stay available for repair. */
+export function shortcutBindings(
+  command: ShortcutCommand,
+  surface: ShortcutSurface,
+  overrides: ShortcutOverrides = {},
+): readonly string[] {
+  return rawShortcutBindings(command, surface, shortcutProblem(overrides) ? {} : overrides);
 }
 
 /** Shared input guard also protects fixed player navigation and native control activation. */
@@ -209,17 +239,12 @@ export function resolveShortcut(
 
   if (!binding) return null;
 
-  const valid = shortcutCommands.every(
-    (entry) =>
-      !overrides[entry.id] ||
-      overrides[entry.id]!.every((key) => !validateShortcut(entry.id, key, overrides)),
-  );
+  const effective = shortcutProblem(overrides) ? {} : overrides;
 
   for (const command of shortcutCommands) {
     if (event.repeat && !command.repeat) continue;
 
-    if (shortcutBindings(command.id, surface, valid ? overrides : {}).includes(binding))
-      return command.id;
+    if (rawShortcutBindings(command.id, surface, effective).includes(binding)) return command.id;
   }
 
   return null;

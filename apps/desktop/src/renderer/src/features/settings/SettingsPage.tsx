@@ -15,6 +15,7 @@ import {
   shortcutBinding,
   shortcutBindings,
   shortcutCommands,
+  shortcutProblem,
   validateShortcut,
   type ShortcutCommand,
   type ShortcutOverrides,
@@ -409,8 +410,22 @@ function KeyboardShortcuts() {
 
   const save = useMutation({
     mutationKey: ["settings", "keyboardShortcuts"],
-    mutationFn: (change: ShortcutChange) =>
-      updatePreferences({ keyboardShortcuts: changedShortcuts(latest(), change) }, client),
+    mutationFn: (change: ShortcutChange) => {
+      const keyboardShortcuts = changedShortcuts(latest(), change);
+      const invalid = shortcutProblem(keyboardShortcuts);
+
+      if (invalid)
+        throw new Error(
+          invalid.problem.kind === "conflict"
+            ? t("{key} is used by {command}. Press another key.", {
+                key: keyName(invalid.binding),
+                command: commandLabel(invalid.problem.command),
+              })
+            : t("That key is reserved. Press another key."),
+        );
+
+      return updatePreferences({ keyboardShortcuts }, client);
+    },
     onSuccess: (_, change) => {
       const target = changeTarget(change);
       setAnnouncement(

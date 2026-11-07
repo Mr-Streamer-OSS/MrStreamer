@@ -332,3 +332,115 @@ it("finds the keyboard reference in Settings search", () => {
     }),
   );
 });
+
+it("refuses a single reset that would take another command's saved key", async () => {
+  ipc.reset();
+  ipc.prefer({ keyboardShortcuts: {} });
+  useUi.setState({ settings: "playback", settingsTarget: null });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const stop = syncPreferences(client, () => {});
+  const mounted = queryView(client);
+  cleanup = () => {
+    mounted.unmount();
+    stop();
+    useUi.setState({ settings: null });
+  };
+
+  ipc.answer("preferences.update", (patch) =>
+    ipc.snapshot({ ...currentPreferences(client)!, ...patch }),
+  );
+  await mounted.render(createElement(SettingsPage));
+  const view = mounted.container;
+
+  for (const [command, binding, label] of [
+    ["pause", "z", "Play or pause: Z"],
+    ["mute", " ", "Mute: Space"],
+  ] as const) {
+    const button = await vi.waitFor(() => {
+      const button = view.querySelector<HTMLButtonElement>(`[data-shortcut="${command}"]`);
+      expect(button).not.toBeNull();
+
+      return button!;
+    });
+
+    await act(async () => {
+      button.focus();
+      button.click();
+    });
+    await act(async () => {
+      button.dispatchEvent(key(binding));
+    });
+    await vi.waitFor(() => expect(button.getAttribute("aria-label")).toBe(label));
+  }
+
+  const writes = ipc.argsOf("preferences.update").length;
+  await act(async () =>
+    view.querySelector<HTMLButtonElement>('[aria-label="Reset Play or pause"]')!.click(),
+  );
+  await vi.waitFor(() =>
+    expect(
+      view.querySelector('[data-setting="keyboard-shortcuts"] [role="alert"]')?.textContent,
+    ).toContain("Space is used by Mute"),
+  );
+  expect(ipc.argsOf("preferences.update")).toHaveLength(writes);
+  expect(currentPreferences(client)?.keyboardShortcuts).toEqual({ pause: ["z"], mute: ["Space"] });
+  expect(view.querySelector('[data-shortcut="mute"]')?.getAttribute("aria-label")).toBe(
+    "Mute: Space",
+  );
+  expect(resolveShortcut(key(" "), "title", currentPreferences(client)?.keyboardShortcuts)).toBe(
+    "mute",
+  );
+  expect(document.activeElement).toBe(view.querySelector('[data-shortcut="pause"]'));
+});
+
+it.each([{ mute: ["Escape"] }, { pause: ["m"], mute: ["m"] }])(
+  "shows the same effective defaults that dispatch uses for invalid saved bindings %j, retaining reset",
+  async (keyboardShortcuts) => {
+    ipc.reset();
+    ipc.prefer({ keyboardShortcuts });
+    useUi.setState({ settings: "playback", settingsTarget: null });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const stop = syncPreferences(client, () => {});
+    const mounted = queryView(client);
+    cleanup = () => {
+      mounted.unmount();
+      stop();
+      useUi.setState({ settings: null });
+    };
+
+    await mounted.render(createElement(SettingsPage));
+    await vi.waitFor(() =>
+      expect(
+        mounted.container.querySelector('[data-shortcut="pause"]')?.getAttribute("aria-label"),
+      ).toBe("Play or pause: Space, K"),
+    );
+    expect(
+      mounted.container.querySelector('[data-shortcut="mute"]')?.getAttribute("aria-label"),
+    ).toBe("Mute: M");
+    expect(resolveShortcut(key(" "), "title", keyboardShortcuts)).toBe("pause");
+    expect(resolveShortcut(key("Escape"), "title", keyboardShortcuts)).toBeNull();
+    expect(currentPreferences(client)?.keyboardShortcuts).toEqual(keyboardShortcuts);
+    expect(mounted.container.querySelector('[aria-label="Reset Mute"]')).not.toBeNull();
+  },
+);
+
+it("keeps Shift arrows seeking and changing volume in titles, including held keys and remaps", () => {
+  for (const [arrow, command] of [
+    ["ArrowLeft", "seekBack"],
+    ["ArrowRight", "seekForward"],
+    ["ArrowUp", "volumeUp"],
+    ["ArrowDown", "volumeDown"],
+  ] as const) {
+    expect(resolveShortcut(key(arrow, { shiftKey: true }), "title")).toBe(command);
+    expect(resolveShortcut(key(arrow, { shiftKey: true, repeat: true }), "title")).toBe(command);
+    expect(resolveShortcut(key(arrow, { shiftKey: true }), "live")).toBeNull();
+    expect(
+      resolveShortcut(key(arrow, { shiftKey: true }), "title", { [command]: ["z"] }),
+    ).toBeNull();
+  }
+
+  expect(validateShortcut("volumeUp", "Shift+ArrowLeft")).toEqual({
+    kind: "conflict",
+    command: "seekBack",
+  });
+});
