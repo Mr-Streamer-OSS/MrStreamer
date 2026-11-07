@@ -293,8 +293,10 @@ it("keeps at most 100 selected channels and saves the same bounded plan it previ
     channelButtons().filter((button) => button.getAttribute("aria-pressed") === "true"),
   ).toHaveLength(100);
   expect(channelButtons().at(-1)?.getAttribute("aria-pressed")).toBe("false");
+  expect(channelButtons().at(-1)?.disabled).toBe(true);
   // A full selection can still be changed: release one slot and choose the last channel.
   await act(async () => channelButtons()[0]!.click());
+  expect(channelButtons().at(-1)?.disabled).toBe(false);
   await act(async () => channelButtons().at(-1)!.click());
 
   const plan = await savePreviewed("Turn on rule");

@@ -660,6 +660,7 @@ function RuleFields({
                       key={key}
                       type="button"
                       aria-pressed={on}
+                      disabled={!on && selected.size >= 100}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         const next = new Set(selected);
@@ -670,7 +671,7 @@ function RuleFields({
                         setSelected(next);
                       }}
                       className={cn(
-                        "flex h-7 items-center rounded-full px-3 text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex h-7 items-center rounded-full px-3 text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
                         on
                           ? "bg-foreground font-semibold text-black"
                           : "bg-white/8 font-medium text-muted-foreground hover:bg-white/12 hover:text-foreground",
