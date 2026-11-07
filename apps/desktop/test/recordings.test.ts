@@ -2302,6 +2302,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         }),
       );
 
+      onTestFinished(() => runtime.dispose());
       const recordings = await promised(runtime, Recordings);
       const profiles = await promised(runtime, ProfileSessions);
       const original = await profiles.active();
@@ -2395,6 +2396,15 @@ describe.skipIf(!hasTools)("recordings", () => {
       });
       expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
 
+      const durable = await app(first.dataDir);
+      onTestFinished(durable.quit);
+      expect((await durable.recordings.copy(id, captured))?.progress).toEqual({
+        position: 42,
+        duration: 90,
+      });
+      expect((await durable.recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+      await durable.quit();
+
       refuseWrites = true;
       await expect(recordings.recordProgress(id, 55, 90, captured)).rejects.toMatchObject({
         error: { kind: "unexpected" },
@@ -2482,6 +2492,12 @@ describe.skipIf(!hasTools)("recordings", () => {
 
     expect((await recordings.copy(id, captured))?.progress).toEqual({ position: 42, duration: 90 });
     await quit();
+    const restarted = await app(dataDir);
+    onTestFinished(restarted.quit);
+    expect((await restarted.recordings.copy(id, captured))?.progress).toEqual({
+      position: 42,
+      duration: 90,
+    });
   });
 
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {
@@ -2815,6 +2831,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     await before.quit();
 
     const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
     onTestFinished(quit);
     held = answer.promise;
     const starting = recordings.start({ subscriptionId, id: channel.id }, Date.now() + 60_000, {});
