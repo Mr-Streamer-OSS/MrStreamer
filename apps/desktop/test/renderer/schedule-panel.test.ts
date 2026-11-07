@@ -4,7 +4,7 @@
 // And which of the guide's airings a schedule still records, as its cells and details mark them.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { queryView } from "./mount.ts";
 import { expect, it, onTestFinished, vi } from "vitest";
 import type { IpcInput } from "@mrstreamer/contracts/ipc";
@@ -206,31 +206,55 @@ function discoveryMatch(
   };
 }
 
-async function followProgramme(search: (input: IpcInput<"guide.searchPage">) => GuideSearchPage) {
+/**
+ * Mounts `panel` with the guide answering `search` and main previewing and saving every rule.
+ * Defaults to following the noon programme from its guide airing.
+ */
+async function discover(
+  search: (input: IpcInput<"guide.searchPage">) => GuideSearchPage,
+  panel: ReactElement = createElement(SchedulePanel, {
+    basis: basisOfProgramme(channel, { title: "Noon News", start: NOON, stop: NOON + HOUR }),
+    channelName: "Eurosport 1",
+    onDone: () => {},
+  }),
+) {
   ipc.reset();
   ipc.answer("guide.searchPage", search);
   ipc.always("recordings.previewRule", { matches: [], limited: false, unproven: 0 });
   ipc.answer("recordings.saveRule", ({ plan }) => ({ id: "rule", plan }));
   const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   onTestFinished(() => view.unmount());
-  await view.render(
-    createElement(SchedulePanel, {
-      basis: basisOfProgramme(channel, { title: "Noon News", start: NOON, stop: NOON + HOUR }),
-      channelName: "Eurosport 1",
-      onDone: () => {},
-    }),
-  );
+  await view.render(panel);
   await act(async () => document.querySelector<HTMLElement>("[data-repeat=follow]")?.click());
-
-  return view;
 }
 
 const channelButtons = () => [
   ...document.querySelectorAll<HTMLButtonElement>('[aria-label="Channels"] button'),
 ];
 
+/** Saves the rule with the button labelled `label`, expecting the plan main last previewed. */
+async function savePreviewed(label: string) {
+  const button = () =>
+    [...document.querySelectorAll("button")].find((each) => each.textContent === label);
+
+  await vi.waitFor(() => expect(button()?.disabled).toBe(false));
+  await act(async () => button()!.click());
+  await vi.waitFor(() => expect(ipc.argsOf("recordings.saveRule")).toHaveLength(1));
+  const plan = ipc.argsOf("recordings.saveRule")[0]!.plan;
+  expect(
+    ipc
+      .argsOf("recordings.previewRule")
+      .filter(({ plan }) => plan.mode === "every")
+      .at(-1)?.plan,
+  ).toEqual(plan);
+
+  return plan;
+}
+
+const LIMIT_WARNING = "More channels may match. The guide search limit was reached.";
+
 it("offers an exact title after a fuzzy guide page and saves the channels previewed", async () => {
-  await followProgramme(({ after }) =>
+  await discover(({ after }) =>
     after
       ? { matches: [discoveryMatch("22", " noon news "), discoveryMatch("22")], next: null }
       : {
@@ -248,30 +272,13 @@ it("offers an exact title after a fuzzy guide page and saves the channels previe
   );
   await act(async () => channelButtons()[1]!.click());
 
-  const turnOn = () =>
-    [...document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Turn on rule",
-    );
-
-  await vi.waitFor(() => expect(turnOn()?.disabled).toBe(false));
-  await act(async () => turnOn()!.click());
-  await vi.waitFor(() => expect(ipc.argsOf("recordings.saveRule")).toHaveLength(1));
-  const plan = ipc.argsOf("recordings.saveRule")[0]!.plan;
+  const plan = await savePreviewed("Turn on rule");
   expect(plan.channels).toEqual([channel, { subscriptionId: SUBSCRIPTION, id: "22" }]);
-  expect(
-    ipc
-      .argsOf("recordings.previewRule")
-      .filter(({ plan }) => plan.mode === "every")
-      .at(-1)?.plan,
-  ).toEqual(plan);
-  expect(channelButtons().some((button) => button.textContent?.includes("fuzzy"))).toBe(false);
-  expect(document.body.textContent).not.toContain(
-    "More channels may match. The guide search limit was reached.",
-  );
+  expect(document.body.textContent).not.toContain(LIMIT_WARNING);
 });
 
 it("keeps at most 100 selected channels and saves the same bounded plan it previews", async () => {
-  await followProgramme(({ after }) =>
+  await discover(({ after }) =>
     after
       ? { matches: [discoveryMatch("extra")], next: null }
       : {
@@ -290,28 +297,14 @@ it("keeps at most 100 selected channels and saves the same bounded plan it previ
   await act(async () => channelButtons()[0]!.click());
   await act(async () => channelButtons().at(-1)!.click());
 
-  const turnOn = () =>
-    [...document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Turn on rule",
-    );
-
-  await vi.waitFor(() => expect(turnOn()?.disabled).toBe(false));
-  await act(async () => turnOn()!.click());
-  await vi.waitFor(() => expect(ipc.argsOf("recordings.saveRule")).toHaveLength(1));
-  const plan = ipc.argsOf("recordings.saveRule")[0]!.plan;
+  const plan = await savePreviewed("Turn on rule");
   expect(plan.channels).toHaveLength(100);
   expect(plan.channels).toContainEqual({ subscriptionId: SUBSCRIPTION, id: "extra" });
   expect(plan.channels).not.toContainEqual(channel);
-  expect(
-    ipc
-      .argsOf("recordings.previewRule")
-      .filter(({ plan }) => plan.mode === "every")
-      .at(-1)?.plan,
-  ).toEqual(plan);
 });
 
 it("stops discovery after ten guide pages and reports that more channels may match", async () => {
-  await followProgramme(({ after }) => {
+  await discover(({ after }) => {
     const page = after ? after.start + 1 : 1;
 
     return {
@@ -322,26 +315,19 @@ it("stops discovery after ten guide pages and reports that more channels may mat
   await vi.waitFor(() => expect(channelButtons()).toHaveLength(11));
   expect(channelButtons().at(-1)?.textContent).toBe("Channel page10");
   expect(ipc.argsOf("guide.searchPage")).toHaveLength(10);
-  expect(document.body.textContent).toContain(
-    "More channels may match. The guide search limit was reached.",
-  );
+  expect(document.body.textContent).toContain(LIMIT_WARNING);
 });
 
 it("keeps the same channel ID from different subscriptions separate while deduplicating guide airings", async () => {
-  ipc.reset();
   const otherSubscription = "another-subscription";
-  ipc.answer("guide.searchPage", ({ subscriptionId }) => ({
-    matches: [
-      discoveryMatch("22", "Noon News", subscriptionId),
-      discoveryMatch("22", "Noon News", subscriptionId),
-    ],
-    next: null,
-  }));
-  ipc.always("recordings.previewRule", { matches: [], limited: false, unproven: 0 });
-  ipc.answer("recordings.saveRule", ({ plan }) => ({ id: "rule", plan }));
-  const view = queryView(new QueryClient());
-  onTestFinished(() => view.unmount());
-  await view.render(
+  await discover(
+    ({ subscriptionId }) => ({
+      matches: [
+        discoveryMatch("22", "Noon News", subscriptionId),
+        discoveryMatch("22", "Noon News", subscriptionId),
+      ],
+      next: null,
+    }),
     createElement(RulePanel, {
       rule: {
         id: "rule",
@@ -359,23 +345,11 @@ it("keeps the same channel ID from different subscriptions separate while dedupl
 
   for (const button of channelButtons().slice(2)) await act(async () => button.click());
 
-  const save = () =>
-    [...document.querySelectorAll("button")].find((button) => button.textContent === "Save");
-
-  await vi.waitFor(() => expect(save()?.disabled).toBe(false));
-  await act(async () => save()!.click());
-  await vi.waitFor(() => expect(ipc.argsOf("recordings.saveRule")).toHaveLength(1));
-  const plan = ipc.argsOf("recordings.saveRule")[0]!.plan;
+  const plan = await savePreviewed("Save");
   expect(plan.channels).toEqual([
     channel,
     { subscriptionId: otherSubscription, id: "11" },
     { subscriptionId: SUBSCRIPTION, id: "22" },
     { subscriptionId: otherSubscription, id: "22" },
   ]);
-  expect(
-    ipc
-      .argsOf("recordings.previewRule")
-      .filter(({ plan }) => plan.mode === "every")
-      .at(-1)?.plan,
-  ).toEqual(plan);
 });

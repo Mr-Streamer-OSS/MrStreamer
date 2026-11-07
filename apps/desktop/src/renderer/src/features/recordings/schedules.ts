@@ -284,23 +284,26 @@ export const rulePreviewQuery = (plan: RecordingRulePlan) =>
     enabled: plan.channels.length > 0,
   });
 
+/** Guide search pages channel discovery reads per subscription before it reports `limited`. */
+const DISCOVERY_PAGES = 10;
+
 /**
  * The channels of `subscriptions` whose guide lists `title` from `from` on, for a rule to choose
- * from. Reads at most ten 100-result pages per subscription; `limited` means at least one
- * guide still had a continuation. Channel identity includes its subscription.
+ * from. Reads at most `DISCOVERY_PAGES` pages of `RECORDING_RULE_LIMITS.matches` results per
+ * subscription; `limited` means at least one guide still had a continuation. Channel identity
+ * includes its subscription.
  */
 export const titleChannelsQuery = (title: string, subscriptions: readonly string[], from: number) =>
   queryOptions({
     queryKey: ["rules", "channels", title, subscriptions, from],
     queryFn: async ({ signal }) => {
       const found = new Map<string, LiveChannel>();
-
       let limited = false;
 
       for (const subscriptionId of subscriptions) {
         let after: GuideSearchPageInput["after"];
 
-        for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+        for (let read = 0; read < DISCOVERY_PAGES; read++) {
           const page = await searchCall(
             "guide.searchPage",
             {
