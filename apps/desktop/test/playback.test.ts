@@ -1463,13 +1463,14 @@ describe("live captures", () => {
     await take(paused, 188);
     const live = new AbortController();
     const reader = (await captures.request(key, "live", provider, live.signal)).body!.getReader();
-    // Four budgets' worth of the stream, while one reader reads nothing.
-    let most = 0;
 
-    for (let read = 0; read < 4 * budget; read += 188 * 1000) {
-      await take(reader, 188 * 1000);
-      most = Math.max(most, await bytesIn(folder));
-    }
+    // Four budgets' worth of the stream, while one reader reads nothing.
+    const reading = (async () => {
+      for (let read = 0; read < 4 * budget; read += 188 * 1000) await take(reader, 188 * 1000);
+    })();
+
+    // Sampling the files must not pause the reader that is meant to keep up.
+    const [, most] = await Promise.all([reading, mostIn(folder, reading)]);
 
     expect(most).toBeGreaterThan(0);
     expect(most).toBeLessThanOrEqual(budget);
