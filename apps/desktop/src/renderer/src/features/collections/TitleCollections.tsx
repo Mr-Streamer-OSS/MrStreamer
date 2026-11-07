@@ -54,7 +54,8 @@ function OwnedTitleCollections({
   return (
     <Membership
       key={kind.current}
-      title={title}
+      // A failed refetch retains cached title data without fresh admission.
+      title={pending ? null : title}
       identity={{ sourceId: version.subscriptionId, kind: kind.current, titleId: version.id }}
     />
   );

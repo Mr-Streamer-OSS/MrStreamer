@@ -736,6 +736,117 @@ describe("a title's collections menu in its details", () => {
     expect(document.querySelector("[role=alert]")).toBeNull();
   });
 
+  it.each(["create", "member"] as const)(
+    "suspends a retained title after an actual refetch error and retries its %s with fresh facts",
+    async (operation) => {
+      mainCollections([{ name: "Private films", members: [] }], [{ ...film, id: "4k" }]);
+      const client = await details();
+      const stop = syncOnDemand(client);
+      const close = unmount;
+      unmount = () => {
+        stop();
+        close();
+      };
+
+      await vi.waitFor(() => expect(button("Add to collection")).toBeTruthy());
+      await act(async () => button("Add to collection").click());
+      const held = ipc.hold("collections.change");
+
+      if (operation === "create") {
+        const item = await vi.waitFor(() => button("New collection"));
+        await act(async () => item.click());
+        await type("Private weekend", "Enter");
+      } else {
+        const item = await vi.waitFor(() => {
+          const found = document.querySelector<HTMLElement>("[role=menuitemcheckbox]");
+          expect(found).not.toBeNull();
+
+          return found!;
+        });
+
+        await act(async () => item.click());
+        await act(async () => held.reject({ kind: "unexpected", detail: "disk refused" }));
+        await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
+        await vi.waitFor(() =>
+          expect(document.querySelector("[role=menuitemcheckbox]")?.textContent).toContain(
+            "Private films",
+          ),
+        );
+      }
+
+      const original = ipc.argsOf("collections.change")[0];
+
+      if (!original || (original.kind !== "create" && original.kind !== "member"))
+        throw new Error("No original operation");
+      // A pending background refresh still has successful cached admission.
+      const refreshing = ipc.hold("ondemand.titles");
+      const reads = ipc.argsOf("ondemand.titles").length;
+      await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+      await vi.waitFor(() => expect(ipc.argsOf("ondemand.titles").length).toBeGreaterThan(reads));
+
+      if (operation === "create") expect(field().value).toBe("Private weekend");
+      else
+        expect(document.querySelector("[role=menuitemcheckbox]")?.textContent).toContain(
+          "Private films",
+        );
+      await act(async () => refreshing.resolve([film]));
+
+      const refused = ipc.hold("ondemand.titles");
+      const beforeFailure = ipc.argsOf("ondemand.titles").length;
+      await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+      await vi.waitFor(() =>
+        expect(ipc.argsOf("ondemand.titles").length).toBeGreaterThan(beforeFailure),
+      );
+      await act(async () => refused.reject({ kind: "unexpected", detail: "worker unavailable" }));
+      await vi.waitFor(() => expect(button("Try again")).toBeTruthy());
+      // Details still shows cached title metadata, but private collection DOM must be gone.
+      expect(document.body.textContent).toContain("Night Harbour");
+      await vi.waitFor(() =>
+        expect(document.querySelector("[aria-label='Collections for Night Harbour']")).toBeNull(),
+      );
+      expect(document.querySelector("input[aria-label='Collection name']")).toBeNull();
+      expect(document.querySelector("[role=menuitemcheckbox]")).toBeNull();
+      expect(document.body.innerHTML).not.toContain("Private weekend");
+      expect(document.body.innerHTML).not.toContain("Private films");
+      expect(() => button("Retry")).toThrow();
+
+      if (original.kind === "create") {
+        // Deliver the successful create while title admission is refused, with usable rereads.
+        ipc.always("collections.list", [
+          { id: "c0", name: "Private films", total: 0 },
+          { id: original.id, name: "Private weekend", total: 0 },
+        ]);
+        await act(async () => held.resolve(null));
+      }
+
+      expect(ipc.argsOf("collections.change")).toHaveLength(1);
+      expect(document.body.innerHTML).not.toContain("Private weekend");
+      const fresh = { ...film, title: "Harbour restored", year: 2025 };
+      ipc.always("ondemand.titles", [fresh]);
+      await act(async () => button("Try again").click());
+      await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
+      expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save.");
+      expect(ipc.argsOf("collections.change")).toHaveLength(1);
+      const retry = ipc.hold("collections.change");
+      await act(async () => button("Retry").click());
+      await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(2));
+      expect(ipc.argsOf("collections.change")[1]).toEqual({
+        kind: "member",
+        id: original.id,
+        title: {
+          sourceId: SUBSCRIPTION,
+          kind: "movie",
+          titleId: "4k",
+          name: "Harbour restored",
+          year: 2025,
+        },
+        present: true,
+      });
+      await act(async () => retry.resolve(null));
+      await vi.waitFor(() => expect(document.querySelector("[role=alert]")).toBeNull());
+    },
+  );
+
   it("ticks and adds the version the details play, not the title's first", async () => {
     mainCollections(
       [
