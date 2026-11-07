@@ -41,7 +41,13 @@ import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Updates } from "../src/main/services/updates.ts";
 import { startFakeHls } from "./fake-hls.ts";
-import { fakeGuide, fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
+import {
+  fakeGuide,
+  fixture,
+  liveStreams,
+  xmltvTime,
+  type FakeProviderOptions,
+} from "./fake-provider.ts";
 import { SavedSubtitles, subtitlesOfCopy } from "../src/main/platform/saved-subtitles.ts";
 import {
   collect,
@@ -2684,10 +2690,6 @@ const TRACKS_FIXTURE = "h264-subtitles.mpegts";
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
-/** A time as the fake guide writes it (fake-provider.ts `xmltvTime`), to find a programme's entry. */
-const guideTime = (time: number) =>
-  `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
-
 /** Ten past seven in the evening, UTC: the fake guide's half-hour programmes start at :00 and :30. */
 const TEN_PAST = Date.UTC(2026, 9, 30, 19, 10);
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
@@ -2745,7 +2747,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
         (_, i) => {
           const start = base + (i + 1) * MINUTE;
 
-          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>R2 title</title></programme>`;
+          return `<programme channel="${id}" start="${xmltvTime(start)}" stop="${xmltvTime(start + MINUTE)}"><title>R2 title</title></programme>`;
         },
       ).join("")}</tv>`;
 
@@ -2801,7 +2803,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
         (_, i) => {
           const start = TEN_PAST + (i + 1) * MINUTE;
 
-          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>Fill</title></programme>`;
+          return `<programme channel="${id}" start="${xmltvTime(start)}" stop="${xmltvTime(start + MINUTE)}"><title>Fill</title></programme>`;
         },
       ).join("")}</tv>`,
     );
@@ -2862,7 +2864,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { provider, guide, subscriptionId, channel, recordings, listing } = await scheduling();
     const { next } = await listing();
     const guideId = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
-    const xml = `<tv><channel id="${guideId}"><display-name>Test</display-name></channel><programme channel="${guideId}" start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"><title>${next.title}</title><episode-num system="xmltv_ns">0.1.</episode-num></programme></tv>`;
+    const xml = `<tv><channel id="${guideId}"><display-name>Test</display-name></channel><programme channel="${guideId}" start="${xmltvTime(next.start)}" stop="${xmltvTime(next.stop)}"><title>${next.title}</title><episode-num system="xmltv_ns">0.1.</episode-num></programme></tv>`;
     provider.serveGuide(xml);
     await guide.refresh(subscriptionId);
     await recordings.saveRule({
@@ -2879,8 +2881,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     )) {
       provider.serveGuide(
         xml.replace(
-          `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
-          `start="${guideTime(next.start + offset)}" stop="${guideTime(next.stop + offset)}"`,
+          `start="${xmltvTime(next.start)}" stop="${xmltvTime(next.stop)}"`,
+          `start="${xmltvTime(next.start + offset)}" stop="${xmltvTime(next.stop + offset)}"`,
         ),
       );
       await guide.refresh(subscriptionId);
@@ -2898,7 +2900,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
         (_, i) => {
           const start = TEN_PAST + (i + 1) * MINUTE;
 
-          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>${i < 100 ? "Review B" : "Review A"}</title></programme>`;
+          return `<programme channel="${id}" start="${xmltvTime(start)}" stop="${xmltvTime(start + MINUTE)}"><title>${i < 100 ? "Review B" : "Review A"}</title></programme>`;
         },
       ).join("")}</tv>`;
 
@@ -2931,7 +2933,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const programmes = Array.from({ length: 102 }, (_, i) => {
       const start = TEN_PAST + (i - 100) * 30 * MINUTE - 15 * MINUTE;
 
-      return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + 30 * MINUTE)}"><title>Review series</title></programme>`;
+      return `<programme channel="${id}" start="${xmltvTime(start)}" stop="${xmltvTime(start + 30 * MINUTE)}"><title>Review series</title></programme>`;
     }).join("");
 
     provider.serveGuide(
@@ -3018,7 +3020,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       const guideId = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
 
       const xml = (offset: number) =>
-        `<tv><channel id="${guideId}"><display-name>Test</display-name></channel><programme channel="${guideId}" start="${guideTime(next.start + offset)}" stop="${guideTime(next.stop + offset)}"><title>${next.title}</title></programme></tv>`;
+        `<tv><channel id="${guideId}"><display-name>Test</display-name></channel><programme channel="${guideId}" start="${xmltvTime(next.start + offset)}" stop="${xmltvTime(next.stop + offset)}"><title>${next.title}</title></programme></tv>`;
 
       provider.serveGuide(xml(0));
       await guide.refresh(subscriptionId);
@@ -3156,8 +3158,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     provider.serveGuide(
       xml.replace(
-        `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
-        `start="${guideTime(next.start + MINUTE)}" stop="${guideTime(next.stop - MINUTE)}"`,
+        `start="${xmltvTime(next.start)}" stop="${xmltvTime(next.stop)}"`,
+        `start="${xmltvTime(next.start + MINUTE)}" stop="${xmltvTime(next.stop - MINUTE)}"`,
       ),
     );
     await guide.refresh(subscriptionId);
@@ -3286,8 +3288,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     provider.serveGuide(
       xml.replace(
-        `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
-        `start="${guideTime(next.start + MINUTE)}" stop="${guideTime(next.stop - MINUTE)}"`,
+        `start="${xmltvTime(next.start)}" stop="${xmltvTime(next.stop)}"`,
+        `start="${xmltvTime(next.start + MINUTE)}" stop="${xmltvTime(next.stop - MINUTE)}"`,
       ),
     );
     await guide.refresh(subscriptionId);
@@ -4039,8 +4041,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const ending = async (minutes: number) => {
       provider.serveGuide(
         fakeGuide(provider.catalogue, TEN_PAST).replace(
-          `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
-          `start="${guideTime(next.start)}" stop="${guideTime(next.stop + minutes * MINUTE)}"`,
+          `start="${xmltvTime(next.start)}" stop="${xmltvTime(next.stop)}"`,
+          `start="${xmltvTime(next.start)}" stop="${xmltvTime(next.stop + minutes * MINUTE)}"`,
         ),
       );
       await guide.refresh(subscriptionId);

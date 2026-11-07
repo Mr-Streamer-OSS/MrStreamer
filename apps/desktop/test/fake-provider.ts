@@ -1085,7 +1085,7 @@ function gridGuide(
 }
 
 /** "20261002140000 +0200" */
-function xmltvTime(time: number): string {
+export function xmltvTime(time: number): string {
   const local = new Date(time + 2 * 60 * 60 * 1000).toISOString();
 
   return `${local.slice(0, 19).replace(/[-T:]/g, "")} +0200`;
