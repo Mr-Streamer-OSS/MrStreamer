@@ -362,6 +362,51 @@ afterEach(() => {
   unmount = () => {};
 });
 
+it.each(["Cancel", "Close", "Escape", "Save"] as const)(
+  "returns focus to the profile control after closing management with %s",
+  async (closing) => {
+    ipc.always("profiles.list", [{ id: A.id, name: "Default", deleting: false }]);
+    ipc.always("profiles.policy", { protected: false, profiles: [] });
+    ipc.always("profiles.setPolicy", { protected: true, profiles: [] });
+    await openMenu();
+    const ui = menu();
+    const trigger = ui.named(t("Profile: {name}", { name: t("Default") }));
+
+    expect(trigger).toBeDefined();
+    await ui.press(t("Manage profiles") + t("PIN"));
+    await vi.waitFor(() => expect(ui.named(t("Cancel"))).toBeDefined());
+
+    if (closing === "Save") {
+      await act(async () => {
+        for (const field of document.querySelectorAll<HTMLInputElement>(
+          '[role="dialog"] input[type="password"]',
+        )) {
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+            field,
+            "1234",
+          );
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+    }
+
+    await act(async () => ui.named(t("Cancel"))!.focus());
+    expect(document.activeElement).toBe(ui.named(t("Cancel")));
+
+    if (closing === "Escape") {
+      await act(async () => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+      });
+    } else await ui.press(t(closing));
+
+    await vi.waitFor(() => expect(ui.named(t("Cancel"))).toBeUndefined());
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(ipc.argsOf("profiles.setPolicy")).toHaveLength(closing === "Save" ? 1 : 0);
+  },
+);
+
 it("creates a profile and keeps a refused deletion listed with Retry until it succeeds", async () => {
   let rows: LocalProfile[] = [
     { id: A.id, name: "Default", deleting: false },

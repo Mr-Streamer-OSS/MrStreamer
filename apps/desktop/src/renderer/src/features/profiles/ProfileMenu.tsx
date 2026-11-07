@@ -61,16 +61,19 @@ export function ProfileMenu() {
   const [pin, setPin] = useState("");
   const [wrongPin, setWrongPin] = useState(false);
 
+  const profileButton = useRef<HTMLButtonElement>(null);
   const newButton = useRef<HTMLButtonElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const pinField = useRef<HTMLInputElement>(null);
   const rows = useRef(new Map<string, HTMLButtonElement>());
-  const previous = useRef({ confirming, naming, asking });
+  const previous = useRef({ confirming, naming, asking, managing });
   useLayoutEffect(() => {
     const before = previous.current;
 
-    if (asking) {
+    // The manager's menu row has unmounted; return to the surviving profile control.
+    if (before.managing === true && managing === false) profileButton.current?.focus();
+    else if (asking) {
       if (!before.asking) pinField.current?.focus();
     } else if (confirming) cancelButton.current?.focus();
     else if (before.asking)
@@ -80,8 +83,8 @@ export function ProfileMenu() {
       )?.focus();
     else if (before.confirming) (rows.current.get(before.confirming) ?? newButton.current)?.focus();
     else if (before.naming && !naming) newButton.current?.focus();
-    previous.current = { confirming, naming, asking };
-  }, [confirming, naming, asking]);
+    previous.current = { confirming, naming, asking, managing };
+  }, [confirming, naming, asking, managing]);
 
   const stopNaming = () => {
     setNaming(false);
@@ -188,6 +191,7 @@ export function ProfileMenu() {
       }}
     >
       <Popover.Trigger
+        ref={profileButton}
         render={
           <button
             aria-label={label}
