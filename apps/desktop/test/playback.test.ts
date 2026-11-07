@@ -911,6 +911,7 @@ async function mostIn(folder: string, until: Promise<unknown>) {
   }
 
   await until;
+
   return most;
 }
 
