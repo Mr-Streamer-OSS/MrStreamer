@@ -659,9 +659,66 @@ describe("a title's collections menu in its details", () => {
       }),
     );
     unmount = view.unmount;
+
+    return client;
   }
 
   beforeEach(() => ipc.reset());
+
+  it("retains a refused operation after a fresh title read fails then recovers", async () => {
+    mainCollections([{ name: "Weekend films", members: [] }], [{ ...film, id: "4k" }]);
+    const client = await details();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='Collections for Night Harbour']")).not.toBeNull(),
+    );
+    await act(async () => button("Add to collection").click());
+
+    const tick = await vi.waitFor(() => {
+      const item = document.querySelector<HTMLElement>("[role=menuitemcheckbox]");
+      expect(item).not.toBeNull();
+
+      return item!;
+    });
+
+    const held = ipc.hold("collections.change");
+    await act(async () => tick.click());
+    const reread = ipc.hold("ondemand.titles");
+    await act(async () => {
+      void client.resetQueries({ queryKey: ["ondemand", "titles"] });
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='Collections for Night Harbour']")).toBeNull(),
+    );
+    expect(document.querySelector("[role=menuitemcheckbox]")).toBeNull();
+    await act(async () => reread.reject({ kind: "unexpected", detail: "worker unavailable" }));
+    await vi.waitFor(() => expect(button("Try again")).toBeTruthy());
+    expect(document.querySelector("[aria-label='Collections for Night Harbour']")).toBeNull();
+    await act(async () => held.reject({ kind: "unexpected", detail: "currency changed" }));
+    ipc.always("ondemand.titles", [film]);
+    await act(async () => button("Try again").click());
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='Collections for Night Harbour']")).not.toBeNull(),
+    );
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save.");
+    expect(button("Retry")).toBeTruthy();
+    const next = ipc.hold("collections.change");
+    await act(async () => button("Retry").click());
+    ipc.always("ondemand.titles", []);
+    await act(async () => {
+      await client.resetQueries({ queryKey: ["ondemand", "titles"] });
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='Collections for Night Harbour']")).toBeNull(),
+    );
+    await act(async () => next.reject({ kind: "unexpected", detail: "obsolete write" }));
+    ipc.always("ondemand.titles", [film]);
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["ondemand", "titles"] });
+    });
+    await vi.waitFor(() => expect(button("Add to collection")).toBeTruthy());
+    expect(() => button("Retry")).toThrow();
+    expect(document.querySelector("[role=alert]")).toBeNull();
+  });
 
   it("ticks and adds the version the details play, not the title's first", async () => {
     mainCollections(
@@ -1126,3 +1183,219 @@ it("discards old collection responses and failures when the full owner changes",
   expect(() => button("Retry")).toThrow();
   expect(ipc.argsOf("collections.change")).toHaveLength(1);
 });
+
+it.each([false, true])(
+  "keeps selected controls and focus while a later page loads or fails: %s",
+  async (fails) => {
+    ipc.reset();
+    ipc.always("subscription.list", [SAVED]);
+
+    const many = Array.from({ length: 130 }, (_, index) =>
+      member(listedTitle("movie", `m${index}`, `Film ${index}`, 2000)),
+    );
+
+    mainCollections([{ name: "Big", members: many }]);
+    await mountTab();
+    const first = await poster("Film 0, Movie, 2000");
+    await pick("Film 0");
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='1 selected']")).not.toBeNull(),
+    );
+    const later = ipc.hold("collections.page");
+    const reads = ipc.argsOf("collections.page").length;
+    const control = button("Remove from Big");
+    await act(async () => {
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      control.focus();
+    });
+    await vi.waitFor(() => expect(ipc.argsOf("collections.page").length).toBeGreaterThan(reads));
+    expect(ipc.argsOf("collections.page").at(-1)?.offset).toBe(120);
+    expect(document.querySelector("[aria-label='1 selected']")).not.toBeNull();
+    expect(document.activeElement).toBe(control);
+    await act(async () =>
+      fails
+        ? later.reject({ kind: "unexpected", detail: "later page" })
+        : later.resolve({ total: 130, members: many.slice(120) }),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='1 selected']")).not.toBeNull(),
+    );
+    expect(button("Remove from Big")).toBe(control);
+    expect(document.activeElement).toBe(control);
+
+    if (fails) await vi.waitFor(() => expect(button("Try again")).toBeTruthy());
+  },
+);
+
+it.each([
+  "complete",
+  "refuse",
+  "retry",
+  "owner",
+  "revision",
+  "version",
+  "visit",
+  "absent",
+  "target",
+] as const)(
+  "keeps a partial create receipt and uses fresh exact admission: %s",
+  async (outcome) => {
+    ipc.reset();
+    selectProfileOwner({ id: "mila", revision: 2 });
+    ipc.always("subscription.list", [SAVED]);
+    mainCollections([{ name: "Films", members: [] }]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = queryView(client);
+    const stop = syncOnDemand(client);
+    unmount = () => {
+      stop();
+      view.unmount();
+    };
+
+    const version = { subscriptionId: SUBSCRIPTION, id: kite.id };
+    await view.render(createElement(TitleCollections, { title: kite, version }));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='Collections for Kite Season']")).not.toBeNull(),
+    );
+    await act(async () => button("Add to collection").click());
+
+    const item = await vi.waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((each) =>
+        each.textContent?.includes("New collection"),
+      );
+
+      expect(found).toBeTruthy();
+
+      return found!;
+    });
+
+    await act(async () => item.click());
+    const held = ipc.hold("collections.change");
+    await type("Weekend", "Enter");
+    const creation = ipc.argsOf("collections.change")[0];
+
+    if (creation?.kind !== "create") throw new Error("No collection creation");
+    const list = ipc.hold("collections.list");
+    const memberships = ipc.hold("collections.memberships");
+    await act(async () =>
+      ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+    );
+    await view.render(createElement(TitleCollections, { title: null, pending: true, version }));
+    await vi.waitFor(() => expect(document.querySelector("input")).toBeNull());
+    expect(document.body.innerHTML).not.toContain("Kite Season");
+    expect(document.body.innerHTML).not.toContain("Weekend");
+    await act(async () => held.resolve(null));
+    await act(async () =>
+      list.resolve([
+        { id: "c0", name: "Films", total: 0 },
+        { id: creation.id, name: "Weekend", total: 0 },
+      ]),
+    );
+    await act(async () => memberships.resolve([]));
+    expect(ipc.argsOf("collections.change").map((each) => each.kind)).toEqual(["create"]);
+    await view.render(createElement(TitleCollections, { title: kite, version }));
+    await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
+    expect(document.querySelector("input")).toBeNull();
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save.");
+    expect(ipc.argsOf("collections.change").map((each) => each.kind)).toEqual(["create"]);
+
+    if (["owner", "revision", "version", "visit", "absent", "target"].includes(outcome)) {
+      if (outcome === "owner") selectProfileOwner({ id: "sam", revision: 2 });
+
+      if (outcome === "revision") selectProfileOwner({ id: "mila", revision: 3 });
+
+      if (outcome === "visit") await view.render(null);
+
+      if (outcome === "absent")
+        await view.render(createElement(TitleCollections, { title: null, version }));
+
+      if (outcome === "target") {
+        ipc.always("collections.list", [{ id: "c0", name: "Films", total: 0 }]);
+        await act(async () => {
+          await client.invalidateQueries({ queryKey: ["collections"] });
+        });
+      }
+
+      await view.render(
+        createElement(TitleCollections, {
+          title: outcome === "version" ? { ...kite, id: "other" } : kite,
+          version: outcome === "version" ? { ...version, id: "other" } : version,
+        }),
+      );
+      await vi.waitFor(() => expect(button("Add to collection")).toBeTruthy());
+      expect(() => button("Retry")).toThrow();
+      expect(document.querySelector("[role=alert]")).toBeNull();
+      expect(ipc.argsOf("collections.change").map((each) => each.kind)).toEqual(["create"]);
+
+      return;
+    }
+
+    const fresh = { ...kite, title: "Kite restored", year: 2025 };
+    await view.render(createElement(TitleCollections, { title: fresh, version }));
+    ipc.always("collections.list", [
+      { id: "c0", name: "Films", total: 0 },
+      { id: creation.id, name: "Weekend", total: 0 },
+    ]);
+    const refused = ipc.hold("collections.change");
+    await act(async () => button("Retry").click());
+    await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(2));
+    const target = creation.id;
+    expect(ipc.argsOf("collections.change")[1]).toEqual({
+      kind: "member",
+      id: target,
+      title: {
+        sourceId: SUBSCRIPTION,
+        kind: "movie",
+        titleId: kite.id,
+        name: "Kite restored",
+        year: 2025,
+      },
+      present: true,
+    });
+
+    if (outcome === "complete") {
+      await act(async () => refused.resolve(null));
+      await vi.waitFor(() => expect(document.querySelector("[role=alert]")).toBeNull());
+      expect(ipc.argsOf("collections.change").map((each) => each.kind)).toEqual([
+        "create",
+        "member",
+      ]);
+
+      return;
+    }
+
+    if (outcome === "retry") {
+      await act(async () => refused.reject({ kind: "unexpected", detail: "disk" }));
+      await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
+      await view.render(
+        createElement(TitleCollections, { title: { ...fresh, title: "Kite current" }, version }),
+      );
+      const finalAdd = ipc.hold("collections.change");
+      await act(async () => button("Retry").click());
+      await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(3));
+      expect(ipc.argsOf("collections.change")[2]).toEqual({
+        kind: "member",
+        id: target,
+        title: {
+          sourceId: SUBSCRIPTION,
+          kind: "movie",
+          titleId: kite.id,
+          name: "Kite current",
+          year: 2025,
+        },
+        present: true,
+      });
+      await act(async () => finalAdd.resolve(null));
+      await vi.waitFor(() => expect(document.querySelector("[role=alert]")).toBeNull());
+
+      return;
+    }
+
+    await act(async () => refused.reject({ kind: "title-not-found", titleId: kite.id }));
+    await vi.waitFor(() => expect(button("Close")).toBeTruthy());
+    expect(() => button("Retry")).toThrow();
+    expect(document.querySelector("[role=alert]")?.textContent).toContain(
+      "This title isn't available here.",
+    );
+  },
+);

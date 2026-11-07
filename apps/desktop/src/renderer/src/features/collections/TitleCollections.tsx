@@ -23,6 +23,7 @@ export function TitleCollections({
 }: {
   title: Title | null;
   version: OwnedId;
+  /** True until a successful title read, including a failed read awaiting retry. */
   pending?: boolean;
 }) {
   return (
@@ -85,7 +86,7 @@ function Membership({ title, identity }: { title: Title | null; identity: Collec
   return (
     <>
       {failure}
-      {!error && (!title || !list.data || !memberOf.data) && (
+      {!error && title && (!list.data || !memberOf.data) && (
         <Button variant="secondary" size="lg" disabled aria-busy>
           <ListPlus />
           {t("Add to collection")}

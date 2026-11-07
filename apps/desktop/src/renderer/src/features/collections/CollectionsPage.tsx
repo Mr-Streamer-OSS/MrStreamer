@@ -118,7 +118,7 @@ function Members({
   const error = loaded.find((each) => each.error)?.error ?? null;
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
 
-  const ready = !!collection && loaded.every((each) => each.data !== undefined);
+  const complete = !!collection && loaded.every((each) => each.isSuccess);
 
   // Keep only current admitted page members, including their latest display facts.
   const admitted = new Map(
@@ -134,7 +134,8 @@ function Members({
   });
 
   useEffect(() => {
-    if (ready && selected.length !== picked.size) setPicked(new Set(selected.map(collectionKey)));
+    if (complete && selected.length !== picked.size)
+      setPicked(new Set(selected.map(collectionKey)));
   });
 
   const pick = (member: CollectionMember) =>
@@ -163,7 +164,7 @@ function Members({
         <Picked
           key={JSON.stringify([...picked])}
           collection={collection}
-          ready={ready && selected.length === picked.size}
+          ready={!!collection && selected.length === picked.size}
           others={others}
           picked={selected}
           commit={commit}

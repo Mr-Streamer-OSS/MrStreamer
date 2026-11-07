@@ -487,6 +487,15 @@ export function CollectionMembership({
   const change = useCommit(commit, ready);
   const [creating, setCreating] = useState<string | null>(null);
   const draft = useRef<string | null>(null);
+  // A successful create is a receipt, not a successful add. Keep only its target while admission
+  // is unknown; the member facts for an explicit Retry come from the current props.
+  const [created, setCreated] = useState<string | null>(null);
+  useEffect(
+    () => () => {
+      draft.current = null;
+    },
+    [],
+  );
   const current = useRef({ ready, title });
   current.current = { ready, title };
   const labelId = useId();
@@ -496,6 +505,7 @@ export function CollectionMembership({
 
   const finish = () => {
     draft.current = null;
+    setCreated(null);
     setCreating(null);
     change.dismiss();
     refocus.current = true;
@@ -503,9 +513,17 @@ export function CollectionMembership({
 
   const failedMember = change.failed?.kind === "member" ? change.failed : null;
 
+  const unfinished = created
+    ? { kind: "member" as const, id: created, present: true }
+    : failedMember;
+
+  const problem = created ? { text: t("Couldn't save."), retry: true } : change.problem;
+
   useEffect(() => {
-    if (ready && failedMember && !collections.some((each) => each.id === failedMember.id))
+    if (ready && unfinished && !collections.some((each) => each.id === unfinished.id)) {
+      setCreated(null);
       change.dismiss();
+    }
   });
 
   // A refused create keeps the field to send again. Once it is stored the field closes, and a
@@ -513,8 +531,17 @@ export function CollectionMembership({
   const create = async (id: string, name: string) => {
     if (!(await change.run({ kind: "create", id, name }))) return;
 
-    if (draft.current !== id || !current.current.ready) return;
-    finish();
+    if (draft.current !== id) return;
+    draft.current = null;
+    setCreating(null);
+    refocus.current = true;
+
+    if (!current.current.ready) {
+      setCreated(id);
+
+      return;
+    }
+
     await change.run({ kind: "member", id, title: current.current.title, present: true });
   };
 
@@ -542,6 +569,7 @@ export function CollectionMembership({
             refocus.current = false;
             node.focus();
           }}
+          disabled={created !== null}
           aria-label={label}
           aria-labelledby={labelId}
           render={<Button variant="secondary" size="lg" aria-busy={change.saving || undefined} />}
@@ -601,16 +629,19 @@ export function CollectionMembership({
           </Menu.Positioner>
         </Menu.Portal>
       </Menu.Root>
-      {failedMember && (
+      {unfinished && (
         <p role="alert" className="flex items-baseline gap-3 text-sm">
-          <span className="text-destructive">{change.problem?.text}</span>
+          <span className="text-destructive">{problem?.text}</span>
           <button
-            onClick={() =>
-              change.problem?.retry ? void change.run({ ...failedMember, title }) : change.dismiss()
-            }
+            onClick={() => {
+              setCreated(null);
+
+              if (problem?.retry) void change.run({ ...unfinished, title });
+              else change.dismiss();
+            }}
             className="text-white underline underline-offset-4"
           >
-            {change.problem?.retry ? t("Retry") : t("Close")}
+            {problem?.retry ? t("Retry") : t("Close")}
           </button>
         </p>
       )}

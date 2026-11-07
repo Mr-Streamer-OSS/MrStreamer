@@ -247,12 +247,20 @@ export function DetailsView({
 
   return (
     <Sheet onClose={closeDetails} bar={bar} scroller={scroller}>
+      {listed.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {describeError(appError(listed.error))}{" "}
+          <button onClick={() => void listed.refetch()} className="text-white underline">
+            {t("Try again")}
+          </button>
+        </p>
+      )}
       {details.data && ready ? (
         <Content
           details={details.data}
           versions={{
             title,
-            pending: listed.isPending,
+            pending: !listed.isSuccess,
             playing,
             picked,
             automatic,
