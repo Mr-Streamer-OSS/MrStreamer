@@ -598,7 +598,7 @@ function RuleFields({
   const subscriptions = [...new Set(named.map((each) => each.owned.subscriptionId))];
   const found = useQuery(titleChannelsQuery(title, subscriptions, from));
 
-  const offered = [...named, ...(found.data ?? [])].filter(
+  const offered = [...named, ...(found.data?.channels ?? [])].filter(
     (each, at, all) =>
       all.findIndex((other) => ownedKey(other.owned) === ownedKey(each.owned)) === at,
   );
@@ -664,7 +664,8 @@ function RuleFields({
                       const next = new Set(selected);
 
                       if (on) next.delete(key);
-                      else next.add(key);
+                      // RecordingRulePlan accepts at most 100 selected channels.
+                      else if (next.size < 100) next.add(key);
                       setSelected(next);
                     }}
                     className={cn(

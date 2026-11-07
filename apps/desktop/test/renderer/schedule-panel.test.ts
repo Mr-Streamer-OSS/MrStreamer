@@ -7,8 +7,13 @@ import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
 import { expect, it, onTestFinished, vi } from "vitest";
+import type { IpcInput } from "@mrstreamer/contracts/ipc";
+import type { GuideSearchPage, ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import type { ScheduledRecording } from "@mrstreamer/contracts/recordings";
-import { SchedulePanel } from "../../src/renderer/src/features/recordings/SchedulePanel.tsx";
+import {
+  RulePanel,
+  SchedulePanel,
+} from "../../src/renderer/src/features/recordings/SchedulePanel.tsx";
 import {
   basisOfProgramme,
   basisOfSchedule,
@@ -176,4 +181,201 @@ it("marks the airings a schedule still records, not one it recorded, stopped or 
   // With no time to come, as a programme stopped partway, and held by the guide, none.
   expect(recordsAt(repeat(null), NOON)).toBe(false);
   expect(recordsAt({ ...repeat(padded(NOON)), status: { kind: "gone" } }, NOON)).toBe(false);
+});
+
+/** A guide result from the public IPC boundary, including fuzzy titles the search can return. */
+function discoveryMatch(
+  id: string,
+  title = "Noon News",
+  subscriptionId = SUBSCRIPTION,
+): ProgrammeMatch {
+  return {
+    channel: {
+      subscriptionId,
+      id,
+      title: `Channel ${id}`,
+      name: `Channel ${id}`,
+      tags: [],
+      number: null,
+      logoUrl: null,
+      categoryIds: [],
+      catchupDays: null,
+      variants: [],
+    },
+    programme: { title, start: NOON, stop: NOON + HOUR, description: null },
+  };
+}
+
+async function followProgramme(search: (input: IpcInput<"guide.searchPage">) => GuideSearchPage) {
+  ipc.reset();
+  ipc.answer("guide.searchPage", search);
+  ipc.always("recordings.previewRule", { matches: [], limited: false, unproven: 0 });
+  ipc.answer("recordings.saveRule", ({ plan }) => ({ id: "rule", plan }));
+  const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  onTestFinished(() => view.unmount());
+  await view.render(
+    createElement(SchedulePanel, {
+      basis: basisOfProgramme(channel, { title: "Noon News", start: NOON, stop: NOON + HOUR }),
+      channelName: "Eurosport 1",
+      onDone: () => {},
+    }),
+  );
+  await act(async () => document.querySelector<HTMLElement>("[data-repeat=follow]")?.click());
+
+  return view;
+}
+
+const channelButtons = () => [
+  ...document.querySelectorAll<HTMLButtonElement>('[aria-label="Channels"] button'),
+];
+
+it("offers an exact title after a fuzzy guide page and saves the channels previewed", async () => {
+  await followProgramme(({ after }) =>
+    after
+      ? { matches: [discoveryMatch("22", " noon news "), discoveryMatch("22")], next: null }
+      : {
+          matches: Array.from({ length: 100 }, (_, i) =>
+            discoveryMatch(`fuzzy${i}`, "Noon News Extra"),
+          ),
+          next: { start: NOON, channel: "fuzzy99" },
+        },
+  );
+  await vi.waitFor(() =>
+    expect(channelButtons().map((button) => button.textContent)).toEqual([
+      "Eurosport 1",
+      "Channel 22",
+    ]),
+  );
+  await act(async () => channelButtons()[1]!.click());
+
+  const turnOn = () =>
+    [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Turn on rule",
+    );
+
+  await vi.waitFor(() => expect(turnOn()?.disabled).toBe(false));
+  await act(async () => turnOn()!.click());
+  await vi.waitFor(() => expect(ipc.argsOf("recordings.saveRule")).toHaveLength(1));
+  const plan = ipc.argsOf("recordings.saveRule")[0]!.plan;
+  expect(plan.channels).toEqual([channel, { subscriptionId: SUBSCRIPTION, id: "22" }]);
+  expect(
+    ipc
+      .argsOf("recordings.previewRule")
+      .filter(({ plan }) => plan.mode === "every")
+      .at(-1)?.plan,
+  ).toEqual(plan);
+  expect(channelButtons().some((button) => button.textContent?.includes("fuzzy"))).toBe(false);
+  expect(document.body.textContent).not.toContain(
+    "More channels may match. The guide search limit was reached.",
+  );
+});
+
+it("keeps at most 100 selected channels and saves the same bounded plan it previews", async () => {
+  await followProgramme(({ after }) =>
+    after
+      ? { matches: [discoveryMatch("extra")], next: null }
+      : {
+          matches: Array.from({ length: 100 }, (_, i) => discoveryMatch(`choice${i}`)),
+          next: { start: NOON, channel: "choice99" },
+        },
+  );
+  await vi.waitFor(() => expect(channelButtons()).toHaveLength(102));
+
+  for (const button of channelButtons().slice(1)) await act(async () => button.click());
+  expect(
+    channelButtons().filter((button) => button.getAttribute("aria-pressed") === "true"),
+  ).toHaveLength(100);
+  expect(channelButtons().at(-1)?.getAttribute("aria-pressed")).toBe("false");
+  // A full selection can still be changed: release one slot and choose the last channel.
+  await act(async () => channelButtons()[0]!.click());
+  await act(async () => channelButtons().at(-1)!.click());
+
+  const turnOn = () =>
+    [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Turn on rule",
+    );
+
+  await vi.waitFor(() => expect(turnOn()?.disabled).toBe(false));
+  await act(async () => turnOn()!.click());
+  await vi.waitFor(() => expect(ipc.argsOf("recordings.saveRule")).toHaveLength(1));
+  const plan = ipc.argsOf("recordings.saveRule")[0]!.plan;
+  expect(plan.channels).toHaveLength(100);
+  expect(plan.channels).toContainEqual({ subscriptionId: SUBSCRIPTION, id: "extra" });
+  expect(plan.channels).not.toContainEqual(channel);
+  expect(
+    ipc
+      .argsOf("recordings.previewRule")
+      .filter(({ plan }) => plan.mode === "every")
+      .at(-1)?.plan,
+  ).toEqual(plan);
+});
+
+it("stops discovery after ten guide pages and reports that more channels may match", async () => {
+  await followProgramme(({ after }) => {
+    const page = after ? after.start + 1 : 1;
+
+    return {
+      matches: [discoveryMatch(`page${page}`)],
+      next: { start: page, channel: `page${page}` },
+    };
+  });
+  await vi.waitFor(() => expect(channelButtons()).toHaveLength(11));
+  expect(channelButtons().at(-1)?.textContent).toBe("Channel page10");
+  expect(ipc.argsOf("guide.searchPage")).toHaveLength(10);
+  expect(document.body.textContent).toContain(
+    "More channels may match. The guide search limit was reached.",
+  );
+});
+
+it("keeps the same channel ID from different subscriptions separate while deduplicating guide airings", async () => {
+  ipc.reset();
+  const otherSubscription = "another-subscription";
+  ipc.answer("guide.searchPage", ({ subscriptionId }) => ({
+    matches: [
+      discoveryMatch("22", "Noon News", subscriptionId),
+      discoveryMatch("22", "Noon News", subscriptionId),
+    ],
+    next: null,
+  }));
+  ipc.always("recordings.previewRule", { matches: [], limited: false, unproven: 0 });
+  ipc.answer("recordings.saveRule", ({ plan }) => ({ id: "rule", plan }));
+  const view = queryView(new QueryClient());
+  onTestFinished(() => view.unmount());
+  await view.render(
+    createElement(RulePanel, {
+      rule: {
+        id: "rule",
+        plan: {
+          title: "Noon News",
+          channels: [channel, { subscriptionId: otherSubscription, id: "11" }],
+          mode: "every",
+          padding: { before: 2, after: 5 },
+        },
+      },
+      onDone: () => {},
+    }),
+  );
+  await vi.waitFor(() => expect(channelButtons()).toHaveLength(4));
+
+  for (const button of channelButtons().slice(2)) await act(async () => button.click());
+
+  const save = () =>
+    [...document.querySelectorAll("button")].find((button) => button.textContent === "Save");
+
+  await vi.waitFor(() => expect(save()?.disabled).toBe(false));
+  await act(async () => save()!.click());
+  await vi.waitFor(() => expect(ipc.argsOf("recordings.saveRule")).toHaveLength(1));
+  const plan = ipc.argsOf("recordings.saveRule")[0]!.plan;
+  expect(plan.channels).toEqual([
+    channel,
+    { subscriptionId: otherSubscription, id: "11" },
+    { subscriptionId: SUBSCRIPTION, id: "22" },
+    { subscriptionId: otherSubscription, id: "22" },
+  ]);
+  expect(
+    ipc
+      .argsOf("recordings.previewRule")
+      .filter(({ plan }) => plan.mode === "every")
+      .at(-1)?.plan,
+  ).toEqual(plan);
 });
