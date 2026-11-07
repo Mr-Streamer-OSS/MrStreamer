@@ -1644,6 +1644,8 @@ export const en = {
     "The guide lists more airings than one check reads. Later ones follow as these pass.",
   "More channels may match. The guide search limit was reached.":
     "More channels may match. The guide search limit was reached.",
+  "{limit} channels selected. Deselect one to choose another.":
+    "{limit} channels selected. Deselect one to choose another.",
   "Turn on rule": "Turn on rule",
   "Stop following": "Stop following",
   "{count} more": { one: "{count} more", other: "{count} more" },
