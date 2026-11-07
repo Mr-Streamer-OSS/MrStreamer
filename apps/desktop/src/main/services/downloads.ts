@@ -765,7 +765,7 @@ function make(deps: DownloadsDeps) {
         .catch((cause) => {
           finished?.("failed", "app");
           console.warn("[downloads] couldn't keep how a transfer ended", cause);
-          const failure = cause instanceof Failed ? cause : failedWith(cause);
+          const failure = failedWith(cause);
           // Failed as far as this run knows, so the queue doesn't take it again and again.
           const latest = records.get(record.id);
 
