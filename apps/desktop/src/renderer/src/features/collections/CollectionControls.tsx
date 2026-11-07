@@ -7,10 +7,11 @@
 import { Menu } from "@base-ui/react/menu";
 import { Check, Ellipsis, ListPlus, Plus } from "lucide-react";
 import { useRef, useState, type SyntheticEvent } from "react";
-import type {
-  CollectionChange,
-  CollectionTitle,
-  PersonalCollection,
+import {
+  COLLECTION_NAME_MAX,
+  type CollectionChange,
+  type CollectionTitle,
+  type PersonalCollection,
 } from "@mrstreamer/contracts/collections";
 import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
@@ -92,6 +93,7 @@ function NameField({
         compact
         autoFocus
         aria-label={t("Collection name")}
+        maxLength={COLLECTION_NAME_MAX}
         aria-invalid={failed || undefined}
         value={name}
         onFocus={(event) => event.currentTarget.select()}

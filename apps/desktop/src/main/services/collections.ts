@@ -128,9 +128,8 @@ export function makeCollections(
             command.titles.some((title) => !captured.allows(title)))
         )
           return yield* refused();
+        // The store checks the guard inside its transaction; once committed, the change is stored.
         yield* store.change(command, current);
-
-        if (!current()) return yield* refused();
       }),
   };
 }

@@ -13,6 +13,9 @@ export interface CollectionTitle extends CollectionIdentity {
   readonly year: number | null;
 }
 
+/** The most characters a collection's name has, once trimmed. */
+export const COLLECTION_NAME_MAX = 120;
+
 export interface PersonalCollection {
   readonly id: string;
   readonly name: string;

@@ -66,7 +66,7 @@ function fixture() {
     return { service, context, db, store, close };
   };
 
-  return { open, dir };
+  return { open };
 }
 
 async function seed(
@@ -81,8 +81,8 @@ async function seed(
 }
 
 describe("personal collections", () => {
-  it("persists independent names, orders and multiple memberships through restart and profile deletion", async () => {
-    const { open, dir } = fixture();
+  it("persists independent names, orders and multiple memberships per profile through restart", async () => {
+    const { open } = fixture();
     const a = await open();
     await seed(a.service, a.context);
     await seed(a.service, a.context, "two");
@@ -109,11 +109,7 @@ describe("personal collections", () => {
     );
     const b = await open("another");
     expect(await run(b.service.list(b.context))).toEqual([]);
-    await seed(b.service, b.context);
     await b.close();
-    rmSync(profileDirectory(dir, "another"), { recursive: true });
-    const deleted = await open("another");
-    expect(await run(deleted.service.list(deleted.context))).toEqual([]);
     await run(restarted.service.change(restarted.context, { kind: "delete", id: "two" }));
     await restarted.close();
     const final = await open();

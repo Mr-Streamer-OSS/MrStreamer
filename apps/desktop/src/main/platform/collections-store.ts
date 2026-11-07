@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import type { Failed } from "@mrstreamer/core/failure";
 import {
   collectionKey,
+  COLLECTION_NAME_MAX,
   type CollectionChange,
   type CollectionTitle,
   type PersonalCollection,
@@ -94,7 +95,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
             case "rename": {
               const name = change.name.trim();
 
-              if (!name || name.length > 120 || !change.id)
+              if (!name || name.length > COLLECTION_NAME_MAX || !change.id)
                 throw new Error("Invalid collection name or id.");
 
               if (change.kind === "create")
