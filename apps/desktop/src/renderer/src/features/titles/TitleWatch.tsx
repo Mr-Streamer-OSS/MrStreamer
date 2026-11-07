@@ -60,8 +60,8 @@ import {
   type TitlePlayerState,
   type TitleProblem,
 } from "../../player/title-player.ts";
-import { CloseMessage, pressesClose, useClosed, type Closable } from "../watch/CloseMessage.tsx";
-import { openDownloads, pressesDownloads } from "../downloads/DownloadsNotice.tsx";
+import { CloseMessage, useClosed, type Closable } from "../watch/CloseMessage.tsx";
+import { openDownloads } from "../downloads/DownloadsNotice.tsx";
 import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
@@ -185,10 +185,8 @@ export function TitleWatch() {
       const current = latest.current;
       current.wake();
 
-      // The menu's own keys: Escape closes it, and focus goes back to its button. A message's
-      // cross takes Enter and Space, so Space closes it rather than playing the title again, and
-      // so does the bar's word on the downloads, which opens Downloads.
-      if (current.menu || pressesClose(event) || pressesDownloads(event)) return;
+      // The menu's own keys: Escape closes it, and focus goes back to its button.
+      if (current.menu) return;
 
       const command = resolveShortcut(event, "title", currentPreferences()?.keyboardShortcuts);
 

@@ -52,8 +52,6 @@ import {
   type ListEntry,
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
-import { pressesClose } from "./CloseMessage.tsx";
-import { pressesDownloads } from "../downloads/DownloadsNotice.tsx";
 import { Flash, flash, flashNote, LiveSubtitleHint } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls } from "./MiniPlayer.tsx";
@@ -295,10 +293,6 @@ export function WatchScreen() {
 
       // The menu's own keys: Escape closes it, and focus goes back to its button.
       if (now.menu) return;
-
-      // The shared guard leaves Enter and Space to focused buttons. Message close and
-      // Downloads keep their own activation; elsewhere Enter opens the channel list.
-      if (pressesClose(event) || pressesDownloads(event)) return;
 
       const {
         switchBy,

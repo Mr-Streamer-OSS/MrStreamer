@@ -4,7 +4,7 @@
 // current (`useDownloadsStatus`), so nothing is asked while a transfer runs, and renders again only
 // when what it says changes. Pressing it opens Downloads, leaving a title that plays as its Back
 // does. Enter and Space on it press it, as on any button: the players' keys leave both to it
-// (`pressesDownloads`).
+// through the shared player shortcut guard.
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDownToLine } from "lucide-react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
@@ -83,15 +83,6 @@ export function useDownloadsStatus(): DownloadsStatus | null {
 export function openDownloads(): void {
   if (useUi.getState().playingTitle) leaveTitle();
   openView("downloads");
-}
-
-/** Whether `event` is Enter or Space on the notice, which it takes itself to open Downloads. */
-export function pressesDownloads(event: KeyboardEvent): boolean {
-  return (
-    (event.key === "Enter" || event.key === " ") &&
-    event.target instanceof Element &&
-    event.target.closest("[data-downloads-notice]") !== null
-  );
 }
 
 /**

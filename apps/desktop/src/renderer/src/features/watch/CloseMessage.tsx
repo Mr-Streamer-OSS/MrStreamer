@@ -6,7 +6,8 @@
 // closed stays closed while the view renders again, or opens again, and while the receivers listed
 // change, as the players keep a lost receiver's failure through those (`outputChanged`). Enter and
 // Space on the cross press it, as on any button: the views' keys leave both to it
-// (`pressesClose`), so closing never also opens the channel list or plays the title again.
+// through the shared player shortcut guard, so closing never also opens the channel list or
+// plays the title again.
 import { X } from "lucide-react";
 import { t } from "@mrstreamer/core/i18n";
 import { useSyncExternalStore } from "react";
@@ -37,15 +38,6 @@ function subscribe(listener: () => void): () => void {
 /** Whether the viewer closed the message about `failure`; false while there is none. */
 export function useClosed(failure: Closable | null): boolean {
   return useSyncExternalStore(subscribe, () => failure !== null && closed.has(failure));
-}
-
-/** Whether `event` is Enter or Space on a cross, which the cross takes itself. */
-export function pressesClose(event: KeyboardEvent): boolean {
-  return (
-    (event.key === "Enter" || event.key === " ") &&
-    event.target instanceof Element &&
-    event.target.closest("[data-close-message]") !== null
-  );
 }
 
 /**
