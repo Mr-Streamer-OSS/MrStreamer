@@ -1,8 +1,9 @@
-import { allowsApproval } from "./services/profile-policy.ts";
+import { allowsApproval, visibleDownloads, visibleOutput } from "./services/profile-policy.ts";
 import { defined } from "@mrstreamer/core/defined";
 import { t } from "@mrstreamer/core/i18n";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { Title, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { Viewing } from "@mrstreamer/contracts/viewing";
 import {
   ActiveProfileSchema,
   sameProfile,
@@ -11,7 +12,7 @@ import {
   type ActiveProfile,
 } from "@mrstreamer/contracts/profiles";
 import { householdMutations } from "./handlers/subscriptions.ts";
-import { visibleDownloads, visibleOutput, type ProfileAdmission } from "./services/profiles.ts";
+import type { ProfileAdmission } from "./services/profiles.ts";
 import type { Type } from "arktype";
 import { ipcMain, type WebContents } from "electron";
 import { type } from "arktype";
@@ -219,47 +220,28 @@ export function registerIpc(
 
         // The mapping keeps per-method types at construction; this loop already dispatches the
         // union of validated inputs, as the ordinary handler above does.
-        const selected = protectKids(admitted, { ...handlers, ...personal.handlers(admitted) })[
+        const selected = kidsHandlers(admitted, { ...handlers, ...personal.handlers(admitted) })[
           method
         ] as typeof handler;
+
+        const start = Effect.andThen(
+          admitted.current,
+          Effect.suspend(() => selected(input, frame)),
+        );
 
         // These household writes serialize with removal, which drains personal permits.
         // Capture the admitted context under a short permit, then release it before that write lock.
         // Forked catalogue work retains its original Settings and current-owner check.
-        if (householdMutations.has(method)) {
-          const context = yield* admitted.run(Effect.context<never>());
-
-          const result = yield* Effect.exit(
-            Effect.provideContext(
-              Effect.andThen(
-                admitted.current,
-                Effect.suspend(() => selected(input, frame)),
-              ),
-              context,
-            ),
-          );
-
-          yield* admitted.current;
-
-          return yield* Exit.isSuccess(result)
-            ? Effect.succeed(result.value)
-            : Effect.failCause(result.cause);
-        }
-
         const result = yield* Effect.exit(
-          admitted.run(
-            Effect.andThen(
-              admitted.current,
-              Effect.suspend(() => selected(input, frame)),
-            ),
-          ),
+          householdMutations.has(method)
+            ? Effect.provideContext(start, yield* admitted.run(Effect.context<never>()))
+            : admitted.run(start),
         );
 
+        // A reply, success or failure, answers only the visit and policy revision it was admitted under.
         yield* admitted.current;
 
-        return yield* Exit.isSuccess(result)
-          ? Effect.succeed(result.value)
-          : Effect.failCause(result.cause);
+        return yield* result;
       });
 
       if (owned) {
@@ -321,20 +303,15 @@ export function emit<E extends IpcEvent>(
   if (!target.isDestroyed()) target.send(event, payload);
 }
 
-/** Apply the admitted policy to commands, without changing household service environments. */
-function protectKids(admission: ProfileAdmission, handlers: IpcHandlers): IpcHandlers {
-  return admission.approved === null
-    ? handlers
-    : kidsHandlers(admission.approved, handlers, admission.owner);
-}
+/**
+ * The commands an admitted viewer may use. Adults get `handlers` as they are. Kids requests use the
+ * same implementations after exact-source authorization; unlisted commands are management
+ * operations and stay closed until explicitly supported here. Household service environments are
+ * never changed.
+ */
+function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandlers): IpcHandlers {
+  if (approved === null) return handlers;
 
-/** Kids requests use the same command implementations after exact-source authorization. Unlisted
- * commands are management operations and stay closed until explicitly supported here. */
-function kidsHandlers(
-  approved: readonly KidsApproval[],
-  handlers: IpcHandlers,
-  owner: ActiveProfile,
-): IpcHandlers {
   const denied = () =>
     Effect.fail(
       new Failed({
@@ -345,11 +322,11 @@ function kidsHandlers(
       }),
     );
 
-  const online = (kind: "channel" | "movie" | "series", ref: OwnedId) =>
-    allowsApproval(approved, { kind, ...ref });
+  const allows = (approval: KidsApproval) => allowsApproval(approved, approval);
 
-  const copy = (kind: "download" | "recording", id: string) =>
-    allowsApproval(approved, { kind, id });
+  const online = (kind: "channel" | "movie" | "series", ref: OwnedId) => allows({ kind, ...ref });
+
+  const copy = (kind: "download" | "recording", id: string) => allows({ kind, id });
 
   const titleRef = (ref: TitleRef) =>
     ref.kind === "movie"
@@ -361,14 +338,9 @@ function kidsHandlers(
       ? { ...item, versions: item.versions.filter((version) => online(item.kind, version)) }
       : null;
 
-  const titles = (items: readonly Title[]) =>
-    items.flatMap((item) => {
-      const allowed = title(item);
+  const titles = (items: readonly Title[]) => items.flatMap((item) => title(item) ?? []);
 
-      return allowed ? [allowed] : [];
-    });
-
-  const viewing = (state: import("@mrstreamer/contracts/viewing").Viewing) => ({
+  const viewing = (state: Viewing) => ({
     ...state,
     favourites: state.favourites.filter((ref) => online("channel", ref)),
     recent: state.recent.filter((ref) => online("channel", ref)),
@@ -468,10 +440,7 @@ function kidsHandlers(
       Effect.map(handlers["guide.searchList"](input, frame), (result) =>
         Object.fromEntries(
           Object.entries(result).filter(([key]) =>
-            approved.some(
-              (item) =>
-                item.kind === "channel" && "subscriptionId" in item && ownedKey(item) === key,
-            ),
+            approved.some((item) => item.kind === "channel" && ownedKey(item) === key),
           ),
         ),
       ),
@@ -595,7 +564,7 @@ function kidsHandlers(
       titleRef(input.episode) ? handlers["viewing.markEpisode"](input, frame) : denied(),
     "downloads.list": (input, frame) =>
       Effect.map(handlers["downloads.list"](input, frame), (list) =>
-        visibleDownloads(list, (item) => copy("download", item.id)),
+        visibleDownloads(list, allows),
       ),
     "recordings.rules": () => Effect.succeed([]),
     "recordings.schedules": () => Effect.succeed([]),
@@ -634,9 +603,7 @@ function kidsHandlers(
     "playback.playing": handlers["playback.playing"],
     "output.status": (input, frame) =>
       Effect.map(handlers["output.status"](input, frame), (status) =>
-        visibleOutput(status, (item) =>
-          "subscriptionId" in item ? online(item.kind, item) : false,
-        ),
+        visibleOutput(status, allows),
       ),
     "output.scan": handlers["output.scan"],
     "output.connect": handlers["output.connect"],

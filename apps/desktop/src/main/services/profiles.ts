@@ -5,14 +5,13 @@ import { OnDemand } from "./ondemand.ts";
 import { Watchlist } from "./watchlist.ts";
 import { CustomLists } from "./custom-lists.ts";
 import { type } from "arktype";
-import { scryptSync, timingSafeEqual } from "node:crypto";
 import {
   KidsProfilePolicySchema,
   type KidsPolicy,
   type KidsApproval,
 } from "@mrstreamer/contracts/profiles";
 import { transaction } from "../platform/database.ts";
-import { randomUUID } from "node:crypto";
+import { randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { rm } from "node:fs/promises";
 import {
   DEFAULT_PROFILE_ID,
@@ -850,44 +849,5 @@ export class ProfileSessions extends Context.Service<
     );
 }
 
-/** Household publications keep their owner; visibility never changes their jobs or progress. */
-export function visibleDownloads(
-  list: import("@mrstreamer/contracts/downloads").DownloadList,
-  allows: (approval: KidsApproval) => boolean,
-) {
-  const items = list.items.filter((item) => allows({ kind: "download", id: item.id }));
-
-  return {
-    ...list,
-    items,
-    series: Object.fromEntries(
-      Object.entries(list.series).filter(([key]) => items.some((item) => item.series === key)),
-    ),
-    bytes: items.reduce((sum, item) => sum + (item.size ?? 0), 0),
-    ended: 0,
-  };
-}
-
-export function visibleOutput(
-  status: import("@mrstreamer/contracts/output").OutputStatus,
-  allows: (approval: KidsApproval) => boolean,
-) {
-  const output = status.output;
-
-  if (output.kind !== "receiver") return status;
-  const item = output.media?.item;
-
-  const allowed =
-    !item ||
-    (item.kind === "channel"
-      ? allows({ kind: "channel", ...item.channel })
-      : item.title.kind === "movie"
-        ? allows(item.title)
-        : allows({
-            kind: "series",
-            subscriptionId: item.title.subscriptionId,
-            id: item.title.seriesId,
-          }));
-
-  return { ...status, output: { ...output, media: allowed ? output.media : null, failure: null } };
-}
+/** The current viewer as publications filter for them: who, whether kids, and what they may see. */
+export type Viewer = Effect.Success<ProfileSessions["Service"]["visibility"]>;

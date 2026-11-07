@@ -146,22 +146,20 @@ function make(deps: RemindersDeps) {
     const sessions = yield* Effect.serviceOption(ProfileSessions);
 
     // Standalone reminder runtimes predate profiles. The assembled desktop always supplies sessions.
-    const visibility =
-      sessions._tag === "Some"
-        ? sessions.value.visibility
-        : Effect.succeed({ allows: () => true, current: Effect.void });
-
+    // A viewer whose policy can't be read is told of nothing.
     const mayTell = (reminder: KeptReminder) =>
-      Effect.gen(function* () {
-        const admitted = yield* visibility;
-        yield* admitted.current;
-
-        return admitted.allows({
-          kind: "channel",
-          subscriptionId: reminder.subscriptionId,
-          id: reminder.channel,
-        });
-      }).pipe(Effect.catchTag("Failed", () => Effect.succeed(false)));
+      sessions._tag === "Some"
+        ? sessions.value.visibility.pipe(
+            Effect.map((viewer) =>
+              viewer.allows({
+                kind: "channel",
+                subscriptionId: reminder.subscriptionId,
+                id: reminder.channel,
+              }),
+            ),
+            Effect.catchTag("Failed", () => Effect.succeed(false)),
+          )
+        : Effect.succeed(true);
 
     const { notifier } = deps;
     const path = join(deps.dataDir, "reminders.json");

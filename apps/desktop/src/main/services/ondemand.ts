@@ -535,27 +535,18 @@ function make(deps: OnDemandDeps) {
           const owners = args.owners as readonly CatalogueOwner[];
           selected = {
             ...args,
-            owners: owners.map((owner) => ({
-              ...owner,
-              approved: {
-                movies: approved
-                  .filter(
-                    (item) =>
-                      item.kind === "movie" &&
-                      "subscriptionId" in item &&
-                      item.subscriptionId === owner.subscriptionId,
-                  )
-                  .map((item) => item.id),
-                series: approved
-                  .filter(
-                    (item) =>
-                      item.kind === "series" &&
-                      "subscriptionId" in item &&
-                      item.subscriptionId === owner.subscriptionId,
-                  )
-                  .map((item) => item.id),
-              },
-            })),
+            owners: owners.map((owner) => {
+              const ids = (kind: "movie" | "series") =>
+                approved.flatMap((item) =>
+                  item.kind === kind &&
+                  "subscriptionId" in item &&
+                  item.subscriptionId === owner.subscriptionId
+                    ? [item.id]
+                    : [],
+                );
+
+              return { ...owner, approved: { movies: ids("movie"), series: ids("series") } };
+            }),
           };
         }
 

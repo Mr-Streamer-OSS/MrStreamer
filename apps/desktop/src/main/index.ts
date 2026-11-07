@@ -2,17 +2,14 @@
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
 import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import {
   DEFAULT_PROFILE_ID,
   sameProfile,
   type ActiveProfile,
 } from "@mrstreamer/contracts/profiles";
-import {
-  ProfileSessions,
-  visibleDownloads,
-  visibleOutput,
-  type ProfileAdmission,
-} from "./services/profiles.ts";
+import { ProfileSessions, type ProfileAdmission, type Viewer } from "./services/profiles.ts";
+import { visibleDownloads, visibleOutput } from "./services/profile-policy.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -975,18 +972,24 @@ async function start(): Promise<void> {
     };
   });
 
-  /** Sends each change to the window, while there is one. */
+  /**
+   * Sends each change to the window, while there is one. `visible` narrows it to what the current
+   * viewer may see, or null for nothing; while their policy can't be read, nothing is sent.
+   */
   const forward = <A, E extends IpcEvent>(
     changes: Stream.Stream<A>,
     event: E,
     payload: (change: A) => IpcEvents[E],
-    visible?: (change: A) => Effect.Effect<A | null, Failed>,
+    visible?: (change: A, viewer: Viewer) => A | null,
   ) =>
     runtime.runFork(
       Stream.runForEach(changes, (change) =>
         Effect.gen(function* () {
           const shown = visible
-            ? yield* visible(change).pipe(Effect.catchTag("Failed", () => Effect.succeed(null)))
+            ? yield* profileSessions.visibility.pipe(
+                Effect.map((viewer) => visible(change, viewer)),
+                Effect.catchTag("Failed", () => Effect.succeed(null)),
+              )
             : change;
 
           if (shown !== null && mainWindow) emit(mainWindow.webContents, event, payload(shown));
@@ -1001,13 +1004,7 @@ async function start(): Promise<void> {
     onDemand.detailsChanged,
     "ondemand.detailsChanged",
     (title) => title,
-    (title) =>
-      Effect.gen(function* () {
-        const visibility = yield* profileSessions.visibility;
-        yield* visibility.current;
-
-        return visibility.allows({ ...title, kind: title.kind }) ? title : null;
-      }),
+    (title, viewer) => (viewer.allows({ ...title, kind: title.kind }) ? title : null),
   );
   forward(guide.changes, "guide.updated", () => null);
   void runtime.runFork(
@@ -1056,38 +1053,20 @@ async function start(): Promise<void> {
     downloads.changes,
     "downloads.changed",
     (list) => list,
-    (list) =>
-      Effect.gen(function* () {
-        const visibility = yield* profileSessions.visibility;
-        yield* visibility.current;
-
-        return visibility.kids ? visibleDownloads(list, visibility.allows) : list;
-      }),
+    (list, viewer) => (viewer.kids ? visibleDownloads(list, viewer.allows) : list),
   );
   forward(reminders.changes, "reminders.changed", () => null);
   forward(
     recordings.changes,
     "recordings.changed",
     (list) => list,
-    (list) =>
-      Effect.gen(function* () {
-        const visibility = yield* profileSessions.visibility;
-        yield* visibility.current;
-
-        return list.filter((item) => visibility.allows({ kind: "recording", id: item.id }));
-      }),
+    (list, viewer) => list.filter((item) => viewer.allows({ kind: "recording", id: item.id })),
   );
   forward(
     recordings.scheduleChanges,
     "recordings.schedulesChanged",
     (list) => list,
-    (list) =>
-      Effect.gen(function* () {
-        const visibility = yield* profileSessions.visibility;
-        yield* visibility.current;
-
-        return visibility.kids ? [] : list;
-      }),
+    (list, viewer) => (viewer.kids ? [] : list),
   );
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
@@ -1225,21 +1204,18 @@ async function start(): Promise<void> {
         // here, or start a preview, with nobody watching.
         if (away && status.output.kind === "local") mainWindow?.destroy();
 
-        const visibility = yield* Effect.option(profileSessions.visibility);
-
-        const valid =
-          visibility._tag === "Some" && (yield* Effect.isSuccess(visibility.value.current));
+        // Only the viewer the status belongs to hears of it, and nobody while policy can't be read.
+        const viewer = yield* Effect.option(profileSessions.visibility);
 
         if (
           mainWindow &&
-          valid &&
-          visibility._tag === "Some" &&
-          (!status.owner || sameProfile(status.owner, visibility.value.owner))
+          Option.isSome(viewer) &&
+          (!status.owner || sameProfile(status.owner, viewer.value.owner))
         )
           emit(
             mainWindow.webContents,
             "output.changed",
-            visibility.value.kids ? visibleOutput(status, visibility.value.allows) : status,
+            viewer.value.kids ? visibleOutput(status, viewer.value.allows) : status,
           );
         receiverPlaying = status.output.kind === "receiver" && status.output.media !== null;
         keepAwake();
