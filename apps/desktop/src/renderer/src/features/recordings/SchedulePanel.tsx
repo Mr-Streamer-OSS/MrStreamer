@@ -6,19 +6,24 @@
 // programme details show it inline, Recordings' Edit in a popover.
 //   A new one made from a guide programme can instead Follow the programme: a rule recording each
 // airing of its title on the channels chosen, every match or new episodes only, which lists the
-// airings main would record now (`recordings.previewRule`) and saves with Turn on rule. A rule is
-// changed, or stopped, from Recordings in the same controls (`RulePanel`). A time a rule records
-// opens to how it stands, with Cancel schedule letting that one airing go.
-//   Its keys are its own: arrows move the repeat and step the padding, and nothing behind it
-// moves. Escape closes it where `onEscape` is given; a popover closes itself.
+// airings main would record now (`recordings.previewRule`), each with whether a connection is free
+// for its padded time as main forecasts it, and saves with Turn on rule. Its Priority decides
+// which rule's airing takes a connection first when they clash. A rule is changed, or stopped,
+// from Recordings in the same controls (`RulePanel`). A time a rule records opens to how it
+// stands, with Cancel schedule letting that one airing go.
+//   Its keys are its own: arrows move the repeat and step the padding and priority, and nothing
+// behind it moves. Escape closes it where `onEscape` is given; a popover closes itself.
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, Download } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   DEFAULT_PADDING,
   PADDING_MAX,
+  RECORDING_PRIORITY_DEFAULT,
+  RECORDING_PRIORITY_MAX,
   RECORDING_RULE_LIMITS,
   type ConnectionHolder,
+  type RecordingCapacity,
   type RecordingPadding,
   type RecordingRule,
   type RecordingRuleMatch,
@@ -26,7 +31,7 @@ import {
   type ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
-import { formatDate, t } from "@mrstreamer/core/i18n";
+import { formatDate, formatList, t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { appError, describeError } from "../../lib/errors.ts";
@@ -36,6 +41,7 @@ import { queries } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import {
   holderText,
+  holdersText,
   paddingRoom,
   planOf,
   planQuery,
@@ -324,27 +330,33 @@ function PaddingSteppers({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-7 gap-y-2">
-      <Stepper
-        label={t("Start")}
-        value={padding.before}
-        max={Math.min(PADDING_MAX, room - padding.after)}
-        text={t("{minutes} min early", { minutes: padding.before })}
-        onChange={(before) => onChange({ ...padding, before })}
-      />
-      <Stepper
-        label={t("End")}
-        value={padding.after}
-        max={Math.min(PADDING_MAX, room - padding.before)}
-        text={t("{minutes} min late", { minutes: padding.after })}
-        onChange={(after) => onChange({ ...padding, after })}
-      />
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">{t("Start")}</span>
+        <Stepper
+          label={t("Start")}
+          value={padding.before}
+          max={Math.min(PADDING_MAX, room - padding.after)}
+          text={t("{minutes} min early", { minutes: padding.before })}
+          onChange={(before) => onChange({ ...padding, before })}
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">{t("End")}</span>
+        <Stepper
+          label={t("End")}
+          value={padding.after}
+          max={Math.min(PADDING_MAX, room - padding.before)}
+          text={t("{minutes} min late", { minutes: padding.after })}
+          onChange={(after) => onChange({ ...padding, after })}
+        />
+      </div>
     </div>
   );
 }
 
 /**
- * Minutes of padding, 0 to `max`: a spin button the arrows step, by ten with Page Up and Down,
- * between − and + for the pointer.
+ * A whole number, 0 to `max`, named `label` for assistive tech (its caller shows the name): a spin
+ * button the arrows step, by ten with Page Up and Down, between − and + for the pointer.
  */
 function Stepper({
   label,
@@ -381,7 +393,6 @@ function Stepper({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-muted-foreground">{label}</span>
       <button
         type="button"
         tabIndex={-1}
@@ -546,6 +557,7 @@ export function RulePanel({ rule, onDone }: { rule: RecordingRule; onDone: () =>
         }))}
         chosen={plan.channels}
         mode={plan.mode ?? "every"}
+        priority={plan.priority ?? RECORDING_PRIORITY_DEFAULT}
         padding={padding}
         id={rule.id}
         onDone={onDone}
@@ -567,13 +579,16 @@ const SHOWN_MATCHES = 8;
  * The channels offered are `named`, then those whose guide lists the title in their
  * subscriptions; `chosen` are on as it opens, else all of `named`. Every match is the default.
  * New episodes only needs the guide to mark an airing as a premiere with its episode number, so
- * it can't be chosen while no airing found is marked so. Saved, it is `id`'s rule changed.
+ * it can't be chosen while no airing found is marked so. Priority starts at `priority`, the default
+ * for a new rule, and says where it stands among the other rules. Saved, it is `id`'s rule
+ * changed.
  */
 function RuleFields({
   title,
   named,
   chosen,
   mode: initialMode = "every",
+  priority: initialPriority = RECORDING_PRIORITY_DEFAULT,
   padding,
   id,
   onDone,
@@ -582,6 +597,7 @@ function RuleFields({
   named: readonly NamedChannel[];
   chosen?: readonly OwnedId[];
   mode?: Mode;
+  priority?: number;
   padding: RecordingPadding;
   id?: string;
   onDone: () => void;
@@ -590,6 +606,8 @@ function RuleFields({
   const now = useNow();
   const [from] = useState(() => Date.now());
   const [mode, setMode] = useState<Mode>(initialMode);
+  const [priority, setPriority] = useState(initialPriority);
+  const rules = useQuery(rulesQuery());
   const unmarkedId = useId();
   const fullId = useId();
 
@@ -609,9 +627,11 @@ function RuleFields({
     selected.has(ownedKey(owned)) ? [{ subscriptionId: owned.subscriptionId, id: owned.id }] : [],
   );
 
-  const plan: RecordingRulePlan = { title, channels, mode, padding };
+  const unranked: RecordingRulePlan = { title, channels, mode, padding };
+  const plan: RecordingRulePlan = { ...unranked, priority };
   const preview = useQuery({ ...rulePreviewQuery(plan), placeholderData: keepPreviousData });
-  const premieres = useQuery(rulePreviewQuery({ ...plan, mode: "new-only" })).data;
+  // Whether the guide marks any premiere doesn't depend on priority: one read for every priority.
+  const premieres = useQuery(rulePreviewQuery({ ...unranked, mode: "new-only" })).data;
 
   // No airing found is marked as a new episode: there is nothing New episodes only could record.
   const unmarked =
@@ -646,6 +666,9 @@ function RuleFields({
   const shown = channels.length > 0 ? preview.data : undefined;
   const modes: readonly Mode[] = ["every", "new-only"];
   const full = selected.size >= RECORDING_RULE_LIMITS.matches;
+
+  const clashes =
+    shown?.matches.filter(({ capacity }) => capacity && capacity.kind !== "available").length ?? 0;
 
   return (
     <>
@@ -763,6 +786,26 @@ function RuleFields({
               )}
             </div>
           </Field>
+          <Field label={t("Priority")}>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-1">
+              <Stepper
+                label={t("Priority")}
+                value={priority}
+                max={RECORDING_PRIORITY_MAX}
+                text={String(priority)}
+                onChange={setPriority}
+              />
+              {/* Unread rules leave it unsaid rather than claim this one stands alone. */}
+              {rules.data && (
+                <span aria-live="polite" className="min-w-0 text-[0.8125rem] font-medium">
+                  {rankText(
+                    priority,
+                    rules.data.filter((rule) => rule.id !== id),
+                  )}
+                </span>
+              )}
+            </div>
+          </Field>
         </div>
         {shown && shown.matches.length > 0 && <Matches matches={shown.matches} now={now} />}
       </div>
@@ -787,6 +830,14 @@ function RuleFields({
         ) : (
           shown && (
             <>
+              {clashes > 0 && (
+                <p>
+                  {t(
+                    "{count} airings clash. Higher priority goes first, and nothing already running is stopped.",
+                    { count: clashes },
+                  )}
+                </p>
+              )}
               {shown.matches.length === 0 && (
                 <p>
                   {t(
@@ -861,8 +912,55 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * The airings a rule would record now, by when: day, time, channel, and On now for one already
- * under way, which records the rest. The first few are listed and the rest counted.
+ * Where a rule at `priority` stands among the `others` saved: "2 of 3, after Kids Club", naming
+ * any at the same priority, whose airings go by their padded start and then the rule saved first.
+ */
+function rankText(priority: number, others: readonly RecordingRule[]): string {
+  if (others.length === 0) return t("The only rule");
+  const of = (rule: RecordingRule) => rule.plan.priority ?? RECORDING_PRIORITY_DEFAULT;
+  const names = (list: readonly RecordingRule[]) => formatList(list.map((rule) => rule.plan.title));
+  const ahead = others.filter((rule) => of(rule) > priority);
+  const level = others.filter((rule) => of(rule) === priority);
+  const place = { rank: ahead.length + 1, total: others.length + 1 };
+
+  if (ahead.length === 0)
+    return level.length === 0
+      ? t("{rank} of {total}, first", place)
+      : t("{rank} of {total}, level with {names}", { ...place, names: names(level) });
+
+  return level.length === 0
+    ? t("{rank} of {total}, after {names}", { ...place, names: names(ahead) })
+    : t("{rank} of {total}, after {names}, level with {level}", {
+        ...place,
+        names: names(ahead),
+        level: names(level),
+      });
+}
+
+/**
+ * How an airing's padded time stands for a connection, as main forecasts it from the connections
+ * this app knows: free, from a later time once one frees up, or not at all, with what holds them.
+ */
+function capacityText({ kind, start, holders }: RecordingCapacity): string {
+  const by = holdersText(holders);
+
+  if (kind === "available") return t("Connection free");
+
+  if (kind === "partial" && start !== null) {
+    const time = formatDate(start, "time");
+
+    return by
+      ? t("From {time}, after {holders}", { time, holders: by })
+      : t("From {time}", { time });
+  }
+
+  return by ? t("Won't record: {holders}", { holders: by }) : t("Won't record");
+}
+
+/**
+ * The airings a rule would record now, by when: day, time, channel, On now for one already under
+ * way, which records the rest, and whether a connection is free for it. The first few are listed
+ * and the rest counted. An airing main gave no forecast for says nothing of its connection.
  */
 function Matches({ matches, now }: { matches: readonly RecordingRuleMatch[]; now: number }) {
   const rest = matches.length - SHOWN_MATCHES;
@@ -876,23 +974,40 @@ function Matches({ matches, now }: { matches: readonly RecordingRuleMatch[]; now
         {t("Matches in the guide")}
       </h3>
       <ul>
-        {matches.slice(0, SHOWN_MATCHES).map(({ identity, plan, channelName }) => (
+        {matches.slice(0, SHOWN_MATCHES).map(({ identity, plan, channelName, capacity }) => (
           <li
             key={identity}
-            className="flex h-8 items-center border-b border-white/6 last:border-b-0"
+            data-capacity={capacity?.kind}
+            className="flex min-h-8 flex-wrap items-center gap-x-3 border-b border-white/6 py-1 last:border-b-0"
           >
-            <span className="w-24 flex-none whitespace-nowrap">
+            <span className="w-[5.25rem] flex-none whitespace-nowrap">
               {formatDate(plan.start, "weekdayDay")}
             </span>
-            <span className="w-[10rem] flex-none whitespace-nowrap tabular-nums">
+            <span className="w-[9.25rem] flex-none whitespace-nowrap tabular-nums">
               {t("{start} to {end}", {
                 start: formatDate(plan.start, "time"),
                 end: formatDate(plan.stop, "time"),
               })}
             </span>
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">{channelName}</span>
+            <span className="min-w-0 flex-[1_1_4rem] truncate text-muted-foreground">
+              {channelName}
+            </span>
             {plan.start <= now && (
               <span className="flex-none text-xs text-muted-foreground">{t("On now")}</span>
+            )}
+            {capacity && (
+              <span
+                className={cn(
+                  "min-w-[8rem] flex-[1_0_8rem] text-xs",
+                  capacity.kind === "missed"
+                    ? "text-destructive"
+                    : capacity.kind === "partial"
+                      ? "text-foreground"
+                      : "text-muted-foreground",
+                )}
+              >
+                {capacityText(capacity)}
+              </span>
             )}
           </li>
         ))}

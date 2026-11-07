@@ -1685,6 +1685,25 @@ export const nl: Translation = {
   "Turn on rule": "Regel aanzetten",
   "Stop following": "Niet meer volgen",
   "{count} more": { one: "nog {count}", other: "nog {count}" },
+  // Recording priority.
+  Priority: "Prioriteit",
+  "Priority {priority}": "Prioriteit {priority}",
+  "The only rule": "De enige regel",
+  "{rank} of {total}, first": "{rank} van {total}, als eerste",
+  "{rank} of {total}, level with {names}": "{rank} van {total}, gelijk met {names}",
+  "{rank} of {total}, after {names}": "{rank} van {total}, na {names}",
+  "{rank} of {total}, after {names}, level with {level}":
+    "{rank} van {total}, na {names}, gelijk met {level}",
+  "Connection free": "Verbinding vrij",
+  "From {time}, after {holders}": "Vanaf {time}, na {holders}",
+  "From {time}": "Vanaf {time}",
+  "Won't record: {holders}": "Wordt niet opgenomen: {holders}",
+  "Won't record": "Wordt niet opgenomen",
+  "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
+    one: "{count} uitzending botst. Hogere prioriteit gaat voor, en wat al loopt, wordt niet gestopt.",
+    other:
+      "{count} uitzendingen botsen. Hogere prioriteit gaat voor, en wat al loopt, wordt niet gestopt.",
+  },
   "A rule following {title} records this. Its padding is the rule's.":
     "Een regel die {title} volgt neemt dit op. De marge is die van de regel.",
   "From a rule": "Via een regel",
