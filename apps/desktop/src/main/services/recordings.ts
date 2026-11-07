@@ -1478,8 +1478,9 @@ function make(deps: RecordingsDeps) {
     /** One check, or change of the schedules, at a time. */
     const scheduling = (yield* Semaphore.make(1)).withPermits(1);
     const scheduleChanges = yield* PubSub.sliding<readonly ScheduledRecording[]>(4);
-    /** What the window was last told, so a check that changed nothing tells nothing. */
+    /** Last snapshot; publish again when schedules or connection owners change. */
     let shownSchedules: readonly ScheduledRecording[] = [];
+    let ownersChanged = false;
     /** What holds each schedule back, as the last check found; null for nothing. */
     let holds = new Map<string, Hold | null>();
     /**
@@ -1612,6 +1613,8 @@ function make(deps: RecordingsDeps) {
             match,
           );
 
+          if (occurrence === null || occurrence?.settled) return undefined;
+
           const saved = occurrence && schedules.get(occurrence.id);
 
           return {
@@ -1632,12 +1635,16 @@ function make(deps: RecordingsDeps) {
             startsOf.has(each.id),
         );
 
-        const capacity = yield* capacityOf([...kept, ...candidates], now);
+        const capacity = yield* capacityOf(
+          [...kept, ...candidates.filter((each) => each !== undefined)],
+          now,
+        );
 
         return {
           ...preview,
           matches: preview.matches.map((match, i) => {
-            const forecast = capacity.get(candidates[i]!.id);
+            const candidate = candidates[i];
+            const forecast = candidate && capacity.get(candidate.id);
 
             return { ...match, ...(forecast && { capacity: forecast }) };
           }),
@@ -1950,6 +1957,14 @@ function make(deps: RecordingsDeps) {
                 ...(yield* settings.ofSubscription(subscriptionId)),
               };
 
+              // Playlist imports expose their current snapshot without refreshing on a miss.
+              // Use the exact source's snapshot, not the disk-backed library's older channel list.
+              const importPlaylist = source.provider.playlistImport;
+
+              const playlist = importPlaylist
+                ? yield* Effect.tryPromise({ try: () => importPlaylist(), catch: (cause) => cause })
+                : undefined;
+
               for (const schedule of own) {
                 const listed = lookup(schedule.plan.channel.id);
 
@@ -1957,7 +1972,10 @@ function make(deps: RecordingsDeps) {
 
                 for (const variant of streamsToPlay(listed, preferences, undefined)) {
                   const stream = yield* Effect.tryPromise({
-                    try: () => source.provider.liveStream(variant.id),
+                    try: () =>
+                      playlist
+                        ? Promise.resolve(playlist.live.streams.get(variant.id) ?? null)
+                        : source.provider.liveStream(variant.id),
                     catch: (cause) =>
                       cause instanceof Failed
                         ? cause
@@ -2411,7 +2429,8 @@ function make(deps: RecordingsDeps) {
       // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
       // wakes the next check.
       if (schedules.size === 0 && !rules?.length && !unsaved.recordings && !unsaved.schedules) {
-        if (shownSchedules.length > 0) {
+        if (shownSchedules.length > 0 || ownersChanged) {
+          ownersChanged = false;
           shownSchedules = [];
           yield* PubSub.publish(scheduleChanges, shownSchedules);
         }
@@ -2584,9 +2603,11 @@ function make(deps: RecordingsDeps) {
       const list = forecast.success;
 
       if (
+        ownersChanged ||
         !isDeepStrictEqual(list, shownSchedules) ||
         !isDeepStrictEqual(previousErrors, ruleErrors)
       ) {
+        ownersChanged = false;
         shownSchedules = list;
         yield* PubSub.publish(scheduleChanges, list);
       }
@@ -2626,6 +2647,18 @@ function make(deps: RecordingsDeps) {
       Stream.runForEach(guide.changes.pipe(Stream.debounce(GUIDE_SETTLE)), () => wake),
     );
     yield* Effect.forkScoped(Stream.runForEach(library.changes, () => wake));
+    // Ownership changes can alter an open rule preview even with no saved schedules.
+    // The normal check publishes once; reading that snapshot never changes ownership.
+    yield* Effect.forkScoped(
+      Stream.runForEach(coordination.busyChanged, () =>
+        Effect.andThen(
+          Effect.sync(() => {
+            ownersChanged = true;
+          }),
+          wake,
+        ),
+      ),
+    );
 
     /**
      * Runs `turn` in a turn once `id`'s start under way, if any, answered, waiting for it outside

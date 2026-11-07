@@ -11,6 +11,7 @@ import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
 import { expect, it, onTestFinished, vi } from "vitest";
 import type { Recording } from "@mrstreamer/contracts/recordings";
+import { RulePanel } from "../../src/renderer/src/features/recordings/SchedulePanel.tsx";
 import { RecordingsPage } from "../../src/renderer/src/features/recordings/RecordingsPage.tsx";
 import { syncRecordings } from "../../src/renderer/src/features/recordings/recordings.ts";
 
@@ -469,3 +470,101 @@ it("keeps saying why a Delete was refused", async () => {
   await act(async () => remove.click());
   await vi.waitFor(() => expect(rowText("Recorded")).toContain("Recordings could not be saved."));
 });
+
+it.each(["recordings.schedulesChanged", "recordings.changed"] as const)(
+  "refreshes an unchanged open rule forecast from %s, retaining the last result between reads",
+  async (event) => {
+    ipc.reset();
+    const channel = { subscriptionId: SUBSCRIPTION, id: "11" };
+
+    const plan = {
+      title: "Noon News",
+      channels: [channel],
+      priority: 1,
+      padding: { before: 0, after: 0 },
+    };
+
+    const match = {
+      identity: "noon",
+      channelName: "Eurosport 1",
+      plan: {
+        kind: "programme" as const,
+        channel,
+        title: plan.title,
+        start: at("12:00"),
+        stop: at("13:00"),
+        padding: plan.padding,
+      },
+    };
+
+    ipc.always("recordings.previewRule", {
+      matches: [
+        { ...match, capacity: { kind: "missed", start: null, holders: [{ kind: "watch" }] } },
+      ],
+      limited: false,
+      unproven: 0,
+    });
+    ipc.always("recordings.rules", [{ id: "rule1", plan }]);
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+
+    const view = queryView(client);
+    const stop = syncRecordings(client);
+    onTestFinished(() => {
+      stop();
+      view.unmount();
+    });
+    const panel = createElement(RulePanel, { rule: { id: "rule1", plan }, onDone: () => {} });
+    await view.render(panel);
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-capacity="missed"]')?.textContent).toContain(
+        "playing in this window",
+      ),
+    );
+    const original = ipc.argsOf("recordings.previewRule")[0];
+    expect(original).toEqual({ plan: { ...plan, mode: "every" }, id: "rule1" });
+
+    const forecasts = () =>
+      ipc.argsOf("recordings.previewRule").filter(({ plan }) => plan.mode === "every");
+
+    const refreshed = ipc.hold("recordings.previewRule", ({ plan }) => plan.mode === "every");
+    await act(async () => ipc.emit(event, []));
+    await vi.waitFor(() => expect(forecasts()).toHaveLength(2));
+    expect(document.querySelector('[data-capacity="missed"]')).not.toBeNull();
+    await act(async () =>
+      refreshed.resolve({
+        matches: [{ ...match, capacity: { kind: "available", start: at("12:00"), holders: [] } }],
+        limited: false,
+        unproven: 0,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-capacity="available"]')?.textContent).toContain(
+        "Connection free",
+      ),
+    );
+    expect(forecasts()[1]).toEqual(original);
+    await view.render(null);
+    await view.render(panel);
+    expect(document.querySelector('[data-capacity="available"]')).not.toBeNull();
+    expect(forecasts()).toHaveLength(2);
+
+    if (event === "recordings.changed") {
+      await act(async () => ipc.emit(event, []));
+      expect(forecasts()).toHaveLength(2);
+    }
+
+    await act(async () =>
+      ipc.emit("output.changed", {
+        offers: [],
+        airplayRoutes: null,
+        scanning: true,
+        receivers: [],
+        output: { kind: "local" },
+      }),
+    );
+    expect(forecasts()).toHaveLength(2);
+  },
+);

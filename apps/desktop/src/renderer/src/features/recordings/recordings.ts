@@ -56,12 +56,7 @@ export function syncRecordings(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["rules", "preview"] });
   });
 
-  const stopOutput = listen("output.changed", () => {
-    void client.invalidateQueries({ queryKey: ["rules", "preview"] });
-  });
-
   return () => {
-    stopOutput();
     stopRecordings();
     stopSchedules();
   };

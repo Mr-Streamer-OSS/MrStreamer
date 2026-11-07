@@ -3299,9 +3299,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     let playlist = `#EXTM3U\n${entry(TRACKS)}${entry(GUIDED)}`;
 
-    const host = createServer((_request, response) =>
-      response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist),
-    );
+    let playlistReads = 0;
+
+    const host = createServer((_request, response) => {
+      playlistReads++;
+      response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist);
+    });
 
     await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
     onTestFinished(() => {
@@ -3349,6 +3352,117 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await after.library.channels({});
     await after.playback.open(channel(TRACKS), ["h264", "aac"]);
     expect((await after.recordings.schedules()).map((row) => row.id)).toContain(saved.id);
+    const reads = playlistReads;
+
+    for (let i = 0; i < 3; i++) {
+      await after.recordings.check();
+      expect((await after.recordings.schedules()).map((row) => row.id)).toContain(saved.id);
+    }
+
+    expect(playlistReads).toBe(reads);
+  });
+
+  it.each([0, 100])(
+    "does not forecast a cancelled edited airing at priority %s",
+    async (priority) => {
+      const { recordings, listing, channel } = await scheduling();
+      const { next } = await listing();
+
+      const plan = {
+        title: next.title,
+        channels: [channel(GUIDED)],
+        priority,
+        padding: { before: 0, after: 0 },
+      };
+
+      const rule = await recordings.saveRule(plan);
+      await recordings.check();
+      const [airing] = await recordings.schedules();
+      await recordings.cancel(airing!.id);
+
+      const other = await recordings.schedule({
+        kind: "programme",
+        channel: channel(TRACKS),
+        title: "Other",
+        start: next.start,
+        stop: next.stop,
+        padding: plan.padding,
+      });
+
+      expect((await recordings.previewRule(plan)).matches[0]?.capacity).toBeDefined();
+      const edited = await recordings.previewRule(plan, rule.id);
+      expect(edited.matches).toHaveLength(1);
+      expect(edited.matches[0]?.capacity).toBeUndefined();
+      await recordings.saveRule(plan, rule.id);
+      await recordings.check();
+      expect((await recordings.schedules()).map((each) => each.id)).toEqual([other.id]);
+    },
+  );
+
+  it("suppresses an ambiguous overlapping edited airing just as reconciliation does", async () => {
+    const { provider, guide, subscriptionId, recordings, listing, channel } = await scheduling();
+    const { next } = await listing();
+    const guideId = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+
+    const xml = (offsets: number[]) =>
+      `<tv><channel id="${guideId}"><display-name>Test</display-name></channel>${offsets.map((offset) => `<programme channel="${guideId}" start="${xmltvTime(next.start + offset)}" stop="${xmltvTime(next.stop + offset)}"><title>${next.title}</title></programme>`).join("")}</tv>`;
+
+    provider.serveGuide(xml([0, 5 * MINUTE]));
+    await guide.refresh(subscriptionId);
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    };
+
+    const rule = await recordings.saveRule(plan);
+    await recordings.check();
+    const airings = await recordings.schedules();
+    expect(airings).toHaveLength(2);
+
+    for (const airing of airings) await recordings.cancel(airing.id);
+    provider.serveGuide(xml([2 * MINUTE]));
+    await guide.refresh(subscriptionId);
+    await recordings.check();
+
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity).toBeDefined();
+    const edited = await recordings.previewRule(plan, rule.id);
+    expect(edited.matches.some((match) => match.plan.start === next.start + 2 * MINUTE)).toBe(true);
+    expect(edited.matches.every((match) => match.capacity === undefined)).toBe(true);
+    await recordings.saveRule(plan, rule.id);
+    await recordings.check();
+    expect(await recordings.schedules()).toEqual([]);
+  });
+
+  it("publishes empty schedule snapshots when Watch opens and closes for an unchanged preview", async () => {
+    const { recordings, runtime, playback, listing, channel } = await scheduling();
+    const { next } = await listing();
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    };
+
+    await recordings.check();
+    const events = await collect(runtime, recordings.scheduleChanges);
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    await until(
+      async () => events.length,
+      (length) => length > 0,
+    );
+    expect(events.at(-1)).toEqual([]);
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("missed");
+    const opened = events.length;
+    await playback.close(watching.sessionId);
+    await until(
+      async () => events.length,
+      (length) => length > opened,
+    );
+    expect(events.at(-1)).toEqual([]);
+    expect((await recordings.previewRule(plan)).matches[0]?.capacity?.kind).toBe("available");
   });
 
   it("an older saved rule retains tie order in edit preview", async () => {
