@@ -45,6 +45,8 @@ reviews:
     actionlint:
       enabled: false
   review_info: true
+  # Findings only: our fixers judge each claim against the code, not a prompt to fix it.
+  enable_prompt_for_ai_agents: false
   pre_merge_checks:
     docstrings:
       mode: "off"
