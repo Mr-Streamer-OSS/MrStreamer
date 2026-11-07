@@ -382,6 +382,14 @@ it("refuses a single reset that would take another command's saved key", async (
       view.querySelector('[data-setting="keyboard-shortcuts"] [role="alert"]')?.textContent,
     ).toContain("Space is used by Mute"),
   );
+  const refusal = view.querySelector('[data-setting="keyboard-shortcuts"] [role="alert"]');
+  expect(refusal?.textContent).toBe(
+    "Space is used by Mute. Reset that command first, or Reset all.",
+  );
+  expect(refusal?.textContent).not.toContain("Something went wrong");
+  expect(
+    [...view.querySelectorAll("button")].some((button) => button.textContent === "Try again"),
+  ).toBe(false);
   expect(ipc.argsOf("preferences.update")).toHaveLength(writes);
   expect(currentPreferences(client)?.keyboardShortcuts).toEqual({ pause: ["z"], mute: ["Space"] });
   expect(view.querySelector('[data-shortcut="mute"]')?.getAttribute("aria-label")).toBe(
@@ -443,4 +451,150 @@ it("keeps Shift arrows seeking and changing volume in titles, including held key
     kind: "conflict",
     command: "seekBack",
   });
+});
+
+it("saves title-only keys shared with live-only defaults without changing either surface", async () => {
+  ipc.reset();
+  ipc.prefer({ keyboardShortcuts: {} });
+  useUi.setState({ settings: "playback", settingsTarget: null });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const stop = syncPreferences(client, () => {});
+  const mounted = queryView(client);
+  cleanup = () => {
+    mounted.unmount();
+    stop();
+    useUi.setState({ settings: null });
+  };
+
+  ipc.answer("preferences.update", (patch) =>
+    ipc.snapshot({ ...currentPreferences(client)!, ...patch }),
+  );
+  await mounted.render(createElement(SettingsPage));
+
+  for (const [command, binding, label] of [
+    ["volumeUp", "j", "Volume up: Movies and series J"],
+    ["nextEpisode", "l", "Next episode: Movies and series L"],
+  ] as const) {
+    const button = await vi.waitFor(() => {
+      const button = mounted.container.querySelector<HTMLButtonElement>(
+        `[data-shortcut="${command}"]`,
+      );
+
+      expect(button).not.toBeNull();
+
+      return button!;
+    });
+
+    await act(async () => {
+      button.focus();
+      button.click();
+    });
+    await act(async () => {
+      button.dispatchEvent(key(binding));
+    });
+    await vi.waitFor(() => expect(button.getAttribute("aria-label")).toBe(label));
+    expect(
+      resolveShortcut(key(binding), "title", currentPreferences(client)?.keyboardShortcuts),
+    ).toBe(command);
+  }
+
+  expect(resolveShortcut(key("j"), "live", currentPreferences(client)?.keyboardShortcuts)).toBe(
+    "seekBack",
+  );
+  expect(resolveShortcut(key("l"), "live", currentPreferences(client)?.keyboardShortcuts)).toBe(
+    "seekForward",
+  );
+});
+
+it("closes Settings with Escape from a focused select while protecting player typeahead", async () => {
+  ipc.reset();
+  useUi.setState({ settings: "playback", settingsTarget: null });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const mounted = queryView(client);
+  cleanup = () => {
+    mounted.unmount();
+    useUi.setState({ settings: null });
+  };
+
+  await mounted.render(createElement(SettingsPage));
+
+  const select = await vi.waitFor(() => {
+    const select = mounted.container.querySelector("select");
+    expect(select).not.toBeNull();
+
+    return select!;
+  });
+
+  await act(async () => {
+    select.focus();
+    const typeahead = key("k");
+    select.dispatchEvent(typeahead);
+    expect(resolveShortcut(typeahead, "live")).toBeNull();
+    expect(resolveShortcut(typeahead, "title")).toBeNull();
+    select.dispatchEvent(key("Escape"));
+  });
+  expect(useUi.getState().settings).toBeNull();
+});
+
+it("revalidates a failed write against newly committed bindings before retrying", async () => {
+  ipc.reset();
+  ipc.prefer({ keyboardShortcuts: {} });
+  useUi.setState({ settings: "playback", settingsTarget: null });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const stop = syncPreferences(client, () => {});
+  const mounted = queryView(client);
+  cleanup = () => {
+    mounted.unmount();
+    stop();
+    useUi.setState({ settings: null });
+  };
+
+  await mounted.render(createElement(SettingsPage));
+
+  const button = await vi.waitFor(() => {
+    const button = mounted.container.querySelector<HTMLButtonElement>('[data-shortcut="mute"]');
+    expect(button).not.toBeNull();
+
+    return button!;
+  });
+
+  const failed = ipc.hold("preferences.update");
+  await act(async () => {
+    button.focus();
+    button.click();
+  });
+  await act(async () => {
+    button.dispatchEvent(key("z"));
+  });
+  failed.reject({ kind: "unexpected", detail: "Disk unavailable" });
+
+  const retry = await vi.waitFor(() => {
+    const retry = [...mounted.container.querySelectorAll("button")].find(
+      (each) => each.textContent === "Try again",
+    );
+
+    expect(retry).toBeDefined();
+
+    return retry!;
+  });
+
+  await act(async () => {
+    ipc.emit(
+      "preferences.changed",
+      ipc.snapshot({ volume: 1, muted: false, keyboardShortcuts: { pause: ["z"] } }),
+    );
+  });
+  const writes = ipc.argsOf("preferences.update").length;
+  await act(async () => {
+    retry.click();
+  });
+  await vi.waitFor(() =>
+    expect(
+      mounted.container.querySelector('[data-setting="keyboard-shortcuts"] [role="alert"]')
+        ?.textContent,
+    ).toBe("Z is used by Play or pause. Press another key."),
+  );
+  expect(ipc.argsOf("preferences.update")).toHaveLength(writes);
+  expect(currentPreferences(client)?.keyboardShortcuts).toEqual({ pause: ["z"] });
+  expect(button.getAttribute("aria-label")).toBe("Mute: M");
 });

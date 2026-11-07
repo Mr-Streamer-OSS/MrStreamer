@@ -148,46 +148,45 @@ export function validateShortcut(
   binding: string,
   overrides: ShortcutOverrides = {},
 ): { kind: "reserved" } | { kind: "conflict"; command: ShortcutCommand } | null {
-  const definition = definitionOf(command);
-
-  // Digits pick Live channels; \w excludes them from the punctuation branch.
-  if (
-    !/^(?:(?:Shift\+)?(?:[a-z]|Space|ArrowLeft|ArrowRight|ArrowUp|ArrowDown)|[^\w\s])$/.test(
-      binding,
-    ) ||
-    (definition.live.length > 0 && LIVE_NAVIGATION.includes(binding.replace(/^Shift\+/, "")))
-  )
-    return { kind: "reserved" };
-  const candidates = withShift(command, [binding]);
-
-  for (const other of shortcutCommands) {
-    if (other.id === command) continue;
-
-    for (const surface of ["live", "title"] as const) {
-      if (
-        definition[surface].length &&
-        rawShortcutBindings(other.id, surface, overrides).some((taken) =>
-          candidates.includes(taken),
-        )
-      )
-        return { kind: "conflict", command: other.id };
-    }
-  }
-
-  return null;
+  return shortcutProblem({ ...overrides, [command]: [binding] }, command)?.problem ?? null;
 }
 
-/** Validate the complete resulting configuration, including defaults restored by a reset. */
-export function shortcutProblem(overrides: ShortcutOverrides) {
-  for (const command of shortcutCommands) {
-    const bindings = overrides[command.id] ?? [...command.live, ...command.title];
+/**
+ * Validate each resulting playback surface, including defaults restored by a reset.
+ * Check the edited command first so a refusal names the other command using its key.
+ */
+export function shortcutProblem(overrides: ShortcutOverrides, first?: ShortcutCommand) {
+  const commands = first
+    ? [definitionOf(first), ...shortcutCommands.filter((command) => command.id !== first)]
+    : shortcutCommands;
 
-    for (const binding of bindings) {
-      const problem = validateShortcut(command.id, binding, overrides);
+  for (const command of commands) {
+    for (const surface of ["live", "title"] as const) {
+      if (!command[surface].length) continue;
 
-      // Title seek defaults use arrows that Live commands cannot accept as remaps.
-      if (problem && (overrides[command.id] || problem.kind === "conflict"))
-        return { binding, problem };
+      for (const binding of overrides[command.id] ?? command[surface]) {
+        // Reserved navigation applies to remaps; title defaults intentionally use arrows.
+        if (
+          overrides[command.id] &&
+          (!/^(?:(?:Shift\+)?(?:[a-z]|Space|ArrowLeft|ArrowRight|ArrowUp|ArrowDown)|[^\w\s])$/.test(
+            binding,
+          ) ||
+            (command.live.length > 0 && LIVE_NAVIGATION.includes(binding.replace(/^Shift\+/, ""))))
+        )
+          return { binding, problem: { kind: "reserved" as const } };
+
+        const candidates = withShift(command.id, [binding]);
+
+        for (const other of shortcutCommands) {
+          if (
+            other.id !== command.id &&
+            rawShortcutBindings(other.id, surface, overrides).some((taken) =>
+              candidates.includes(taken),
+            )
+          )
+            return { binding, problem: { kind: "conflict" as const, command: other.id } };
+        }
+      }
     }
   }
 
@@ -220,7 +219,7 @@ export function blocksPlayerShortcut(event: KeyboardEvent): boolean {
 
   if (
     target.closest(
-      '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="slider"]',
+      'select, [role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="slider"]',
     )
   )
     return true;

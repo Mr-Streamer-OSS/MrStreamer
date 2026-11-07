@@ -19,7 +19,7 @@ export function isTyping(event: KeyboardEvent): boolean {
   return (
     target instanceof Element &&
     !!target.closest(
-      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+      'input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
     )
   );
 }

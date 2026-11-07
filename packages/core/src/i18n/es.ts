@@ -102,6 +102,8 @@ export const es: Translation = {
   "Reset all": "Restablecer todo",
   "Press a key": "Pulsa una tecla",
   "Press a key for {command}. Escape cancels.": "Pulsa una tecla para {command}. Esc cancela.",
+  "{key} is used by {command}. Reset that command first, or Reset all.":
+    "{key} está en uso por {command}. Restablece primero ese comando o elige Restablecer todo.",
   "{key} is used by {command}. Press another key.":
     "{key} ya se usa para {command}. Pulsa otra tecla.",
   "That key is reserved. Press another key.": "Esa tecla está reservada. Pulsa otra tecla.",

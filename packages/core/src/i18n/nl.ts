@@ -100,6 +100,8 @@ export const nl: Translation = {
   "Reset all": "Alles herstellen",
   "Press a key": "Druk op een toets",
   "Press a key for {command}. Escape cancels.": "Druk op een toets voor {command}. Esc annuleert.",
+  "{key} is used by {command}. Reset that command first, or Reset all.":
+    "{key} wordt gebruikt door {command}. Reset eerst die opdracht, of kies Alles resetten.",
   "{key} is used by {command}. Press another key.":
     "{key} wordt gebruikt voor {command}. Druk op een andere toets.",
   "That key is reserved. Press another key.":

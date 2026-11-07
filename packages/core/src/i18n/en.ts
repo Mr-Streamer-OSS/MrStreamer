@@ -100,6 +100,8 @@ export const en = {
   "Reset all": "Reset all",
   "Press a key": "Press a key",
   "Press a key for {command}. Escape cancels.": "Press a key for {command}. Escape cancels.",
+  "{key} is used by {command}. Reset that command first, or Reset all.":
+    "{key} is used by {command}. Reset that command first, or Reset all.",
   "{key} is used by {command}. Press another key.":
     "{key} is used by {command}. Press another key.",
   "That key is reserved. Press another key.": "That key is reserved. Press another key.",

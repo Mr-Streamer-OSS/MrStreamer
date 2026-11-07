@@ -350,6 +350,8 @@ export function SettingsPage() {
   );
 }
 
+class ShortcutRefusal extends Error {}
+
 type ShortcutChange =
   { command: ShortcutCommand; binding: string } | { reset: ShortcutCommand | "all" };
 
@@ -412,15 +414,24 @@ function KeyboardShortcuts() {
     mutationKey: ["settings", "keyboardShortcuts"],
     mutationFn: (change: ShortcutChange) => {
       const keyboardShortcuts = changedShortcuts(latest(), change);
-      const invalid = shortcutProblem(keyboardShortcuts);
+
+      const invalid = shortcutProblem(
+        keyboardShortcuts,
+        "command" in change ? change.command : change.reset === "all" ? undefined : change.reset,
+      );
 
       if (invalid)
-        throw new Error(
+        throw new ShortcutRefusal(
           invalid.problem.kind === "conflict"
-            ? t("{key} is used by {command}. Press another key.", {
-                key: keyName(invalid.binding),
-                command: commandLabel(invalid.problem.command),
-              })
+            ? t(
+                "reset" in change
+                  ? "{key} is used by {command}. Reset that command first, or Reset all."
+                  : "{key} is used by {command}. Press another key.",
+                {
+                  key: keyName(invalid.binding),
+                  command: commandLabel(invalid.problem.command),
+                },
+              )
             : t("That key is reserved. Press another key."),
         );
 
@@ -480,14 +491,19 @@ function KeyboardShortcuts() {
 
   const feedback = (target: ShortcutCommand | "all") =>
     change &&
-    changeTarget(change) === target && (
+    changeTarget(change) === target &&
+    (save.error instanceof ShortcutRefusal ? (
+      <p role="alert" className="pb-2 text-[0.8125rem] text-destructive">
+        {save.error.message}
+      </p>
+    ) : (
       <SaveFeedback
         pending={busy}
         error={save.error}
         retryDisabled={busy}
         retry={() => save.mutate(change)}
       />
-    );
+    ));
 
   const lanes = "w-40 flex-none lg:w-50";
 

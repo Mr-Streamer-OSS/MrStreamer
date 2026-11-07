@@ -13,6 +13,7 @@ import { setSubtitleDelay, subtitleDelay } from "../../src/renderer/src/player/s
 
 import { closeWatch, openWatch, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
+import { readPreferences, syncPreferences } from "../../src/renderer/src/lib/preferences.ts";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 
 let unmount = () => {};
@@ -532,4 +533,51 @@ it("sets a channel's subtitle timing and look under CC, and lists them greyed wh
   expect(named("Subtitle timing")?.disabled).toBe(true);
   expect(named("Subtitle look")?.disabled).toBe(true);
   expect(document.body.textContent).toContain("The subtitle settings apply on this computer only.");
+});
+
+it("dispatches the live favourite command from current committed remaps and retires the old keys", async () => {
+  ipc.reset();
+  ipc.prefer({ keyboardShortcuts: { favourite: ["z"] } });
+  ipc.always("library.browse", browseResult([qualityChannel, nextChannel]));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const stop = syncPreferences(client, player.hydrate);
+  await readPreferences(client);
+  const mounted = queryView(client);
+  unmount = () => {
+    mounted.unmount();
+    mounted.container.remove();
+    stop();
+    ipc.reset();
+  };
+
+  await act(async () => {
+    ipc.emit("output.changed", cast);
+    openWatch();
+    player.play(qualityChannel);
+  });
+  await mounted.render(createElement(WatchScreen));
+  await settle();
+  await pressKey("s");
+  expect(ipc.argsOf("viewing.setFavourite")).toEqual([]);
+  await pressKey("z");
+  expect(ipc.argsOf("viewing.setFavourite")).toHaveLength(1);
+  expect(ipc.argsOf("viewing.setFavourite")[0]).toMatchObject({
+    channel: { subscriptionId: SUBSCRIPTION, id: "one" },
+    favourite: true,
+  });
+  await act(async () => {
+    ipc.emit(
+      "preferences.changed",
+      ipc.snapshot({ volume: 1, muted: false, keyboardShortcuts: { favourite: ["x"] } }),
+    );
+  });
+  await settle();
+  await pressKey("z");
+  await pressKey("s");
+  expect(ipc.argsOf("viewing.setFavourite")).toHaveLength(1);
+  await pressKey("x");
+  expect(ipc.argsOf("viewing.setFavourite")).toHaveLength(2);
+  expect(ipc.argsOf("viewing.setFavourite")[1]).toMatchObject({
+    channel: { subscriptionId: SUBSCRIPTION, id: "one" },
+  });
 });
