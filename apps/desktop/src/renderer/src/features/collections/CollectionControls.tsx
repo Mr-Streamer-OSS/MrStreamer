@@ -6,7 +6,7 @@
 // A member is the exact source version given as `title`, never every title of the same name.
 import { Menu } from "@base-ui/react/menu";
 import { Check, Ellipsis, ListPlus, Plus } from "lucide-react";
-import { useId, useRef, useState, type SyntheticEvent } from "react";
+import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import {
   COLLECTION_NAME_MAX,
   type CollectionChange,
@@ -59,21 +59,35 @@ export function problemOf(cause: unknown): CollectionProblem {
  * One change at a time. `run` resolves whether it was stored; a refused one is kept as `failed`,
  * so the control that sent it can say so and send it again.
  */
-function useCommit(commit: CommitCollection) {
+function useCommit(commit: CommitCollection, ready: boolean) {
+  const admitted = useRef(ready);
+  admitted.current = ready;
+  const requested = useRef<CollectionChange | null>(null);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<CollectionChange | null>(null);
   const busy = useRef(false);
   const generation = useRef(0);
   const [problem, setProblem] = useState<CollectionProblem | null>(null);
 
+  useEffect(
+    () => () => {
+      admitted.current = false;
+      generation.current++;
+      requested.current = null;
+    },
+    [],
+  );
+
   const dismiss = () => {
     generation.current++;
+    requested.current = null;
     setFailed(null);
     setProblem(null);
   };
 
   const run = async (change: CollectionChange) => {
-    if (busy.current) return false;
+    if (busy.current || !admitted.current) return false;
+    requested.current = change;
     const turn = generation.current;
     busy.current = true;
     setSaving(true);
@@ -97,7 +111,7 @@ function useCommit(commit: CommitCollection) {
     }
   };
 
-  return { saving, failed, problem, run, dismiss };
+  return { saving, failed, problem, run, dismiss, requested: requested.current };
 }
 
 /**
@@ -183,7 +197,9 @@ export function CollectionNav({
   selected,
   onOpen,
   commit,
+  ready = true,
 }: {
+  ready?: boolean;
   collections: readonly CollectionSummary[];
   selected: string | null;
   onOpen: (id: string) => void;
@@ -191,7 +207,7 @@ export function CollectionNav({
 }) {
   const [editing, setEditing] = useState<Editing | null>(null);
   const edit = useRef<Editing | null>(null);
-  const change = useCommit(commit);
+  const change = useCommit(commit, ready);
   // What takes the focus once the field or question that had it goes: a row's button, or New
   // collection. Both remount after editing, so each takes it from its ref once it is back.
   const refocus = useRef<string | typeof NEW | null>(null);
@@ -233,6 +249,22 @@ export function CollectionNav({
       ? (change.problem?.text ?? null)
       : null;
 
+  useEffect(() => {
+    if (!ready) return;
+
+    if (
+      editing &&
+      editing.kind !== "create" &&
+      !collections.some((each) => each.id === editing.id)
+    ) {
+      edit.current = null;
+      setEditing(null);
+      change.dismiss();
+    }
+  });
+
+  if (!ready) return null;
+
   return (
     <nav aria-label={t("Collections")} className="flex flex-col gap-0.5 text-[13px] leading-4">
       <ul className="flex flex-col gap-0.5">
@@ -241,7 +273,11 @@ export function CollectionNav({
             {editing?.kind === "rename" && editing.id === collection.id ? (
               <NameField
                 saving={change.saving}
-                initial={collection.name}
+                initial={
+                  change.requested?.kind === "rename" && change.requested.id === collection.id
+                    ? change.requested.name
+                    : collection.name
+                }
                 failed={failedHere("rename")}
                 onCancel={() => close(collection.id)}
                 onSave={(name) =>
@@ -293,7 +329,7 @@ export function CollectionNav({
       {editing?.kind === "create" ? (
         <NameField
           saving={change.saving}
-          initial=""
+          initial={change.requested?.kind === "create" ? change.requested.name : ""}
           failed={failedHere("create")}
           onCancel={() => close(NEW)}
           onSave={(name) => void save({ kind: "create", id: editing.id, name }, NEW)}
@@ -440,15 +476,19 @@ export function CollectionMembership({
   collections,
   memberOf,
   commit,
+  ready = true,
 }: {
+  ready?: boolean;
   title: CollectionTitle;
   collections: readonly CollectionSummary[];
   memberOf: ReadonlySet<string>;
   commit: CommitCollection;
 }) {
-  const change = useCommit(commit);
+  const change = useCommit(commit, ready);
   const [creating, setCreating] = useState<string | null>(null);
   const draft = useRef<string | null>(null);
+  const current = useRef({ ready, title });
+  current.current = { ready, title };
   const labelId = useId();
   // The button comes back after the new collection's field, and takes the focus back from it.
   const refocus = useRef(false);
@@ -461,22 +501,31 @@ export function CollectionMembership({
     refocus.current = true;
   };
 
+  const failedMember = change.failed?.kind === "member" ? change.failed : null;
+
+  useEffect(() => {
+    if (ready && failedMember && !collections.some((each) => each.id === failedMember.id))
+      change.dismiss();
+  });
+
   // A refused create keeps the field to send again. Once it is stored the field closes, and a
   // refused add then offers Retry below the button like any other tick.
   const create = async (id: string, name: string) => {
     if (!(await change.run({ kind: "create", id, name }))) return;
 
-    if (draft.current !== id) return;
+    if (draft.current !== id || !current.current.ready) return;
     finish();
-    await change.run({ kind: "member", id, title, present: true });
+    await change.run({ kind: "member", id, title: current.current.title, present: true });
   };
+
+  if (!ready) return null;
 
   if (creating !== null)
     return (
       <div className="w-[15rem]">
         <NameField
           saving={change.saving}
-          initial=""
+          initial={change.requested?.kind === "create" ? change.requested.name : ""}
           failed={change.failed?.kind === "create" ? (change.problem?.text ?? null) : null}
           onCancel={finish}
           onSave={(name) => void create(creating, name)}
@@ -552,14 +601,12 @@ export function CollectionMembership({
           </Menu.Positioner>
         </Menu.Portal>
       </Menu.Root>
-      {change.failed?.kind === "member" && (
+      {failedMember && (
         <p role="alert" className="flex items-baseline gap-3 text-sm">
           <span className="text-destructive">{change.problem?.text}</span>
           <button
             onClick={() =>
-              change.problem?.retry
-                ? change.failed && void change.run(change.failed)
-                : change.dismiss()
+              change.problem?.retry ? void change.run({ ...failedMember, title }) : change.dismiss()
             }
             className="text-white underline underline-offset-4"
           >

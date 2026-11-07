@@ -22,6 +22,7 @@ import { PosterContent } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { menuItem, menuSurface } from "../../components/ui/menu.ts";
 import { appError, describeError } from "../../lib/errors.ts";
+import { profileOwner } from "../../lib/ipc.ts";
 import { useSourceOf } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { kindLabel } from "../../lib/watchlist.ts";
@@ -33,36 +34,45 @@ import { collectionQueries, useCollectionUpdates, useCommitCollection } from "./
 const useOpen = create<{ id: string | null }>(() => ({ id: null }));
 
 export function CollectionsPage({ active }: { active: boolean }) {
+  return <OwnedCollections key={JSON.stringify(profileOwner())} active={active} />;
+}
+
+function OwnedCollections({ active }: { active: boolean }) {
   useCollectionUpdates();
   const list = useQuery(collectionQueries.list());
   const commit = useCommitCollection();
   const opened = useOpen((state) => state.id);
   const collections = list.data;
 
+  const lastOpen = useRef<string | null>(null);
+
   // The one opened, while the viewer still has it, else their first.
   const open = collections?.find((each) => each.id === opened) ?? collections?.[0] ?? null;
+
+  if (collections) lastOpen.current = open?.id ?? null;
+  const id = collections ? open?.id : lastOpen.current;
 
   return (
     <div className="flex min-h-0 flex-1 pl-10">
       <div className="w-56 flex-none overflow-y-auto pr-6 pb-10">
-        {list.error ? (
-          <Failure error={list.error} onRetry={() => void list.refetch()} />
-        ) : collections ? (
-          <CollectionNav
-            collections={collections}
-            selected={open?.id ?? null}
-            onOpen={(id) => useOpen.setState({ id })}
-            commit={commit}
-          />
-        ) : (
+        {list.error ? <Failure error={list.error} onRetry={() => void list.refetch()} /> : null}
+        <CollectionNav
+          collections={collections ?? []}
+          ready={!!collections}
+          selected={open?.id ?? null}
+          onOpen={(id) => useOpen.setState({ id })}
+          commit={commit}
+        />
+        {!collections && !list.error && (
           <p className="px-3 text-[0.8125rem] text-muted-foreground">{t("Loading…")}</p>
         )}
       </div>
-      {collections && open && (
+      {id && (
         <Members
-          key={open.id}
+          key={id}
+          id={id}
           collection={open}
-          others={collections.filter((each) => each.id !== open.id)}
+          others={collections?.filter((each) => each.id !== id) ?? []}
           active={active}
           commit={commit}
         />
@@ -85,26 +95,30 @@ function Failure({ error, onRetry }: { error: Error; onRetry: () => void }) {
 
 /** One collection's members, a page at a time as the grid asks, with the bar for those picked. */
 function Members({
+  id,
   collection,
   others,
   active,
   commit,
 }: {
-  collection: CollectionSummary;
+  id: string;
+  collection: CollectionSummary | null;
   others: readonly CollectionSummary[];
   active: boolean;
   commit: (change: CollectionChange | readonly CollectionChange[]) => Promise<void>;
 }) {
-  const { pages, load } = usePages(collection.id);
+  const { pages, load } = usePages(id);
 
   const loaded = useQueries({
-    queries: pages.map((page) => collectionQueries.page(collection.id, page * PAGE, PAGE)),
+    queries: pages.map((page) => collectionQueries.page(id, page * PAGE, PAGE)),
   });
 
   const byPage = new Map(pages.map((page, index) => [page, loaded[index]?.data]));
   const total = byPage.get(0)?.total ?? null;
   const error = loaded.find((each) => each.error)?.error ?? null;
-  const [picked, setPicked] = useState<ReadonlyMap<string, CollectionMember>>(new Map());
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+
+  const ready = !!collection && loaded.every((each) => each.data !== undefined);
 
   // Keep only current admitted page members, including their latest display facts.
   const admitted = new Map(
@@ -113,26 +127,22 @@ function Members({
       .map((member) => [collectionKey(member), member]),
   );
 
-  const selected = [...picked.keys()].flatMap((key) => {
+  const selected = [...picked].flatMap((key) => {
     const member = admitted.get(key);
 
     return member ? [member] : [];
   });
 
   useEffect(() => {
-    if (
-      selected.length !== picked.size ||
-      selected.some((member) => picked.get(collectionKey(member)) !== member)
-    )
-      setPicked(new Map(selected.map((member) => [collectionKey(member), member])));
+    if (ready && selected.length !== picked.size) setPicked(new Set(selected.map(collectionKey)));
   });
 
   const pick = (member: CollectionMember) =>
     setPicked((now) => {
-      const next = new Map(now);
+      const next = new Set(now);
       const key = collectionKey(member);
 
-      if (!next.delete(key)) next.set(key, member);
+      if (!next.delete(key)) next.add(key);
 
       return next;
     });
@@ -141,25 +151,26 @@ function Members({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none items-baseline gap-2.5 pr-8 pb-4">
         <h1 className="truncate text-[1.625rem] leading-8 font-bold tracking-[-0.02em]">
-          {collection.name}
+          {collection?.name}
         </h1>
-        {total !== null && (
+        {collection && total !== null && (
           <span className="flex-none text-[0.8125rem] text-muted-foreground tabular-nums">
             {t("{count} titles", { count: total })}
           </span>
         )}
       </div>
-      {selected.length > 0 && (
+      {picked.size > 0 && (
         <Picked
-          key={JSON.stringify(selected.map(collectionKey))}
+          key={JSON.stringify([...picked])}
           collection={collection}
+          ready={ready && selected.length === picked.size}
           others={others}
           picked={selected}
           commit={commit}
-          onDone={() => setPicked(new Map())}
+          onDone={() => setPicked(new Set())}
         />
       )}
-      {error ? (
+      {!collection ? null : error ? (
         <Failure error={error} onRetry={() => loaded.forEach((each) => void each.refetch())} />
       ) : total === 0 ? (
         <p className="text-[0.9375rem] text-muted-foreground">
@@ -267,12 +278,14 @@ function MemberTile({
  */
 function Picked({
   collection,
+  ready,
   others,
   picked,
   commit,
   onDone,
 }: {
-  collection: CollectionSummary;
+  collection: CollectionSummary | null;
+  ready: boolean;
   others: readonly CollectionSummary[];
   picked: readonly CollectionMember[];
   commit: (changes: readonly CollectionChange[]) => Promise<void>;
@@ -280,9 +293,16 @@ function Picked({
 }) {
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
 
   const [failed, setFailed] = useState<{
-    readonly changes: readonly CollectionChange[];
+    readonly targets: readonly { id: string; present: boolean; key: string }[];
     readonly problem: CollectionProblem;
     readonly then: () => void;
   } | null>(null);
@@ -296,14 +316,28 @@ function Picked({
 
     try {
       await commit(changes);
-      then();
+
+      if (mounted.current) then();
     } catch (cause) {
-      setFailed({ changes, problem: problemOf(cause), then });
+      if (!mounted.current) return;
+
+      setFailed({
+        targets: changes.flatMap((change) =>
+          change.kind === "member"
+            ? [{ id: change.id, present: change.present, key: collectionKey(change.title) }]
+            : [],
+        ),
+        problem: problemOf(cause),
+        then,
+      });
     } finally {
       busy.current = false;
       setSaving(false);
     }
   };
+
+  // Operation identity survives an unknown admission; no old labels or posters are rendered.
+  if (!ready || !collection || picked.length === 0) return null;
 
   const member = (id: string, title: CollectionMember, present: boolean): CollectionChange => ({
     kind: "member",
@@ -372,7 +406,18 @@ function Picked({
           <span className="text-destructive">{failed.problem.text}</span>
           <button
             onClick={() =>
-              failed.problem.retry ? void send(failed.changes, failed.then) : setFailed(null)
+              failed.problem.retry
+                ? void send(
+                    failed.targets.map((target) =>
+                      member(
+                        target.id,
+                        picked.find((each) => collectionKey(each) === target.key)!,
+                        target.present,
+                      ),
+                    ),
+                    failed.then,
+                  )
+                : setFailed(null)
             }
             className="text-white underline"
           >

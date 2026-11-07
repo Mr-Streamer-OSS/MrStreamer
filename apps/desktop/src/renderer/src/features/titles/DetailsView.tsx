@@ -102,6 +102,7 @@ interface SheetPlace {
 interface Versions {
   /** The title from the lists, with every version; null when they don't have it. */
   readonly title: Title | null;
+  readonly pending: boolean;
   readonly playing: OwnedId;
   readonly picked: OwnedId | null;
   /** The version Automatic plays, which its line in the menu names. */
@@ -249,7 +250,14 @@ export function DetailsView({
       {details.data && ready ? (
         <Content
           details={details.data}
-          versions={{ title, playing, picked, automatic, onPick: chooseVersion }}
+          versions={{
+            title,
+            pending: listed.isPending,
+            playing,
+            picked,
+            automatic,
+            onPick: chooseVersion,
+          }}
           switching={details.isPlaceholderData}
           saving={saving}
           place={place}
@@ -572,7 +580,11 @@ function SeriesActions({
         <div className="flex flex-wrap items-center gap-3">
           {download}
           <SaveButton state={saving} />
-          <TitleCollections title={versions.title} version={versions.playing} />
+          <TitleCollections
+            title={versions.title}
+            pending={versions.pending}
+            version={versions.playing}
+          />
         </div>
         <SaveError state={saving} />
         {error && (
@@ -596,7 +608,11 @@ function SeriesActions({
         <div className="flex flex-wrap items-center gap-3">
           {download}
           <SaveButton state={saving} />
-          <TitleCollections title={versions.title} version={versions.playing} />
+          <TitleCollections
+            title={versions.title}
+            pending={versions.pending}
+            version={versions.playing}
+          />
         </div>
         <SaveError state={saving} />
         <p className="mt-6 text-[0.9375rem] text-muted-foreground">{t("No episodes yet.")}</p>
@@ -706,7 +722,7 @@ function Actions({
         )}
         {download}
         <SaveButton state={saving} />
-        <TitleCollections title={title} version={playing} />
+        <TitleCollections title={title} pending={versions.pending} version={playing} />
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>
             {t("Remove from Continue watching")}

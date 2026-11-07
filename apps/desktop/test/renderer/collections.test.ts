@@ -22,6 +22,7 @@ import {
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { CollectionsPage } from "../../src/renderer/src/features/collections/CollectionsPage.tsx";
+import { TitleCollections } from "../../src/renderer/src/features/collections/TitleCollections.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import {
@@ -900,4 +901,228 @@ it("drops obsolete failed commands when one of the selected identities is desele
   expect(document.querySelector("[role=alert]")).toBeNull();
   expect(() => button("Retry")).toThrow();
   expect(button("Remove from Films").hasAttribute("disabled")).toBe(false);
+});
+
+it.each([false, true])(
+  "retains an allowed removal refusal across privacy loading: %s",
+  async (marked) => {
+    ipc.reset();
+    ipc.always("subscription.list", [SAVED]);
+    selectProfileOwner({ id: "mila", revision: 2 });
+    mainCollections([
+      { name: "Films", members: [member({ ...kite, posterUrl: "https://img.invalid/old.jpg" })] },
+    ]);
+    await mountTab();
+    await poster("Kite Season, Movie, 2022");
+    await pick("Kite Season");
+    const held = ipc.hold("collections.change");
+    await act(async () => button("Remove from Films").click());
+    const list = ipc.hold("collections.list");
+    const page = ipc.hold("collections.page");
+    await act(async () =>
+      ipc.emit(
+        "ondemand.updated",
+        marked
+          ? { lists: [], metadata: null, markedForAdults: true }
+          : { lists: [], metadata: null },
+      ),
+    );
+
+    if (marked) {
+      await vi.waitFor(() => expect(document.querySelector("[data-index]")).toBeNull());
+      expect(document.body.innerHTML).not.toContain("old.jpg");
+      expect(document.body.innerHTML).not.toContain("Kite Season");
+      expect(() => button("Retry")).toThrow();
+      expect(document.querySelector("[aria-label='1 selected']")).toBeNull();
+    }
+
+    await act(async () => list.resolve([{ id: "c0", name: "Films", total: 1 }]));
+    await act(async () => page.resolve({ total: 1, members: [member(kite)] }));
+    await poster("Kite Season, Movie, 2022");
+    await act(async () => held.reject({ kind: "unexpected", detail: "subscription changed" }));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save."),
+    );
+    const original = ipc.argsOf("collections.change")[0];
+    await act(async () => button("Retry").click());
+    await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(2));
+    expect(ipc.argsOf("collections.change")[1]).toEqual(original);
+    expect(document.body.innerHTML).not.toContain("old.jpg");
+  },
+);
+
+it("retains the details membership refusal through unrelated privacy loading", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  mainCollections([{ name: "Films", members: [] }]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  const stop = syncOnDemand(client);
+  unmount = () => {
+    stop();
+    view.unmount();
+  };
+
+  await view.render(
+    createElement(TitleCollections, {
+      title: kite,
+      version: { subscriptionId: SUBSCRIPTION, id: kite.id },
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(document.querySelector("[aria-label='Collections for Kite Season']")).not.toBeNull(),
+  );
+  await act(async () => button("Add to collection").click());
+
+  const tick = await vi.waitFor(() => {
+    const item = document.querySelector<HTMLElement>("[role=menuitemcheckbox]");
+    expect(item).not.toBeNull();
+
+    return item!;
+  });
+
+  const held = ipc.hold("collections.change");
+  await act(async () => tick.click());
+  const list = ipc.hold("collections.list");
+  const memberships = ipc.hold("collections.memberships");
+  await act(async () =>
+    ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+  );
+  await view.render(
+    createElement(TitleCollections, {
+      title: null,
+      pending: true,
+      version: { subscriptionId: SUBSCRIPTION, id: kite.id },
+    }),
+  );
+  await vi.waitFor(() => expect(document.body.innerHTML).not.toContain("Films"));
+  expect(document.querySelector("[role=menuitemcheckbox]")).toBeNull();
+  await act(async () => list.resolve([{ id: "c0", name: "Films", total: 0 }]));
+  await act(async () => memberships.resolve([]));
+  await view.render(
+    createElement(TitleCollections, {
+      title: kite,
+      version: { subscriptionId: SUBSCRIPTION, id: kite.id },
+    }),
+  );
+  await act(async () => held.reject({ kind: "unexpected", detail: "currency changed" }));
+  await vi.waitFor(() =>
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save."),
+  );
+  const original = ipc.argsOf("collections.change")[0];
+  await act(async () => button("Retry").click());
+  await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(2));
+  expect(ipc.argsOf("collections.change")[1]).toEqual(original);
+});
+
+it("keeps a refused rename and its exact submitted name through privacy loading", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  mainCollections([{ name: "Films", members: [member(kite)] }]);
+  await mountTab();
+  await row("Films");
+  await choose("Films", "Rename");
+  const held = ipc.hold("collections.change");
+  await type("Weekend", "Enter");
+  const list = ipc.hold("collections.list");
+  await act(async () =>
+    ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+  );
+  await vi.waitFor(() => expect(document.querySelector("input")).toBeNull());
+  expect(document.body.innerHTML).not.toContain("Films");
+  await act(async () => list.resolve([{ id: "c0", name: "Films", total: 1 }]));
+  await act(async () => held.reject({ kind: "unexpected", detail: "currency changed" }));
+  await vi.waitFor(() =>
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save."),
+  );
+  expect(field().value).toBe("Weekend");
+  await act(async () =>
+    field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+  );
+  await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(2));
+  expect(ipc.argsOf("collections.change")[1]).toEqual(ipc.argsOf("collections.change")[0]);
+});
+
+it("forgets a restricted selection and pending refusal before it can become eligible again", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+
+  const main = mainCollections([
+    {
+      name: "Films",
+      members: [member({ ...kite, posterUrl: "https://img.invalid/restricted.jpg" })],
+    },
+  ]);
+
+  await mountTab();
+  await poster("Kite Season, Movie, 2022");
+  await pick("Kite Season");
+  const held = ipc.hold("collections.change");
+  await act(async () => button("Remove from Films").click());
+  main.find("c0")!.members = [];
+
+  const page = ipc.hold("collections.page");
+  await act(async () =>
+    ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+  );
+  await vi.waitFor(() => expect(document.querySelector("[data-index]")).toBeNull());
+  expect(document.body.innerHTML).not.toContain("restricted.jpg");
+  expect(document.body.innerHTML).not.toContain("Kite Season");
+  expect(() => button("Retry")).toThrow();
+  await act(async () => page.resolve({ total: 0, members: [] }));
+  await vi.waitFor(() => expect(document.body.textContent).toContain("0 titles"));
+  await act(async () => held.reject({ kind: "unexpected", detail: "refused" }));
+  expect(document.querySelector("[role=alert]")).toBeNull();
+  main.find("c0")!.members = [member(kite)];
+  await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+  await poster("Kite Season, Movie, 2022");
+  expect(document.querySelector("[aria-label='1 selected']")).toBeNull();
+  expect(() => button("Retry")).toThrow();
+  expect(ipc.argsOf("collections.change")).toHaveLength(1);
+});
+
+it("discards old collection responses and failures when the full owner changes", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  selectProfileOwner({ id: "mila", revision: 2 });
+  mainCollections([{ name: "Old films", members: [member(kite)] }]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  const stop = syncOnDemand(client);
+  unmount = () => {
+    stop();
+    view.unmount();
+  };
+
+  await view.render(createElement(CollectionsPage, { active: true }));
+  await poster("Kite Season, Movie, 2022");
+  await pick("Kite Season");
+  const held = ipc.hold("collections.change");
+  await act(async () => button("Remove from Old films").click());
+  const oldPage = ipc.hold("collections.page");
+  const reads = ipc.argsOf("collections.page").length;
+  await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+  await vi.waitFor(() => expect(ipc.argsOf("collections.page").length).toBeGreaterThan(reads));
+  await act(async () => {
+    client.clear();
+    selectProfileOwner({ id: "mila", revision: 3 });
+  });
+  mainCollections([{ name: "New films", members: [member(kite)] }]);
+  const page = ipc.hold("collections.page");
+  await view.render(createElement(CollectionsPage, { active: true }));
+  await act(async () =>
+    oldPage.resolve({
+      total: 1,
+      members: [member({ ...kite, posterUrl: "https://img.invalid/old-owner.jpg" })],
+    }),
+  );
+  expect(document.body.innerHTML).not.toContain("old-owner.jpg");
+  expect(document.body.innerHTML).not.toContain("Old films");
+  await act(async () => page.resolve({ total: 1, members: [member(kite)] }));
+  await poster("Kite Season, Movie, 2022");
+  await act(async () => held.reject({ kind: "unexpected", detail: "old failure" }));
+  expect(document.querySelector("[role=alert]")).toBeNull();
+  expect(document.querySelector("[aria-label='1 selected']")).toBeNull();
+  expect(() => button("Retry")).toThrow();
+  expect(ipc.argsOf("collections.change")).toHaveLength(1);
 });
