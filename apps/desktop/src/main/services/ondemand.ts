@@ -615,6 +615,8 @@ function make(deps: OnDemandDeps) {
       });
 
     const status = Effect.gen(function* () {
+      const policy = yield* Effect.serviceOption(AdmittedKids);
+
       const found = yield* held.pipe(
         // A worker that doesn't answer says nothing of the lists: they count as not loaded.
         Effect.catchTag("Failed", () =>
@@ -626,7 +628,10 @@ function make(deps: OnDemandDeps) {
 
       return {
         lists: found.map(({ subscription, worked }) => statusOf(subscription.id, worked)),
-        metadata: tmdbKey ? metadataProgress : null,
+        metadata:
+          tmdbKey && (policy._tag === "None" || policy.value.approved === null)
+            ? metadataProgress
+            : null,
       } satisfies OnDemandStatus;
     });
 

@@ -1045,7 +1045,12 @@ async function start(): Promise<void> {
     "ondemand.updated",
     (status) => status,
   );
-  forward(onDemand.progressChanges, "ondemand.progress", (metadata) => metadata);
+  forward(
+    onDemand.progressChanges,
+    "ondemand.progress",
+    (metadata) => metadata,
+    (metadata, viewer) => (viewer.kids ? null : metadata),
+  );
   forward(
     onDemand.detailsChanged,
     "ondemand.detailsChanged",
