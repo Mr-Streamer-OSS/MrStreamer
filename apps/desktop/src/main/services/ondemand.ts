@@ -539,7 +539,7 @@ function make(deps: OnDemandDeps) {
 
             return worker.call(method, args);
           },
-          catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
+          catch: failedWith,
         });
       });
 

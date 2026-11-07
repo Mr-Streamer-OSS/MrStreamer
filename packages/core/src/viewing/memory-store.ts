@@ -305,7 +305,7 @@ export function memoryViewingStore(deps: {
   const attempt = <A>(run: () => A): Effect.Effect<A, Failed> =>
     Effect.try({
       try: run,
-      catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
+      catch: failedWith,
     });
 
   return {

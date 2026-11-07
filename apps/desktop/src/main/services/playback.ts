@@ -4093,7 +4093,7 @@ function make(deps: PlaybackDeps) {
 
         const probe = yield* Effect.tryPromise({
           try: () => probeTitle(session),
-          catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
+          catch: failedWith,
         }).pipe(Effect.tapError(() => Scope.close(forked, Exit.void)));
 
         session.probe = probe;
