@@ -1218,7 +1218,11 @@ describe("live captures", () => {
   });
 
   it("retains a view through pause and seeks independently of an attached recording", async () => {
-    const { captures, key, provider, requests, open, folder } = await capturing();
+    const { captures, key, provider, requests, open, folder } = await capturing({
+      pieces: 16,
+      pieceBytes: 188 * 1600,
+    });
+
     const watch = new AbortController();
     const record = new AbortController();
 
