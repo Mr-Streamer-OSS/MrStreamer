@@ -2,7 +2,7 @@ import { type as arkType } from "arktype";
 // Recordings through the real main runtime: the fake provider at the HTTP boundary, its live
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, constants as sqlite } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { createServer, get as httpGet, type IncomingMessage } from "node:http";
@@ -37,6 +37,7 @@ import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Recordings } from "../src/main/services/recordings.ts";
+import { ProfileSessions } from "../src/main/services/profiles.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Updates } from "../src/main/services/updates.ts";
@@ -2275,6 +2276,229 @@ describe.skipIf(!hasTools)("recordings", () => {
     const last = await app(dataDir);
     onTestFinished(last.quit);
     expect((await last.recordings.copy(id))?.progress).toEqual({ position: 0, duration: 90 });
+  });
+
+  it.each(["deleted", "tombstoned"] as const)(
+    "retires captured-owner progress retries only after the owner is %s, retaining registry failures",
+    async (state) => {
+      const first = await connected();
+      const answer = await first.recordings.start(first.channel(TRACKS), Date.now() + 1500, {});
+
+      if (answer.kind !== "started") throw new Error("Not started");
+      const { id } = answer.recording;
+      expect(
+        (await until(first.recordings.list, ([each]) => each?.status.kind === "complete"))[0]
+          ?.status.kind,
+      ).toBe("complete");
+      await first.quit();
+
+      const runtime = runtimeFor(
+        mainLayer({
+          ...testConfig(first.dataDir),
+          profiles: {
+            consent: { read: Effect.succeed(true), write: () => Effect.void },
+            stopInteractive: () => Effect.void,
+          },
+        }),
+      );
+
+      onTestFinished(() => runtime.dispose());
+      const recordings = await promised(runtime, Recordings);
+      const profiles = await promised(runtime, ProfileSessions);
+      const original = await profiles.active();
+      await recordings.recordProgress(id, 9, 90, original);
+      const created = await profiles.create("Captured viewer");
+      const captured = await profiles.switch(created.id);
+      await recordings.recordProgress(id, 11, 90, captured);
+
+      // SQLite's public authorization seam refuses storage operations and counts registry reads.
+      // No recordings collaborator or pending-retry state is replaced or inspected.
+      let refuseWrites = true;
+      let refuseRegistry = false;
+      let refuseDeletion = false;
+      let registryReads = 0;
+      const connections = new Set<DatabaseSync>();
+      const prepare = DatabaseSync.prototype.prepare;
+
+      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+        this: DatabaseSync,
+        sql: string,
+      ) {
+        connections.add(this);
+        this.setAuthorizer((action, table) => {
+          if (action === sqlite.SQLITE_READ && table === "profiles") {
+            registryReads++;
+
+            if (refuseRegistry) return sqlite.SQLITE_DENY;
+          }
+
+          if (
+            refuseWrites &&
+            table === "profile_copy_progress" &&
+            (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+          )
+            return sqlite.SQLITE_DENY;
+
+          if (refuseDeletion && action === sqlite.SQLITE_DELETE && table === "profiles")
+            return sqlite.SQLITE_DENY;
+
+          return sqlite.SQLITE_OK;
+        });
+
+        return prepare.call(this, sql);
+      });
+
+      const restore = () => {
+        adapter.mockRestore();
+
+        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
+      };
+
+      onTestFinished(restore);
+      // Keep the advancing retry deadlines monotonic without changing real timers.
+      let now = Date.now();
+
+      const retry = async () => {
+        now += 10_001;
+        const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+        try {
+          await recordings.check();
+        } finally {
+          clock.mockRestore();
+        }
+      };
+
+      await expect(recordings.recordProgress(id, 42, 90, captured)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 11,
+        duration: 90,
+      });
+      await profiles.switch(original.id);
+      refuseWrites = false;
+      refuseRegistry = true;
+      registryReads = 0;
+      await recordings.check();
+      expect(registryReads).toBe(0);
+      await retry();
+      expect(registryReads).toBeGreaterThan(0);
+      refuseRegistry = false;
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 11,
+        duration: 90,
+      });
+      await retry();
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 42,
+        duration: 90,
+      });
+      expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+
+      const durable = await app(first.dataDir);
+      onTestFinished(durable.quit);
+      expect((await durable.recordings.copy(id, captured))?.progress).toEqual({
+        position: 42,
+        duration: 90,
+      });
+      expect((await durable.recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+      await durable.quit();
+
+      refuseWrites = true;
+      await expect(recordings.recordProgress(id, 55, 90, captured)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      refuseWrites = false;
+
+      if (state === "tombstoned") {
+        // A refused registry delete leaves the owner tombstoned.
+        refuseDeletion = true;
+        await expect(profiles.remove(captured.id)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+        refuseDeletion = false;
+        expect((await profiles.list()).find((each) => each.id === captured.id)?.deleting).toBe(
+          true,
+        );
+      } else {
+        await profiles.remove(captured.id);
+        expect((await profiles.list()).some((each) => each.id === captured.id)).toBe(false);
+      }
+
+      registryReads = 0;
+      await retry();
+      expect(registryReads).toBeGreaterThan(0);
+      registryReads = 0;
+      await retry();
+      expect(registryReads).toBe(0);
+      await expect(recordings.copy(id, captured)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect((await recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
+        "complete",
+      );
+      expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+      restore();
+      await runtime.dispose();
+      const restarted = await app(first.dataDir);
+      onTestFinished(restarted.quit);
+      expect((await restarted.recordings.copy(id))?.progress).toEqual({
+        position: 9,
+        duration: 90,
+      });
+      await expect(restarted.recordings.copy(id, captured)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+    },
+  );
+
+  it("retries captured-owner recording progress without a profile registry", async () => {
+    const { dataDir, runtime, recordings, channel, quit } = await connected();
+    onTestFinished(quit);
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+
+    if (answer.kind !== "started") throw new Error("Not started");
+    const { id } = answer.recording;
+    expect(
+      (await until(recordings.list, ([each]) => each?.status.kind === "complete"))[0]?.status.kind,
+    ).toBe("complete");
+    const profiles = await promised(runtime, ProfileSessions);
+    const captured = await profiles.active();
+    await recordings.recordProgress(id, 11, 90, captured);
+    // A standalone copy-progress adapter can have no profiles table at all.
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      lock.exec("pragma foreign_keys = off; drop table profiles; begin immediate");
+      await expect(recordings.recordProgress(id, 42, 90, captured)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 11,
+        duration: 90,
+      });
+    } finally {
+      if (lock.isTransaction) lock.exec("rollback");
+      lock.close();
+    }
+
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_001);
+
+    try {
+      await recordings.check();
+    } finally {
+      clock.mockRestore();
+    }
+
+    expect((await recordings.copy(id, captured))?.progress).toEqual({ position: 42, duration: 90 });
+    await quit();
+    const restarted = await app(dataDir);
+    onTestFinished(restarted.quit);
+    expect((await restarted.recordings.copy(id, captured))?.progress).toEqual({
+      position: 42,
+      duration: 90,
+    });
   });
 
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {

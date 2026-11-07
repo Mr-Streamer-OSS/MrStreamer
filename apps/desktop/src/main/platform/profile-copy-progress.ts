@@ -24,6 +24,16 @@ const SCHEMA = `create table if not exists profile_copy_progress (
   primary key (profile_id, kind, copy_id)
 )`;
 
+/** Standalone ports may omit the registry; deleted owners cannot save progress. */
+function ownerAvailable(db: DatabaseSync, owner: string): boolean {
+  if (!db.prepare("select 1 from sqlite_master where type = 'table' and name = 'profiles'").get())
+    return true;
+
+  const registered = db.prepare("select * from profiles where id = ?").get(owner);
+
+  return !!registered && registered["deleting"] !== 1;
+}
+
 /** Captures a viewing owner before a copy opens; retained callbacks never read active again. */
 export const copyProgress = Effect.gen(function* () {
   const opened = yield* Database;
@@ -35,23 +45,14 @@ export const copyProgress = Effect.gen(function* () {
       if ("failure" in opened) return yield* unavailable(opened.failure);
 
       return yield* attempt(() => {
-        // Installations have a registry; standalone ports may supply an owner without one.
         // A deleted/tombstoned owner must never recreate progress through a retained callback.
-        if (
-          opened.db
-            .prepare("select 1 from sqlite_master where type = 'table' and name = 'profiles'")
-            .get()
-        ) {
-          const registered = opened.db.prepare("select * from profiles where id = ?").get(owner.id);
-
-          if (!registered || registered["deleting"] === 1)
-            throw new Failed({
-              error: {
-                kind: "unexpected",
-                detail: "This viewing profile is unavailable or being deleted.",
-              },
-            });
-        }
+        if (!ownerAvailable(opened.db, owner.id))
+          throw new Failed({
+            error: {
+              kind: "unexpected",
+              detail: "This viewing profile is unavailable or being deleted.",
+            },
+          });
 
         if (!initialized) {
           opened.db.exec(SCHEMA);
@@ -64,6 +65,11 @@ export const copyProgress = Effect.gen(function* () {
 
   const of = (owner: ActiveProfile) => ({
     owner,
+    /** False only when the registry definitively lacks or tombstones the owner; never writes. */
+    available:
+      "failure" in opened
+        ? unavailable(opened.failure)
+        : attempt(() => ownerAvailable(opened.db, owner.id)),
     /** Seed once, including absence and zero. A failed migration leaves the legacy data intact. */
     read: (kind: CopyKind, id: string, legacy: Position | null) =>
       access(owner, (db, owner): Position | null => {
