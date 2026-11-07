@@ -66,7 +66,17 @@ it("dispatches remapped commands on both players, retires defaults, resets and r
     expect(resolveShortcut(key("m"), surface, { pause: ["m"] })).toBe("mute");
     expect(resolveShortcut(key("z", { repeat: true }), surface, { pause: ["z"] })).toBeNull();
     expect(resolveShortcut(key("g", { repeat: true }), surface)).toBe("subtitlesEarlier");
+    // Shift keeps the larger subtitle step on a remapped key, but stays off for Mute.
+    expect(
+      resolveShortcut(key("Z", { shiftKey: true }), surface, { subtitlesEarlier: ["z"] }),
+    ).toBe("subtitlesEarlier");
+    expect(resolveShortcut(key("Z", { shiftKey: true }), surface, { mute: ["z"] })).toBeNull();
   }
+
+  expect(validateShortcut("mute", "Shift+z", { subtitlesEarlier: ["z"] })).toEqual({
+    kind: "conflict",
+    command: "subtitlesEarlier",
+  });
 });
 
 it("leaves nested editable content, menus, sliders, activation keys and composition with their controls", () => {

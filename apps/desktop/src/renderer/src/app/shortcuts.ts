@@ -6,68 +6,84 @@ export type ShortcutOverrides = NonNullable<Preferences["keyboardShortcuts"]>;
 export type ShortcutSurface = "live" | "title";
 
 // Commands share identity across both players; navigation retains its own fixed keys.
+// A `shift` command also runs with Shift held on a letter or Space it is bound to, remapped or
+// not; title subtitle timing reads that Shift as its larger step.
 export const shortcutCommands = [
   {
     id: "pause",
     label: "Play or pause",
-    live: ["Space", "Shift+Space", "k", "Shift+k"],
-    title: ["Space", "Shift+Space", "k", "Shift+k"],
+    live: ["Space", "k"],
+    title: ["Space", "k"],
+    shift: true,
     repeat: false,
   },
   {
     id: "seekBack",
     label: "Skip backward",
-    live: ["j", "Shift+j"],
+    live: ["j"],
     title: ["ArrowLeft"],
+    shift: true,
     repeat: true,
   },
   {
     id: "seekForward",
     label: "Skip forward",
-    live: ["l", "Shift+l"],
+    live: ["l"],
     title: ["ArrowRight"],
+    shift: true,
     repeat: true,
   },
-  { id: "fullscreen", label: "Full screen", live: ["f"], title: ["f"], repeat: false },
   {
-    id: "miniPlayer",
-    label: "Mini player",
-    live: ["p", "Shift+p"],
-    title: ["p", "Shift+p"],
+    id: "fullscreen",
+    label: "Full screen",
+    live: ["f"],
+    title: ["f"],
+    shift: false,
     repeat: false,
   },
-  {
-    id: "output",
-    label: "Play on",
-    live: ["o", "Shift+o"],
-    title: ["o", "Shift+o"],
-    repeat: false,
-  },
-  { id: "mute", label: "Mute", live: ["m"], title: ["m"], repeat: false },
-  { id: "subtitles", label: "Subtitles", live: ["c"], title: ["c"], repeat: false },
+  { id: "miniPlayer", label: "Mini player", live: ["p"], title: ["p"], shift: true, repeat: false },
+  { id: "output", label: "Play on", live: ["o"], title: ["o"], shift: true, repeat: false },
+  { id: "mute", label: "Mute", live: ["m"], title: ["m"], shift: false, repeat: false },
+  { id: "subtitles", label: "Subtitles", live: ["c"], title: ["c"], shift: false, repeat: false },
   {
     id: "subtitlesEarlier",
     label: "Subtitles earlier",
-    live: ["g", "Shift+g"],
-    title: ["g", "Shift+g"],
+    live: ["g"],
+    title: ["g"],
+    shift: true,
     repeat: true,
   },
   {
     id: "subtitlesLater",
     label: "Subtitles later",
-    live: ["h", "Shift+h"],
-    title: ["h", "Shift+h"],
+    live: ["h"],
+    title: ["h"],
+    shift: true,
     repeat: true,
   },
-  { id: "info", label: "Show controls", live: ["i"], title: [], repeat: false },
-  { id: "favourite", label: "Favourite channel", live: ["s", "Shift+s"], title: [], repeat: false },
-  { id: "quality", label: "Choose quality", live: ["q"], title: [], repeat: false },
-  { id: "retry", label: "Retry channel", live: ["r", "Shift+r"], title: [], repeat: false },
-  { id: "volumeUp", label: "Volume up", live: [], title: ["ArrowUp"], repeat: true },
-  { id: "volumeDown", label: "Volume down", live: [], title: ["ArrowDown"], repeat: true },
-  { id: "nextEpisode", label: "Next episode", live: [], title: ["n"], repeat: false },
-  { id: "slower", label: "Play slower", live: [], title: ["<"], repeat: true },
-  { id: "faster", label: "Play faster", live: [], title: [">"], repeat: true },
+  { id: "info", label: "Show controls", live: ["i"], title: [], shift: false, repeat: false },
+  {
+    id: "favourite",
+    label: "Favourite channel",
+    live: ["s"],
+    title: [],
+    shift: true,
+    repeat: false,
+  },
+  { id: "quality", label: "Choose quality", live: ["q"], title: [], shift: false, repeat: false },
+  { id: "retry", label: "Retry channel", live: ["r"], title: [], shift: true, repeat: false },
+  { id: "volumeUp", label: "Volume up", live: [], title: ["ArrowUp"], shift: false, repeat: true },
+  {
+    id: "volumeDown",
+    label: "Volume down",
+    live: [],
+    title: ["ArrowDown"],
+    shift: false,
+    repeat: true,
+  },
+  { id: "nextEpisode", label: "Next episode", live: [], title: ["n"], shift: false, repeat: false },
+  { id: "slower", label: "Play slower", live: [], title: ["<"], shift: false, repeat: true },
+  { id: "faster", label: "Play faster", live: [], title: [">"], shift: false, repeat: true },
 ] as const;
 
 export type ShortcutCommand = (typeof shortcutCommands)[number]["id"];
@@ -88,17 +104,41 @@ export function shortcutBinding(
   return event.shiftKey && (key.length > 1 || /^[a-z]$/.test(key)) ? `Shift+${key}` : key;
 }
 
+const definitionOf = (command: ShortcutCommand) =>
+  shortcutCommands.find((entry) => entry.id === command)!;
+
+/** A `shift` command's letters and Space also run with Shift held. */
+function withShift(command: ShortcutCommand, bindings: readonly string[]): readonly string[] {
+  if (!definitionOf(command).shift) return bindings;
+
+  return bindings.flatMap((binding) =>
+    /^(?:[a-z]|Space)$/.test(binding) ? [binding, `Shift+${binding}`] : [binding],
+  );
+}
+
 export function shortcutBindings(
   command: ShortcutCommand,
   surface: ShortcutSurface,
   overrides: ShortcutOverrides = {},
 ): readonly string[] {
-  const definition = shortcutCommands.find((entry) => entry.id === command)!;
+  const defaults = definitionOf(command)[surface];
 
-  if (!definition[surface].length) return [];
+  if (!defaults.length) return [];
 
-  return overrides[command] ?? definition[surface];
+  return withShift(command, overrides[command] ?? defaults);
 }
+
+// Live TV keeps these for channel-list navigation, with or without Shift.
+const LIVE_NAVIGATION = [
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+];
 
 /** Returns a reason the editor can announce; replacement frees all of a command's old keys. */
 export function validateShortcut(
@@ -106,27 +146,17 @@ export function validateShortcut(
   binding: string,
   overrides: ShortcutOverrides = {},
 ): { kind: "reserved" } | { kind: "conflict"; command: ShortcutCommand } | null {
-  const definition = shortcutCommands.find((entry) => entry.id === command)!;
+  const definition = definitionOf(command);
 
-  const liveNavigation = [
-    "ArrowLeft",
-    "ArrowRight",
-    "ArrowUp",
-    "ArrowDown",
-    "Home",
-    "End",
-    "PageUp",
-    "PageDown",
-  ];
-
+  // Digits pick Live channels; \w excludes them from the punctuation branch.
   if (
-    !/^(?:(?:Shift\+)?(?:[a-z]|Space|ArrowLeft|ArrowRight|ArrowUp|ArrowDown)|[0-9]|[^\w\s])$/.test(
+    !/^(?:(?:Shift\+)?(?:[a-z]|Space|ArrowLeft|ArrowRight|ArrowUp|ArrowDown)|[^\w\s])$/.test(
       binding,
     ) ||
-    /^[0-9]$/.test(binding) ||
-    (definition.live.length > 0 && liveNavigation.includes(binding.replace(/^Shift\+/, "")))
+    (definition.live.length > 0 && LIVE_NAVIGATION.includes(binding.replace(/^Shift\+/, "")))
   )
     return { kind: "reserved" };
+  const candidates = withShift(command, [binding]);
 
   for (const other of shortcutCommands) {
     if (other.id === command) continue;
@@ -134,7 +164,7 @@ export function validateShortcut(
     for (const surface of ["live", "title"] as const) {
       if (
         definition[surface].length &&
-        shortcutBindings(other.id, surface, overrides).includes(binding)
+        shortcutBindings(other.id, surface, overrides).some((taken) => candidates.includes(taken))
       )
         return { kind: "conflict", command: other.id };
     }
