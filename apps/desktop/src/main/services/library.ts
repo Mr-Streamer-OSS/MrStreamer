@@ -1,3 +1,4 @@
+import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import type { UsageObservers } from "../analytics/observers.ts";
 // The live catalogue: each saved subscription's, fetched from its provider and cached on disk,
 // and all of them together as the UI asks for them over IPC. Every channel and category says
@@ -583,9 +584,52 @@ function make(options: LibraryOptions) {
     const visible = Effect.gen(function* () {
       const loaded = yield* current;
 
+      const policy = yield* Effect.serviceOption(AdmittedKids);
+      const approved = policy._tag === "Some" ? policy.value.approved : null;
+
+      const restrict = (lists: Combined): Combined => {
+        if (approved === null) return lists;
+
+        const allows = (channel: LiveChannel) =>
+          !channel.adult &&
+          allowsApproval(approved, {
+            kind: "channel",
+            subscriptionId: channel.subscriptionId,
+            id: channel.id,
+          });
+
+        const byCategory = new Map(
+          [...lists.byCategory].map(([key, channels]) => [key, channels.filter(allows)]),
+        );
+
+        return {
+          ...lists,
+          channels: lists.channels.filter(allows),
+          members: lists.members.map((member) => {
+            const indices = member.channels.flatMap((channel, index) =>
+              allows(channel) ? [index] : [],
+            );
+
+            return {
+              ...member,
+              channels: member.channels.filter(allows),
+              searchNames: indices.map((index) => member.searchNames[index] ?? ""),
+              titles: indices.map((index) => member.titles[index] ?? ""),
+              byId: new Map([...member.byId].filter(([, channel]) => allows(channel))),
+            };
+          }),
+          byCategory,
+          categories: lists.categories.flatMap((category) => {
+            const count = byCategory.get(ownedKey(category))?.length ?? 0;
+
+            return count ? [{ ...category, channelCount: count }] : [];
+          }),
+        };
+      };
+
       return {
-        lists: listsOf((yield* adults) ? "all" : "ordinary", loaded),
-        search: listsOf("ordinary", loaded),
+        lists: restrict(listsOf((yield* adults) ? "all" : "ordinary", loaded)),
+        search: restrict(listsOf("ordinary", loaded)),
       };
     });
 

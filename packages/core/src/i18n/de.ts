@@ -3,6 +3,11 @@
 import type { Translation } from "../i18n.ts";
 
 export const de: Translation = {
+  "Kids policy could not be read or saved. Try again.":
+    "Die Kinderregeln konnten nicht gelesen oder gespeichert werden. Erneut versuchen.",
+  "Kids policy: enter the correct PIN.": "Kinderregeln: die richtige PIN eingeben.",
+  "Kids policy: this content or action is not approved.":
+    "Kinderregeln: Dieser Inhalt oder diese Aktion ist nicht freigegeben.",
   "Viewing preferences could not be read. Repair the file or switch profiles.":
     "Die Wiedergabeeinstellungen konnten nicht gelesen werden. Repariere die Datei oder wechsle das Profil.",
   "This viewing profile is unavailable or being deleted.":

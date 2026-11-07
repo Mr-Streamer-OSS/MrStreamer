@@ -45,6 +45,8 @@ export interface CatalogueOwner {
   /** The subscription's folder, where its lists are kept. */
   readonly dir: string;
   readonly importRevision?: string;
+  /** Main's captured policy, for this read only. Absent keeps household catalogues unrestricted. */
+  readonly approved?: { readonly movies: readonly string[]; readonly series: readonly string[] };
 }
 
 /** The subscriptions whose lists make the catalogue a call asks about, in their order. */

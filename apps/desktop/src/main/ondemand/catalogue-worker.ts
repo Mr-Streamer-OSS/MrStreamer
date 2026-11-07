@@ -457,6 +457,40 @@ async function catalogueOf(
     });
   }
 
+  if (owners.some((owner) => owner.approved !== undefined)) {
+    const selected = members.map((member) => {
+      const approval = owners.find(
+        (owner) => owner.subscriptionId === member.subscriptionId,
+      )?.approved;
+
+      const movies = new Set(approval?.movies ?? []);
+      const series = new Set(approval?.series ?? []);
+      const movieAdult = adultIn(member.catalogue.movieCategories);
+      const seriesAdult = adultIn(member.catalogue.seriesCategories);
+
+      return {
+        ...member,
+        catalogue: {
+          ...member.catalogue,
+          movies: member.catalogue.movies.filter(
+            (item) => movies.has(item.id) && !movieAdult(item),
+          ),
+          series: member.catalogue.series.filter(
+            (item) => series.has(item.id) && !seriesAdult(item),
+          ),
+        },
+      };
+    });
+
+    // A request-local index cannot replace the household index or any persisted catalogue.
+    return {
+      members: selected,
+      index: indexCatalogue(selected, language),
+      fileListings: new Map(),
+      collections: new Map(),
+    };
+  }
+
   return shownOf(members, language);
 }
 
@@ -994,6 +1028,9 @@ const handlers: {
       if (!first) return [];
       const listed = listedAs(found.index, entry);
       const title = listed ? named(listed, language) : null;
+
+      // A restricted read cannot trust fallback facts saved under a former, wider version group.
+      if (owners.some((owner) => owner.approved !== undefined) && !title) return [];
 
       // For adults as the lists say now, or as they last said of a title they hold no more.
       if (!shown && (title?.adult ?? first.adult)) return [];

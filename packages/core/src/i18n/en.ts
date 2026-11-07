@@ -4,6 +4,11 @@
 import type { Plural } from "../i18n.ts";
 
 export const en = {
+  "Kids policy could not be read or saved. Try again.":
+    "Kids policy could not be read or saved. Try again.",
+  "Kids policy: enter the correct PIN.": "Kids policy: enter the correct PIN.",
+  "Kids policy: this content or action is not approved.":
+    "Kids policy: this content or action is not approved.",
   "Viewing preferences could not be read. Repair the file or switch profiles.":
     "Viewing preferences could not be read. Repair the file or switch profiles.",
   "This viewing profile is unavailable or being deleted.":

@@ -1,12 +1,18 @@
 // Composition root: creates the window and wires the services to IPC.
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
+import * as Exit from "effect/Exit";
 import {
   DEFAULT_PROFILE_ID,
   sameProfile,
   type ActiveProfile,
 } from "@mrstreamer/contracts/profiles";
-import { ProfileSessions, type ProfileAdmission } from "./services/profiles.ts";
+import {
+  ProfileSessions,
+  visibleDownloads,
+  visibleOutput,
+  type ProfileAdmission,
+} from "./services/profiles.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -821,8 +827,18 @@ async function start(): Promise<void> {
       return new Response(null, { status: 404 });
     }
 
+    const admitted = await runtime.runPromiseExit(profileSessions.visibility);
+
+    if (
+      Exit.isFailure(admitted) ||
+      !admitted.value.allows({ kind: "download", id: decodeURIComponent(id) })
+    )
+      return new Response(null, { status: 404 });
     const kept = await runtime.runPromise(downloads.artwork(decodeURIComponent(id), kind));
     const bytes = kept && (await readFile(kept.path).catch(() => null));
+
+    if (Exit.isFailure(await runtime.runPromiseExit(admitted.value.current)))
+      return new Response(null, { status: 404 });
 
     return bytes
       ? new Response(bytes, { headers: { "Content-Type": kept.type, "Cache-Control": "no-store" } })
@@ -964,11 +980,16 @@ async function start(): Promise<void> {
     changes: Stream.Stream<A>,
     event: E,
     payload: (change: A) => IpcEvents[E],
+    visible?: (change: A) => Effect.Effect<A | null, Failed>,
   ) =>
     runtime.runFork(
       Stream.runForEach(changes, (change) =>
-        Effect.sync(() => {
-          if (mainWindow) emit(mainWindow.webContents, event, payload(change));
+        Effect.gen(function* () {
+          const shown = visible
+            ? yield* visible(change).pipe(Effect.catchTag("Failed", () => Effect.succeed(null)))
+            : change;
+
+          if (shown !== null && mainWindow) emit(mainWindow.webContents, event, payload(shown));
         }),
       ),
     );
@@ -976,7 +997,18 @@ async function start(): Promise<void> {
   forward(library.changes, "library.updated", (status) => status);
   forward(onDemand.changes, "ondemand.updated", (status) => status);
   forward(onDemand.progressChanges, "ondemand.progress", (metadata) => metadata);
-  forward(onDemand.detailsChanged, "ondemand.detailsChanged", (title) => title);
+  forward(
+    onDemand.detailsChanged,
+    "ondemand.detailsChanged",
+    (title) => title,
+    (title) =>
+      Effect.gen(function* () {
+        const visibility = yield* profileSessions.visibility;
+        yield* visibility.current;
+
+        return visibility.allows({ ...title, kind: title.kind }) ? title : null;
+      }),
+  );
   forward(guide.changes, "guide.updated", () => null);
   void runtime.runFork(
     Stream.runForEach(profileSessions.changes, (change) =>
@@ -1020,10 +1052,43 @@ async function start(): Promise<void> {
 
     return status;
   });
-  forward(downloads.changes, "downloads.changed", (list) => list);
+  forward(
+    downloads.changes,
+    "downloads.changed",
+    (list) => list,
+    (list) =>
+      Effect.gen(function* () {
+        const visibility = yield* profileSessions.visibility;
+        yield* visibility.current;
+
+        return visibility.kids ? visibleDownloads(list, visibility.allows) : list;
+      }),
+  );
   forward(reminders.changes, "reminders.changed", () => null);
-  forward(recordings.changes, "recordings.changed", (list) => list);
-  forward(recordings.scheduleChanges, "recordings.schedulesChanged", (list) => list);
+  forward(
+    recordings.changes,
+    "recordings.changed",
+    (list) => list,
+    (list) =>
+      Effect.gen(function* () {
+        const visibility = yield* profileSessions.visibility;
+        yield* visibility.current;
+
+        return list.filter((item) => visibility.allows({ kind: "recording", id: item.id }));
+      }),
+  );
+  forward(
+    recordings.scheduleChanges,
+    "recordings.schedulesChanged",
+    (list) => list,
+    (list) =>
+      Effect.gen(function* () {
+        const visibility = yield* profileSessions.visibility;
+        yield* visibility.current;
+
+        return visibility.kids ? [] : list;
+      }),
+  );
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
@@ -1154,13 +1219,28 @@ async function start(): Promise<void> {
 
   runtime.runFork(
     Stream.runForEach(output.changes, (status) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         // A window out of sight is there for the receiver only. Once the receiver lets go it
         // closes, as the viewer asked, before its page hears of it: the page would carry on
         // here, or start a preview, with nobody watching.
         if (away && status.output.kind === "local") mainWindow?.destroy();
 
-        if (mainWindow) emit(mainWindow.webContents, "output.changed", status);
+        const visibility = yield* Effect.option(profileSessions.visibility);
+
+        const valid =
+          visibility._tag === "Some" && (yield* Effect.isSuccess(visibility.value.current));
+
+        if (
+          mainWindow &&
+          valid &&
+          visibility._tag === "Some" &&
+          (!status.owner || sameProfile(status.owner, visibility.value.owner))
+        )
+          emit(
+            mainWindow.webContents,
+            "output.changed",
+            visibility.value.kids ? visibleOutput(status, visibility.value.allows) : status,
+          );
         receiverPlaying = status.output.kind === "receiver" && status.output.media !== null;
         keepAwake();
       }),

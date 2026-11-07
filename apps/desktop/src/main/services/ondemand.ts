@@ -1,3 +1,4 @@
+import { AdmittedKids } from "./profile-policy.ts";
 import { ArkErrors } from "arktype";
 import { workerResults } from "../ondemand/protocol.ts";
 import { listedFileKey } from "@mrstreamer/core/ondemand/files";
@@ -524,6 +525,39 @@ function make(deps: OnDemandDeps) {
     const call = <M extends WorkerMethod>(method: M, args: WorkerCalls[M]["args"]) =>
       Effect.gen(function* () {
         const admitted = yield* Effect.serviceOption(AdmittedSettings);
+        const policy = yield* Effect.serviceOption(AdmittedKids);
+        // Only owner-scoped reads carry this selection; storage and household work use the full catalogue.
+        const approved = policy._tag === "Some" ? policy.value.approved : null;
+        let selected = args;
+
+        if (approved !== null && "owners" in args) {
+          // WorkerCalls correlates owners with these methods. The generic branch retains their other inputs.
+          const owners = args.owners as readonly CatalogueOwner[];
+          selected = {
+            ...args,
+            owners: owners.map((owner) => ({
+              ...owner,
+              approved: {
+                movies: approved
+                  .filter(
+                    (item) =>
+                      item.kind === "movie" &&
+                      "subscriptionId" in item &&
+                      item.subscriptionId === owner.subscriptionId,
+                  )
+                  .map((item) => item.id),
+                series: approved
+                  .filter(
+                    (item) =>
+                      item.kind === "series" &&
+                      "subscriptionId" in item &&
+                      item.subscriptionId === owner.subscriptionId,
+                  )
+                  .map((item) => item.id),
+              },
+            })),
+          };
+        }
 
         return yield* Effect.tryPromise({
           try: () => {
@@ -537,7 +571,7 @@ function make(deps: OnDemandDeps) {
                 },
               });
 
-            return worker.call(method, args);
+            return worker.call(method, selected);
           },
           catch: failedWith,
         });

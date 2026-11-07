@@ -3,6 +3,11 @@
 import type { Translation } from "../i18n.ts";
 
 export const nl: Translation = {
+  "Kids policy could not be read or saved. Try again.":
+    "Het kinderbeleid kon niet worden gelezen of opgeslagen. Probeer opnieuw.",
+  "Kids policy: enter the correct PIN.": "Kinderbeleid: voer de juiste pincode in.",
+  "Kids policy: this content or action is not approved.":
+    "Kinderbeleid: deze inhoud of actie is niet goedgekeurd.",
   "Viewing preferences could not be read. Repair the file or switch profiles.":
     "De kijkvoorkeuren konden niet worden gelezen. Herstel het bestand of wissel van profiel.",
   "This viewing profile is unavailable or being deleted.":
