@@ -3350,20 +3350,26 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
     // Let the initial guide/catalogue notifications settle before the one failed lookup.
     await runtime.runPromise(TestClock.adjust(MINUTE));
+    const entered = await runtime.runPromise(Deferred.make<void>());
     const release = await runtime.runPromise(Deferred.make<void>());
 
     const lookup = vi
       .spyOn(library, "lookup")
       .mockImplementationOnce(() =>
         Effect.andThen(
-          Deferred.await(release),
-          Effect.die(new Error("One scheduled lookup failed")),
+          Deferred.succeed(entered, undefined),
+          Effect.andThen(
+            Deferred.await(release),
+            Effect.die(new Error("One scheduled lookup failed")),
+          ),
         ),
       );
 
     onTestFinished(() => lookup.mockRestore());
     vi.setSystemTime(at.getTime());
     await runtime.runPromise(TestClock.adjust(MINUTE));
+    // Advancing TestClock wakes the check, but does not await its asynchronous subscription read.
+    await runtime.runPromise(Deferred.await(entered));
     expect(lookup).toHaveBeenCalled();
     expect(provider.streamRequests()).toBe(0);
     // Fail only after the clock is at the start, so the timed retry cannot run in the same jump.

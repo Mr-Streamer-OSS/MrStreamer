@@ -1,9 +1,26 @@
 import { updatesInApp } from "@mrstreamer/contracts/updates";
 import { distributionLabel } from "../updates/distribution.ts";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as KeyPress,
+  type ReactNode,
+} from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { t } from "@mrstreamer/core/i18n";
 import { isTyping } from "../../app/platform.ts";
+import {
+  shortcutBinding,
+  shortcutBindings,
+  shortcutCommands,
+  shortcutProblem,
+  validateShortcut,
+  type ShortcutCommand,
+  type ShortcutOverrides,
+} from "../../app/shortcuts.ts";
+import { currentPreferences, updatePreferences } from "../../lib/preferences.ts";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
@@ -181,7 +198,12 @@ export function SettingsPage() {
 
   const panels = {
     general: <GeneralSection />,
-    playback: <PlaybackSection />,
+    playback: (
+      <>
+        <PlaybackSection />
+        <KeyboardShortcuts />
+      </>
+    ),
     live: <LiveSettingsSection />,
     movies: <MoviesSettingsSection />,
     subtitles: <SubtitlesSettingsSection />,
@@ -325,6 +347,290 @@ export function SettingsPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+class ShortcutRefusal extends Error {}
+
+type ShortcutChange =
+  { command: ShortcutCommand; binding: string } | { reset: ShortcutCommand | "all" };
+
+/** The overrides a change leaves. Commands this version doesn't know survive a single edit. */
+function changedShortcuts(overrides: ShortcutOverrides, change: ShortcutChange): ShortcutOverrides {
+  if ("binding" in change) return { ...overrides, [change.command]: [change.binding] };
+
+  if (change.reset === "all") return {};
+
+  return Object.fromEntries(Object.entries(overrides).filter(([id]) => id !== change.reset));
+}
+
+const changeTarget = (change: ShortcutChange) =>
+  "reset" in change ? change.reset : change.command;
+
+const ARROWS: Readonly<Record<string, string>> = {
+  ArrowLeft: "←",
+  ArrowRight: "→",
+  ArrowUp: "↑",
+  ArrowDown: "↓",
+};
+
+/** A binding as its key is labelled: Space, ←, Shift K. */
+function keyName(binding: string): string {
+  const key = binding.replace(/^Shift\+/, "");
+  const name = key === "Space" ? t("Space") : (ARROWS[key] ?? key.toUpperCase());
+
+  return key === binding ? name : `${t("Shift")} ${name}`;
+}
+
+/** A letter bound with and without Shift runs one command, so it shows once. */
+function keyNames(bindings: readonly string[]): string[] {
+  return bindings.flatMap((binding) =>
+    binding.startsWith("Shift+") && bindings.includes(binding.slice(6)) ? [] : [keyName(binding)],
+  );
+}
+
+const commandLabel = (id: ShortcutCommand) =>
+  t(shortcutCommands.find((command) => command.id === id)!.label);
+
+/**
+ * The player's keyboard reference for the viewing profile, where a command's keys are also the
+ * button that changes them. The next key pressed replaces every key of that command in both
+ * players; Escape cancels and Tab leaves. A save that fails keeps the committed keys shown, with
+ * the same change to retry beside the row.
+ */
+function KeyboardShortcuts() {
+  const client = useQueryClient();
+  const preferences = useQuery(queries.preferences());
+  const [capturing, setCapturing] = useState<ShortcutCommand | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const root = useRef<HTMLElement>(null);
+  // A saved Space would otherwise click the focused button on keyup and start capturing again.
+  const swallowKeyUp = useRef(false);
+  const hint = useId();
+  const latest = () => currentPreferences(client)?.keyboardShortcuts ?? {};
+
+  const save = useMutation({
+    mutationKey: ["settings", "keyboardShortcuts"],
+    mutationFn: (change: ShortcutChange) => {
+      const keyboardShortcuts = changedShortcuts(latest(), change);
+
+      const invalid = shortcutProblem(
+        keyboardShortcuts,
+        "command" in change ? change.command : change.reset === "all" ? undefined : change.reset,
+      );
+
+      if (invalid)
+        throw new ShortcutRefusal(
+          invalid.problem.kind === "conflict"
+            ? t(
+                "reset" in change
+                  ? "{key} is used by {command}. Reset that command first, or Reset all."
+                  : "{key} is used by {command}. Press another key.",
+                {
+                  key: keyName(invalid.binding),
+                  command: commandLabel(invalid.problem.command),
+                },
+              )
+            : t("That key is reserved. Press another key."),
+        );
+
+      return updatePreferences({ keyboardShortcuts }, client);
+    },
+    onSuccess: (_, change) => {
+      const target = changeTarget(change);
+      setAnnouncement(
+        target === "all" ? t("Reset to defaults") : `${commandLabel(target)}, ${t("Saved")}`,
+      );
+    },
+  });
+
+  if (!preferences.data) return null;
+
+  const overrides = preferences.data.keyboardShortcuts ?? {};
+  const busy = save.isPending;
+  const change = save.variables;
+
+  const focusKeys = (id: ShortcutCommand) =>
+    root.current?.querySelector<HTMLButtonElement>(`[data-shortcut="${id}"]`)?.focus();
+
+  const stop = () => {
+    setCapturing(null);
+    setRefusal(null);
+  };
+
+  const capture = (event: KeyPress, command: ShortcutCommand) => {
+    if (capturing !== command || ["Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
+
+    if (event.key === "Tab") return stop();
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Refused app chords must not also act on the window while it is capturing a key.
+    if (event.ctrlKey || event.metaKey || event.altKey)
+      return setRefusal(t("That key is reserved. Press another key."));
+
+    if (event.key === "Escape") return stop();
+    const binding = shortcutBinding(event.nativeEvent);
+    const problem = binding && validateShortcut(command, binding, latest());
+
+    if (!binding || problem)
+      return setRefusal(
+        problem && problem.kind === "conflict"
+          ? t("{key} is used by {command}. Press another key.", {
+              key: keyName(binding!),
+              command: commandLabel(problem.command),
+            })
+          : t("That key is reserved. Press another key."),
+      );
+    swallowKeyUp.current = true;
+    stop();
+    save.mutate({ command, binding });
+  };
+
+  const feedback = (target: ShortcutCommand | "all") =>
+    change &&
+    changeTarget(change) === target &&
+    (save.error instanceof ShortcutRefusal ? (
+      <p role="alert" className="pb-2 text-[0.8125rem] text-destructive">
+        {save.error.message}
+      </p>
+    ) : (
+      <SaveFeedback
+        pending={busy}
+        error={save.error}
+        retryDisabled={busy}
+        retry={() => save.mutate(change)}
+      />
+    ));
+
+  const lanes = "w-40 flex-none lg:w-50";
+
+  return (
+    <section ref={root} data-setting="keyboard-shortcuts" className="mb-10 text-[0.9375rem]">
+      <div className="mb-1 flex items-baseline gap-4">
+        <h2 className="flex-1 font-semibold">{t("Keyboard shortcuts")}</h2>
+        <button
+          aria-disabled={busy || !Object.keys(overrides).length}
+          onClick={() => {
+            if (!busy && Object.keys(overrides).length) save.mutate({ reset: "all" });
+          }}
+          className="rounded text-sm underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:text-muted-foreground aria-disabled:no-underline"
+        >
+          {t("Reset all")}
+        </button>
+      </div>
+      {feedback("all")}
+      <p id={hint} className="mb-2 text-[0.8125rem] text-muted-foreground">
+        {t("Select keys to change them. Escape cancels.")}
+      </p>
+      <div
+        aria-hidden
+        className="flex h-8 items-center gap-2 border-b border-white/8 text-[0.8125rem] text-muted-foreground"
+      >
+        <span className="min-w-0 flex-1" />
+        <span className={lanes}>{t("Live TV")}</span>
+        <span className={lanes}>{t("Movies and series")}</span>
+        <span className="w-14 flex-none" />
+      </div>
+      {shortcutCommands.map((command) => {
+        const live = keyNames(shortcutBindings(command.id, "live", overrides));
+        const title = keyNames(shortcutBindings(command.id, "title", overrides));
+        const label = t(command.label);
+        const same = live.join() === title.join();
+
+        const spoken = same
+          ? live.join(", ")
+          : [
+              live.length ? `${t("Live TV")} ${live.join(", ")}` : "",
+              title.length ? `${t("Movies and series")} ${title.join(", ")}` : "",
+            ]
+              .filter(Boolean)
+              .join(", ");
+
+        const keys = (names: string[]) => (
+          <span className={cn(lanes, "flex")}>
+            {names.length > 0 && (
+              <kbd className="inline-flex h-7 items-center gap-2.5 rounded-md border border-white/10 px-2.5 font-sans text-sm font-medium">
+                {names.map((name) => (
+                  <span key={name}>{name}</span>
+                ))}
+              </kbd>
+            )}
+          </span>
+        );
+
+        return (
+          <div key={command.id} className="border-b border-white/8">
+            <div className="flex min-h-11 items-center gap-2 py-1">
+              <span className="min-w-0 flex-1 break-words">{label}</span>
+              <button
+                data-shortcut={command.id}
+                aria-label={capturing === command.id ? label : `${label}: ${spoken}`}
+                aria-describedby={hint}
+                aria-disabled={busy}
+                onClick={() => {
+                  if (busy || capturing === command.id) return;
+                  setCapturing(command.id);
+                  setRefusal(null);
+                  setAnnouncement(
+                    t("Press a key for {command}. Escape cancels.", { command: label }),
+                  );
+                }}
+                onKeyDown={(event) => capture(event, command.id)}
+                onKeyUp={(event) => {
+                  if (!swallowKeyUp.current) return;
+                  swallowKeyUp.current = false;
+                  event.preventDefault();
+                }}
+                onBlur={() => capturing === command.id && stop()}
+                className="flex gap-2 rounded-md text-left outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {capturing === command.id ? (
+                  <span className="flex w-82 flex-none lg:w-102">
+                    <kbd className="inline-flex h-7 items-center rounded-md border-2 border-white px-2.5 font-sans text-sm font-medium">
+                      {t("Press a key")}
+                    </kbd>
+                  </span>
+                ) : (
+                  <>
+                    {keys(live)}
+                    {keys(title)}
+                  </>
+                )}
+              </button>
+              <span className="flex w-14 flex-none justify-end">
+                {overrides[command.id] && (
+                  <button
+                    aria-label={`${t("Reset")} ${label}`}
+                    aria-disabled={busy}
+                    onClick={() => {
+                      if (busy) return;
+                      // The reset button leaves with the override, so focus waits on the keys.
+                      focusKeys(command.id);
+                      save.mutate({ reset: command.id });
+                    }}
+                    className="rounded text-sm underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {t("Reset")}
+                  </button>
+                )}
+              </span>
+            </div>
+            {capturing === command.id && refusal && (
+              <p role="alert" className="pb-2 text-[0.8125rem] text-destructive">
+                {refusal}
+              </p>
+            )}
+            {feedback(command.id)}
+          </div>
+        );
+      })}
+      <p role="status" className="sr-only">
+        {announcement}
+      </p>
+    </section>
   );
 }
 

@@ -34,7 +34,8 @@ import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { formatDecimal, t } from "@mrstreamer/core/i18n";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
-import { hasModifier, isTyping } from "../../app/platform.ts";
+import { blocksPlayerShortcut, resolveShortcut } from "../../app/shortcuts.ts";
+import { currentPreferences } from "../../lib/preferences.ts";
 import { leaveTitle, openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -59,8 +60,8 @@ import {
   type TitlePlayerState,
   type TitleProblem,
 } from "../../player/title-player.ts";
-import { CloseMessage, pressesClose, useClosed, type Closable } from "../watch/CloseMessage.tsx";
-import { openDownloads, pressesDownloads } from "../downloads/DownloadsNotice.tsx";
+import { CloseMessage, useClosed, type Closable } from "../watch/CloseMessage.tsx";
+import { openDownloads } from "../downloads/DownloadsNotice.tsx";
 import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
@@ -178,67 +179,61 @@ export function TitleWatch() {
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
 
-      if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
-        return;
+      if (blocksPlayerShortcut(event)) return;
 
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.playingTitle) return;
       const current = latest.current;
       current.wake();
 
-      // The menu's own keys: Escape closes it, and focus goes back to its button. A message's
-      // cross takes Enter and Space, so Space closes it rather than playing the title again, and
-      // so does the bar's word on the downloads, which opens Downloads.
-      if (current.menu || pressesClose(event) || pressesDownloads(event)) return;
+      // The menu's own keys: Escape closes it, and focus goes back to its button.
+      if (current.menu) return;
 
-      switch (event.key) {
-        case " ":
-        case "k":
+      const command = resolveShortcut(event, "title", currentPreferences()?.keyboardShortcuts);
+
+      switch (command ?? event.key) {
+        case "pause":
           titlePlayer.togglePause();
           break;
-        case "ArrowLeft":
+        case "seekBack":
           titlePlayer.skip(-SKIP_S);
           break;
-        case "ArrowRight":
+        case "seekForward":
           titlePlayer.skip(SKIP_S);
           break;
-        case "ArrowUp":
-        case "ArrowDown":
-          if (!player.nudgeVolume(event.key === "ArrowUp" ? 0.05 : -0.05)) {
+        case "volumeUp":
+        case "volumeDown":
+          if (!player.nudgeVolume(command === "volumeUp" ? 0.05 : -0.05)) {
             flash(t("TV remote sets volume"));
           }
 
           break;
-        case "f":
+        case "fullscreen":
           if (miniPlayer.on()) void miniPlayer.leave(true);
           else current.toggleFullscreen();
           break;
-        case "p":
-        case "P":
+        case "miniPlayer":
           if (titlePlayer.onReceiver()) flash(t(MINI_NEEDS_PICTURE));
           else void miniPlayer.toggle();
           break;
-        case "o":
-        case "O":
+        case "output":
           // A copy plays here only.
           if (titlePlayer.state().now?.kind === "copy") return;
           void openChooser(() => setMenu("output"), view.signal);
           break;
-        case "m":
+        case "mute":
           if (!player.toggleMute()) flash(t("TV remote sets volume"));
           break;
-        case "c":
+        case "subtitles":
           titlePlayer.toggleSubtitles();
           break;
-        case "n":
+        case "nextEpisode":
           titlePlayer.playNext();
           break;
-        case "g":
-        case "G":
-        case "h":
-        case "H":
+        case "subtitlesEarlier":
+        case "subtitlesLater":
           if (titlePlayer.onReceiver()) flash(t("Subtitle timing plays here only"));
           else {
-            const direction = event.key.toLowerCase() === "g" ? -1 : 1;
+            const direction = command === "subtitlesEarlier" ? -1 : 1;
             const state = titlePlayer.state();
 
             if (state.downloadedOn && state.savedSubtitle) {
@@ -264,10 +259,10 @@ export function TitleWatch() {
           }
 
           break;
-        case "<":
-        case ">":
+        case "slower":
+        case "faster":
           if (titlePlayer.onReceiver()) flash(t("Speed plays here only"));
-          else stepSpeed(event.key === "<" ? -1 : 1);
+          else stepSpeed(command === "slower" ? -1 : 1);
           break;
         case "Escape":
           if (document.fullscreenElement) void document.exitFullscreen();
