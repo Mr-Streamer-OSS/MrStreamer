@@ -22,6 +22,7 @@ import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.ts
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
+import { findSettings } from "../../src/renderer/src/features/settings/catalogue.ts";
 import { SettingsPage } from "../../src/renderer/src/features/settings/SettingsPage.tsx";
 
 vi.mock(
@@ -219,7 +220,7 @@ it("remaps from Settings, refuses taken and reserved keys, keeps committed keys 
   });
   // A command this version doesn't know survives editing another one.
   ipc.prefer({ keyboardShortcuts: { future: ["x"] } });
-  useUi.setState({ settings: "playback", settingsTarget: null });
+  useUi.setState({ settings: "general", settingsTarget: null });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const stop = syncPreferences(client, () => {});
   const mounted = queryView(client);
@@ -232,6 +233,22 @@ it("remaps from Settings, refuses taken and reserved keys, keeps committed keys 
 
   await mounted.render(createElement(SettingsPage));
   const view = mounted.container;
+  const search = view.querySelector<HTMLInputElement>('[aria-label="Find a setting"]')!;
+  await act(async () => {
+    search.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      search,
+      "Keyboard shortcuts",
+    );
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    search.dispatchEvent(key("Enter"));
+  });
+  await vi.waitFor(() => {
+    expect(useUi.getState().settings).toBe("playback");
+    expect(document.activeElement?.closest('[data-setting="keyboard-shortcuts"]')).not.toBeNull();
+  });
 
   const mute = await vi.waitFor(() => {
     const button = view.querySelector<HTMLButtonElement>('[data-shortcut="mute"]');
@@ -257,6 +274,13 @@ it("remaps from Settings, refuses taken and reserved keys, keeps committed keys 
   expect(mute.textContent).toBe("Press a key");
   await press("c");
   expect(alert()?.textContent).toBe("C is used by Subtitles. Press another key.");
+  const chord = key("f", { ctrlKey: true });
+  await act(async () => {
+    mute.dispatchEvent(chord);
+  });
+  expect(chord.defaultPrevented).toBe(true);
+  expect(alert()?.textContent).toBe("That key is reserved. Press another key.");
+  expect(mute.textContent).toBe("Press a key");
   await press("7");
   expect(alert()?.textContent).toBe("That key is reserved. Press another key.");
   await press("Escape");
@@ -297,4 +321,14 @@ it("remaps from Settings, refuses taken and reserved keys, keeps committed keys 
   await vi.waitFor(() => expect(mute.getAttribute("aria-label")).toBe("Mute: M"));
   expect(document.activeElement).toBe(mute);
   expect(ipc.argsOf("preferences.update").at(-1)).toEqual({ keyboardShortcuts: { future: ["x"] } });
+});
+
+it("finds the keyboard reference in Settings search", () => {
+  expect(findSettings("Keyboard shortcuts")).toContainEqual(
+    expect.objectContaining({
+      id: "keyboard-shortcuts",
+      section: "playback",
+      label: "Keyboard shortcuts",
+    }),
+  );
 });

@@ -438,11 +438,12 @@ function KeyboardShortcuts() {
 
     if (event.key === "Tab") return stop();
 
-    // App and system chords keep working; only the refusal shows.
-    if (event.ctrlKey || event.metaKey || event.altKey)
-      return setRefusal(t("That key is reserved. Press another key."));
     event.preventDefault();
     event.stopPropagation();
+
+    // Refused app chords must not also act on the window while it is capturing a key.
+    if (event.ctrlKey || event.metaKey || event.altKey)
+      return setRefusal(t("That key is reserved. Press another key."));
 
     if (event.key === "Escape") return stop();
     const binding = shortcutBinding(event.nativeEvent);
