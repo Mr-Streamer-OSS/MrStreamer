@@ -584,6 +584,8 @@ export function CollectionMembership({
         <Menu.Portal>
           <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
             <Menu.Popup
+              // Creating replaces this menu with an autofocus field; keep its focus.
+              finalFocus={() => draft.current === null}
               aria-label={label}
               className={cn(
                 menuSurface,

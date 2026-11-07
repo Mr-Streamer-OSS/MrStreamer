@@ -665,6 +665,22 @@ describe("a title's collections menu in its details", () => {
 
   beforeEach(() => ipc.reset());
 
+  it("keeps the new collection name focused when its menu unmounts", async () => {
+    mainCollections([], [{ ...film, id: "4k" }]);
+    await details();
+    const trigger = await vi.waitFor(() => button("Add to collection"));
+    // The details initially focus Play. Pointer opening the menu leaves that return target.
+    await act(async () => button("Play").focus());
+    await act(async () => trigger.click());
+    const item = await vi.waitFor(() => button("New collection"));
+    await act(async () => item.click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(field()));
+    await type("Friday films", "Escape");
+    expect(document.querySelector("input[aria-label='Collection name']")).toBeNull();
+    expect(document.activeElement).toBe(button("Add to collection"));
+    expect(ipc.argsOf("collections.change")).toEqual([]);
+  });
+
   it("retains a refused operation after a fresh title read fails then recovers", async () => {
     mainCollections([{ name: "Weekend films", members: [] }], [{ ...film, id: "4k" }]);
     const client = await details();
