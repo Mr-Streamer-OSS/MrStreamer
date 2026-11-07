@@ -628,10 +628,11 @@ function make(deps: OnDemandDeps) {
 
       return {
         lists: found.map(({ subscription, worked }) => statusOf(subscription.id, worked)),
-        metadata:
-          tmdbKey && (policy._tag === "None" || policy.value.approved === null)
-            ? metadataProgress
-            : null,
+        metadata: !tmdbKey
+          ? null
+          : policy._tag === "Some" && policy.value.approved !== null
+            ? { known: 0, wanted: 0, refused: false, fetching: false }
+            : metadataProgress,
       } satisfies OnDemandStatus;
     });
 

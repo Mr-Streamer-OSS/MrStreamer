@@ -9,6 +9,7 @@ import { PlaybackCoordination } from "../src/main/services/playback-coordination
 import { analyticsFixture } from "./e2e/analytics-fixture.ts";
 import { Failed } from "@mrstreamer/core/failure";
 import type { FakeProviderOptions } from "./fake-provider.ts";
+import { startFakeTmdb } from "./fake-tmdb.ts";
 import { defined } from "@mrstreamer/core/defined";
 import { describe, expect, it, vi, onTestFinished } from "vitest";
 import * as Effect from "effect/Effect";
@@ -149,6 +150,7 @@ async function fixture(
     notifier?: Notifier;
     now?: number;
     titlesOf?: FakeProviderOptions["titlesOf"];
+    tmdb?: { readonly key: string; readonly api: string };
   } = {},
 ) {
   const dataDir = await tempDir();
@@ -157,7 +159,11 @@ async function fixture(
 
   const config = {
     ...testConfig(dataDir),
-    ...defined({ notifier: options.notifier }),
+    ...defined({
+      notifier: options.notifier,
+      tmdbKey: options.tmdb?.key,
+      tmdbApi: options.tmdb?.api,
+    }),
     profiles: {
       consent: { read: Effect.succeed(true), write: () => Effect.void },
       stopInteractive: () => stop(),
@@ -1148,4 +1154,68 @@ it("keeps household services available while a database open failure denies pers
   expect(await app.runPromise(recordings.list)).toEqual([]);
   const reminders = await app.runPromise(Reminders);
   expect(await app.runPromise(reminders.list)).toMatchObject({ reminders: [] });
+});
+
+it("keeps configured metadata available without exposing household progress to kids", async () => {
+  const tmdb = await startFakeTmdb();
+  onTestFinished(() => tmdb.close());
+  const f = await fixture({ tmdb: { key: "fake-key", api: tmdb.url } });
+  const progress = type({ metadata: { known: "number", wanted: "number" } });
+
+  await expect
+    .poll(async () => {
+      const result = await f.call(f.adult, "ondemand.status", undefined);
+
+      if (!result.ok) throw new Error("Adult metadata status was refused.");
+      const { metadata } = progress.assert(result.value);
+
+      return metadata.known > 0 && metadata.wanted > 0;
+    })
+    .toBe(true);
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [{ id: f.kid.id, approved: [] }],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+  expect(await f.call(kid, "ondemand.status", undefined)).toMatchObject({
+    ok: true,
+    value: { metadata: { known: 0, wanted: 0, refused: false, fetching: false } },
+  });
+  const adult = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  const result = await f.call(adult, "ondemand.status", undefined);
+
+  expect(result.ok).toBe(true);
+
+  if (result.ok) {
+    const { metadata } = progress.assert(result.value);
+
+    expect(metadata.known).toBeGreaterThan(0);
+    expect(metadata.wanted).toBeGreaterThan(0);
+  }
+});
+
+it("keeps metadata absent without a key for both adult and kids viewers", async () => {
+  const f = await fixture();
+
+  expect(await f.call(f.adult, "ondemand.status", undefined)).toMatchObject({
+    ok: true,
+    value: { metadata: null },
+  });
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [{ id: f.kid.id, approved: [] }],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+  expect(await f.call(kid, "ondemand.status", undefined)).toMatchObject({
+    ok: true,
+    value: { metadata: null },
+  });
 });
