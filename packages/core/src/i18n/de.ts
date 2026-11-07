@@ -1424,6 +1424,7 @@ export const de: Translation = {
   "Collection name": "Name der Sammlung",
   "Delete collection": "Sammlung löschen",
   "Add to collection": "Zur Sammlung hinzufügen",
+  "This title isn't available here.": "Dieser Titel ist hier nicht verfügbar.",
   "Collections for {name}": "Sammlungen für {name}",
   "In {count} collections": { one: "In {count} Sammlung", other: "In {count} Sammlungen" },
   "Not listed now": "Derzeit nicht gelistet",

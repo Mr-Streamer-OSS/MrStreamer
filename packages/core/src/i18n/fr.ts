@@ -1479,6 +1479,7 @@ export const fr: Translation = {
   "Collection name": "Nom de la collection",
   "Delete collection": "Supprimer la collection",
   "Add to collection": "Ajouter à une collection",
+  "This title isn't available here.": "Ce titre n’est pas disponible ici.",
   "Collections for {name}": "Collections pour {name}",
   "In {count} collections": {
     one: "Dans {count} collection",

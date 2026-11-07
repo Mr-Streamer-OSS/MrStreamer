@@ -17,7 +17,11 @@ export interface CollectionVisibility {
   readonly adult: boolean;
   readonly sources: readonly Pick<SavedSubscription, "id" | "key">[];
   readonly approved: "all" | readonly CollectionIdentity[];
-  /** Exact, ungrouped source rows. Filter before selecting labels or counting members. */
+  /**
+   * Successfully read, exact ungrouped source rows. Pending or failed reads must refuse the
+   * request upstream with a retryable failure, never supply an empty successful catalogue.
+   * Filter before selecting labels or counting members.
+   */
   readonly catalogue: readonly CollectionTitle[];
 }
 

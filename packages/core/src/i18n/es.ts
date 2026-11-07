@@ -1485,6 +1485,7 @@ export const es: Translation = {
   "Collection name": "Nombre de la colección",
   "Delete collection": "Eliminar colección",
   "Add to collection": "Añadir a una colección",
+  "This title isn't available here.": "Este título no está disponible aquí.",
   "Collections for {name}": "Colecciones para {name}",
   "In {count} collections": {
     one: "En {count} colección",

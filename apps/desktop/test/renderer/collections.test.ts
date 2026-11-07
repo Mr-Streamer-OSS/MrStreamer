@@ -6,6 +6,7 @@ import "./support.ts";
 import { act, createElement, useState } from "react";
 import { bareView } from "./mount.ts";
 import { afterEach, expect, it, vi } from "vitest";
+import { AppFailure } from "@mrstreamer/contracts/errors";
 import {
   collectionKey,
   type CollectionChange,
@@ -196,6 +197,33 @@ it("keeps a refused new collection's field and sends the same collection again",
     true,
   );
   expect(saved.lists()).toHaveLength(1);
+});
+
+it("explains an unavailable membership without offering an identical retry", async () => {
+  const view = bareView();
+  unmount = view.unmount;
+  await view.render(
+    createElement(CollectionMembership, {
+      title: { sourceId: "sub-a", kind: "movie", titleId: "41", name: "Kite Season", year: 2022 },
+      collections: [{ id: "one", name: "Weekend films", total: 0 }],
+      memberOf: new Set<string>(),
+      commit: async () => {
+        throw new AppFailure({ kind: "title-not-found", titleId: "41" });
+      },
+    }),
+  );
+  await act(async () => button("Add to collection").click());
+  await vi.waitFor(() => expect(document.querySelector("[role=menuitemcheckbox]")).toBeTruthy());
+  await act(async () => document.querySelector<HTMLElement>("[role=menuitemcheckbox]")!.click());
+  await vi.waitFor(() =>
+    expect(document.querySelector("[role=alert]")?.textContent).toContain(
+      "This title isn't available here.",
+    ),
+  );
+  expect(
+    [...document.querySelectorAll("button")].some((item) => item.textContent === "Retry"),
+  ).toBe(false);
+  expect(button("Close")).toBeTruthy();
 });
 
 it("ticks a title's collections by its exact source version and adds it to a new one", async () => {

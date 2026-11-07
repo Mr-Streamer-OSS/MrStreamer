@@ -1411,6 +1411,7 @@ export const nl: Translation = {
   "Collection name": "Naam van de collectie",
   "Delete collection": "Collectie verwijderen",
   "Add to collection": "Aan collectie toevoegen",
+  "This title isn't available here.": "Deze titel is hier niet beschikbaar.",
   "Collections for {name}": "Collecties voor {name}",
   "In {count} collections": { one: "In {count} collectie", other: "In {count} collecties" },
   "Not listed now": "Nu niet vermeld",

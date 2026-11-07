@@ -1381,6 +1381,7 @@ export const en = {
   "Collection name": "Collection name",
   "Delete collection": "Delete collection",
   "Add to collection": "Add to collection",
+  "This title isn't available here.": "This title isn't available here.",
   "Collections for {name}": "Collections for {name}",
   "In {count} collections": { one: "In {count} collection", other: "In {count} collections" },
   "Not listed now": "Not listed now",

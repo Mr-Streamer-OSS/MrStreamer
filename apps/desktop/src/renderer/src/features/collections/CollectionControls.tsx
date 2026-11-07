@@ -74,7 +74,12 @@ function useCommit(commit: CommitCollection) {
 
         setFailed(change);
         setProblem({
-          text: actionable ? describeError(typed) : t("Couldn't save."),
+          text:
+            typed.kind === "title-not-found"
+              ? t("This title isn't available here.")
+              : actionable
+                ? describeError(typed)
+                : t("Couldn't save."),
           retry: !actionable,
         });
       }
