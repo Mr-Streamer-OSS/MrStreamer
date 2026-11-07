@@ -436,11 +436,13 @@ function Approvals({
             state={channels}
             items={(channels.data ?? [])
               .slice(0, SHOWN)
-              .map((channel) =>
-                choice(
-                  { kind: "channel", subscriptionId: channel.subscriptionId, id: channel.id },
-                  channel.title,
-                  source(channel.subscriptionId),
+              .flatMap((channel) =>
+                channel.variants.map((variant) =>
+                  choice(
+                    { kind: "channel", subscriptionId: channel.subscriptionId, id: variant.id },
+                    channel.title,
+                    `${variant.name} · ${source(channel.subscriptionId)}`,
+                  ),
                 ),
               )}
           />
