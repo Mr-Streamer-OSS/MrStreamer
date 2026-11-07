@@ -896,7 +896,7 @@ async function bytesIn(folder: string) {
   return sizes.reduce((sum, size) => sum + size, 0);
 }
 
-/** The most bytes the files under `folder` took, sampled until `until` settles. */
+/** The most bytes under `folder`, sampled until `until` settles; rejects if `until` rejects. */
 async function mostIn(folder: string, until: Promise<unknown>) {
   let most = 0;
   let done = false;
@@ -910,6 +910,7 @@ async function mostIn(folder: string, until: Promise<unknown>) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 
+  await until;
   return most;
 }
 
