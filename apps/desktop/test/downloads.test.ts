@@ -8,7 +8,7 @@ import * as streams from "node:stream/promises";
 import * as files from "node:fs/promises";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { basename, join, sep } from "node:path";
 import { Writable } from "node:stream";
@@ -2909,9 +2909,10 @@ describe.skipIf(!hasTools)("the queue", () => {
   /**
    * A transfer paused while another copy of the app holds the database: the pause is written
    * down, the transfer stops and where it stopped can't be. Its partial file closes only once the
-   * lock is taken, so the lock meets that very write.
+   * lock is taken, so the lock meets that very write. New injected cases fail that write at
+   * SQLite instead; the production store preserves Failed advice and wraps other causes.
    */
-  async function pausedUnkept() {
+  async function pausedUnkept(settlement?: { cause: unknown; error: AppError }) {
     const closing = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<void>();
     let holding = true;
@@ -2955,15 +2956,39 @@ describe.skipIf(!hasTools)("the queue", () => {
     await written(started.dataDir, id, 200_000);
     const pausing = started.downloads.pause(id);
     await closing.promise;
-    const lock = new DatabaseSync(join(started.dataDir, "mrstreamer.db"));
-    lock.exec("begin exclusive");
-    closed.resolve();
 
-    try {
-      await expect(pausing).rejects.toMatchObject({ error: { kind: "unexpected" } });
-    } finally {
-      lock.exec("rollback");
-      lock.close();
+    if (settlement) {
+      // Fail this download's settlement write at SQLite, through the real store's attempt adapter.
+      const run = StatementSync.prototype.run;
+
+      const refusal = vi.spyOn(StatementSync.prototype, "run").mockImplementation(function (
+        this: StatementSync,
+        ...args
+      ) {
+        if (this.sourceSQL.startsWith("insert into downloads ") && args.at(0) === id)
+          throw settlement.cause;
+
+        return run.apply(this, args);
+      });
+
+      closed.resolve();
+
+      try {
+        await expect(pausing).rejects.toMatchObject({ error: settlement.error });
+      } finally {
+        refusal.mockRestore();
+      }
+    } else {
+      const lock = new DatabaseSync(join(started.dataDir, "mrstreamer.db"));
+      lock.exec("begin exclusive");
+      closed.resolve();
+
+      try {
+        await expect(pausing).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      } finally {
+        lock.exec("rollback");
+        lock.close();
+      }
     }
 
     return { ...started, film, id };
@@ -3279,6 +3304,56 @@ describe.skipIf(!hasTools)("the queue", () => {
     expect(provider.fileBytes() - sent).toBe(film.bytes.length - 200_000);
     expect(provider.mostFilesAtOnce()).toBe(1);
   }, 60_000);
+
+  it.each([
+    {
+      name: "Failed advice",
+      cause: new Failed({
+        error: {
+          kind: "keychain-refused",
+          connect: "snap connect mrstreamer:password-manager-service",
+        },
+      }),
+      error: {
+        kind: "keychain-refused",
+        connect: "snap connect mrstreamer:password-manager-service",
+      } satisfies AppError,
+    },
+    {
+      name: "ordinary Error",
+      cause: new Error("Settlement could not be saved"),
+      error: {
+        kind: "unexpected",
+        detail: "Error: Settlement could not be saved",
+      } satisfies AppError,
+    },
+    {
+      name: "primitive cause",
+      cause: "Settlement storage unavailable",
+      error: { kind: "unexpected", detail: "Settlement storage unavailable" } satisfies AppError,
+    },
+  ])(
+    "reports settlement $name and retries from the kept partial",
+    async ({ cause, error }) => {
+      const { provider, dataDir, downloads, find, film, id } = await pausedUnkept({ cause, error });
+      await vi.waitFor(() => expect(provider.activeStreams()).toBe(0), { timeout: 1000 });
+      expect((await find(id))?.status).toMatchObject({
+        kind: "failed",
+        failure: { kind: "app", error },
+      });
+      expect(await partial(dataDir, id)).toBe(200_000);
+      const sent = provider.fileBytes();
+      provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
+      await downloads.retry(id);
+      await vi.waitFor(async () => expect((await find(id))?.status.kind).toBe("complete"), {
+        timeout: LONG,
+      });
+      expect(digest(await copyOf(dataDir, id))).toBe(digest(film.bytes));
+      expect(provider.fileBytes() - sent).toBe(film.bytes.length - 200_000);
+      expect(provider.mostFilesAtOnce()).toBe(1);
+    },
+    60_000,
+  );
 
   it("keeps the pause of a transfer whose stopping point couldn't be written: the next start lists it paused", async () => {
     const { provider, dataDir, find, quit, film, id } = await pausedUnkept();
