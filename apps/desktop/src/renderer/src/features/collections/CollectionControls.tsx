@@ -32,6 +32,34 @@ export type CommitCollection = (change: CollectionChange) => Promise<void>;
 /** Keeps a menu's keys and clicks from the row or page behind its portal. */
 const keep = (event: SyntheticEvent) => event.stopPropagation();
 
+/** What a refused change says, and whether sending it again could store it. */
+export interface CollectionProblem {
+  readonly text: string;
+  readonly retry: boolean;
+}
+
+/** A refusal the viewer can act on says why and offers no Retry; any other offers Retry. */
+export function problemOf(cause: unknown): CollectionProblem {
+  // Failed is a main-process value; renderer adapters usually reject AppFailure.
+  const typed = failedWith(cause).error;
+
+  const actionable =
+    typed.kind === "list-name-taken" ||
+    typed.kind === "no-list" ||
+    typed.kind === "list-changed" ||
+    typed.kind === "title-not-found";
+
+  return {
+    text:
+      typed.kind === "title-not-found"
+        ? t("This title isn't available here.")
+        : actionable
+          ? describeError(typed)
+          : t("Couldn't save."),
+    retry: !actionable,
+  };
+}
+
 /**
  * One change at a time. `run` resolves whether it was stored; a refused one is kept as `failed`,
  * so the control that sent it can say so and send it again.
@@ -41,7 +69,7 @@ function useCommit(commit: CommitCollection) {
   const [failed, setFailed] = useState<CollectionChange | null>(null);
   const busy = useRef(false);
   const generation = useRef(0);
-  const [problem, setProblem] = useState<{ text: string; retry: boolean } | null>(null);
+  const [problem, setProblem] = useState<CollectionProblem | null>(null);
 
   const dismiss = () => {
     generation.current++;
@@ -63,25 +91,8 @@ function useCommit(commit: CommitCollection) {
       return true;
     } catch (cause) {
       if (turn === generation.current) {
-        // Failed is a main-process value; renderer adapters usually reject AppFailure.
-        const typed = failedWith(cause).error;
-
-        const actionable =
-          typed.kind === "list-name-taken" ||
-          typed.kind === "no-list" ||
-          typed.kind === "list-changed" ||
-          typed.kind === "title-not-found";
-
         setFailed(change);
-        setProblem({
-          text:
-            typed.kind === "title-not-found"
-              ? t("This title isn't available here.")
-              : actionable
-                ? describeError(typed)
-                : t("Couldn't save."),
-          retry: !actionable,
-        });
+        setProblem(problemOf(cause));
       }
 
       return false;

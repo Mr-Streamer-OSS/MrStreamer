@@ -1384,6 +1384,9 @@ export const en = {
   "This title isn't available here.": "This title isn't available here.",
   "Collections for {name}": "Collections for {name}",
   "In {count} collections": { one: "In {count} collection", other: "In {count} collections" },
+  "Remove from {name}": "Remove from {name}",
+  "Add movies and series to it from their details.":
+    "Add movies and series to it from their details.",
   "Not listed now": "Not listed now",
   "Not listed by {name} now": "Not listed by {name} now",
   "{count} channels are from a subscription that isn't saved.": {

@@ -1486,6 +1486,9 @@ export const fr: Translation = {
     many: "Dans {count} de collections",
     other: "Dans {count} collections",
   },
+  "Remove from {name}": "Retirer de {name}",
+  "Add movies and series to it from their details.":
+    "Ajoutez-y des films et des séries depuis leur fiche.",
   "Not listed now": "Plus proposées pour l'instant",
   "Not listed by {name} now": "Plus proposée par {name} pour l'instant",
   "{count} channels are from a subscription that isn't saved.": {

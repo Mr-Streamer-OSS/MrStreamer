@@ -1427,6 +1427,9 @@ export const de: Translation = {
   "This title isn't available here.": "Dieser Titel ist hier nicht verfügbar.",
   "Collections for {name}": "Sammlungen für {name}",
   "In {count} collections": { one: "In {count} Sammlung", other: "In {count} Sammlungen" },
+  "Remove from {name}": "Aus {name} entfernen",
+  "Add movies and series to it from their details.":
+    "Füge Filme und Serien aus ihren Details hinzu.",
   "Not listed now": "Derzeit nicht gelistet",
   "Not listed by {name} now": "Derzeit nicht bei {name} gelistet",
   "{count} channels are from a subscription that isn't saved.": {

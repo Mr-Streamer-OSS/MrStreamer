@@ -1492,6 +1492,8 @@ export const es: Translation = {
     many: "En {count} de colecciones",
     other: "En {count} colecciones",
   },
+  "Remove from {name}": "Quitar de {name}",
+  "Add movies and series to it from their details.": "Añade películas y series desde sus detalles.",
   "Not listed now": "Ya no figuran",
   "Not listed by {name} now": "{name} ya no lo ofrece",
   "{count} channels are from a subscription that isn't saved.": {

@@ -4,6 +4,7 @@ Every subscription's movies and series in one place, each film once, with detail
 
 - **Find.** For you, filters for quality and language, genres and streaming services.
 - **Watchlist.** **Save** keeps a movie or a whole series for later.
+- **Collections.** Your own named collections of movies and series, a title in as many as you like.
 - **Continue.** Continue watching and the next episode pick up where you stopped.
 - **One connection.** Opening a movie or episode stops the live channel first.
 
@@ -23,6 +24,7 @@ Tabs under the top bar:
 - **4K** lists titles with a 4K version, when your provider has any, and plays that version.
 - **Adults** lists the titles your provider marks for adults, once you turn on **For adults** in Settings > Movies and series.
 - **All movies** and **All series** list everything, sorted by date added, popularity, rating or name.
+- **Collections** has your own [collections](#collections), movies and series together, on both Movies and Series.
 
 A row's **All**, a genre or a service opens the whole list; **Back**, or Escape, returns to the tab. In a list, the arrow keys move through the posters and Enter opens one. Page Up and Page Down move by a screen; Home and End go to the ends. Tab stops once in the list, on the selected poster, and closing its details returns keyboard focus there while the poster is still listed. The pointer only hovers; clicking a poster selects and opens it.
 
@@ -79,6 +81,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 - The arrow beside **Play** shows when there are several versions, each named for what you hear and read, such as "English sound, Nederlands subtitles" or "Deutsch sound · 4K", from the marks in your provider's list and the language the title was made in; the line under the buttons says which one plays, and **Automatic** shows which it picks. **Automatic** plays the 4K version of a title opened from the 4K tab, carries on in the version you were watching, or else plays the one that suits your language. Pick another and that title plays it from then on, from Home and the lists too, and a series lists its episodes. Opening from the 4K tab or a filtered grid first picks that grid's matching version instead; the menu still lets you change it. How far you got carries over within one subscription. When several subscriptions offer the title, each version also says which subscription it is from, and one from another subscription starts from the beginning: see [picking which subscription plays a title](subscriptions.md#picking-which-subscription-plays-a-title). A pick goes when you remove its subscription.
 - A series opens on the season you're watching. Each episode shows its name, air date, length and story, and once TMDB answers for that season, its rating, director and guest stars where TMDB has them. Other seasons ask TMDB nothing until you open their tab. Watched episodes have a check mark, and one you stopped in shows how far you got. Click an episode to play it. The three dots at the end of its row [mark it watched or unwatched](#marking-episodes).
 - **Save** puts the movie, or the whole series, on your [watchlist](#watchlist). The button then reads **Saved**, and pressing it again takes the title off.
+- **Add to collection** beside it opens your [collections](#collections), ticked where they hold the version that plays. Tick or untick one to add or remove it, or **New collection** to make one with the title in it. The button then reads **In 2 collections**.
 - **Remove from Continue watching** takes the title off Home's row, every version of it, and the button goes. How far you got stays, so **Resume** carries on. The title comes back to the row when you play it again.
 
 **Also in your subscriptions** lists related titles from your subscriptions' catalogues, excluding adult titles. Its posters open their details in place of these. **Back** in the top bar returns through up to eight previous details, restoring the season and scroll position, with keyboard focus on the related poster when it is still listed. From the first it returns to the page. **Close** or Escape returns to the page at once. Playing a title or opening Settings from the details keeps the way back. Opening a title from a page or search starts a new one. The top bar remains usable in details, including Back, Search and Settings.
@@ -125,6 +128,20 @@ When no provider lists a saved title any more, it stays on the watchlist, dimmed
 Saved titles for adults show, and count, only while **For adults** is on in Settings > Movies and series. They stay saved while it is off.
 
 The watchlist is kept on your computer, with the subscription each title was saved from, like favourites. **Remove**, on a subscription in Settings > Subscriptions, keeps what it saved for when you add the same account again, unless you tick the box that deletes it. A title you saved from another subscription as well stays on the list.
+
+## Collections
+
+_Named collections of movies and series, beside the watchlist._
+
+Collections are lists you name and keep, such as Family night or Weekend films. They are not the watchlist: **Save** still keeps a title for later, and a title can be saved and in several collections at once.
+
+**Collections**, the last tab on Movies and on Series, lists your collections with how many titles each has, and opens the one you pick beside them. **New collection** names a new one. A collection's **⋯** has **Rename**, **Move up**, **Move down** and **Delete collection**, which asks first; deleting a collection leaves its titles in every other collection and on the watchlist. Every control is a button or a menu, so Tab, Enter, Space and the arrow keys reach all of it.
+
+An open collection shows its titles in the order you added them, as posters. A poster opens the details of the version that was added. The arrow keys move through the posters and Enter opens one; Tab reaches the poster they are on, then the ring in its corner, which selects it. Once something is selected the bar above the posters says how many, **Add to collection** puts them in another collection, **Remove from** takes them out of this one, and **Done** clears the selection.
+
+A collection holds the exact version you added, from the subscription you added it from. Another version of the same film, such as its 4K one, or the same film from another subscription, is a separate entry, and two titles that share a name stay two. A title keeps its place when your provider renames it. When no provider lists it any more it stays, dimmed and marked **Unavailable**: press it to select it, then **Remove from** takes it out. It can't be added to another collection until a provider lists it again.
+
+Each profile has its own collections, kept on your computer across restarts; another profile never sees them or their counts, and deleting a profile deletes its collections. Titles a profile may not open are left out of its collections and their counts: a kids profile sees only its approved titles, and titles for adults show only while **For adults** is on. Unavailable titles show only on a profile that isn't a kids profile, while **For adults** is on, since a title the lists no longer have can't be checked. If your collections can't be read, the page and the details say so with **Try again**, and show nothing as empty in their place.
 
 ## Watching
 

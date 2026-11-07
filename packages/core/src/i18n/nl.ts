@@ -1414,6 +1414,9 @@ export const nl: Translation = {
   "This title isn't available here.": "Deze titel is hier niet beschikbaar.",
   "Collections for {name}": "Collecties voor {name}",
   "In {count} collections": { one: "In {count} collectie", other: "In {count} collecties" },
+  "Remove from {name}": "Verwijderen uit {name}",
+  "Add movies and series to it from their details.":
+    "Voeg er films en series aan toe vanuit hun details.",
   "Not listed now": "Nu niet vermeld",
   "Not listed by {name} now": "Nu niet vermeld door {name}",
   "{count} channels are from a subscription that isn't saved.": {
