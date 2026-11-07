@@ -99,15 +99,18 @@ export function comparePending(a: PendingCapture, b: PendingCapture): number {
   );
 }
 
+/** A connection held now, on the source `channel` names, through `until`. */
+export interface Holding {
+  readonly channel: string;
+  readonly until: number;
+  readonly holder: ConnectionHolder;
+}
+
 /** Forecast bounded pending work at starts/releases, sharing a channel's connection. Watch and
- * downloads have no known end, so callers retain them through the forecast horizon. */
+ * downloads have no known end, so callers hold them with an `until` of Infinity. */
 export function forecastCapacity(
   pending: readonly PendingCapture[],
-  protectedUses: readonly {
-    readonly channel: string;
-    readonly until: number;
-    readonly holder: ConnectionHolder;
-  }[],
+  protectedUses: readonly Holding[],
   limit: number,
   now: number,
 ): ReadonlyMap<string, RecordingCapacity> {

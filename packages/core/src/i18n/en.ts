@@ -1661,8 +1661,6 @@ export const en = {
   "Connection free": "Connection free",
   "From {time}, after {holders}": "From {time}, after {holders}",
   "From {time}": "From {time}",
-  "Won't record: {holders}": "Won't record: {holders}",
-  "Won't record": "Won't record",
   "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
     one: "{count} airing clashes. Higher priority goes first, and nothing already running is stopped.",
     other:

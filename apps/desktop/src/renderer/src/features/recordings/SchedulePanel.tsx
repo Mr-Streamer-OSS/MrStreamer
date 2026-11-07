@@ -939,7 +939,8 @@ function rankText(priority: number, others: readonly RecordingRule[]): string {
 
 /**
  * How an airing's padded time stands for a connection, as main forecasts it from the connections
- * this app knows: free, from a later time once one frees up, or not at all, with what holds them.
+ * this app knows: free, from a later time once one frees up, or every one in use, with what holds
+ * them.
  */
 function capacityText({ kind, start, holders }: RecordingCapacity): string {
   const by = holdersText(holders);
@@ -954,7 +955,10 @@ function capacityText({ kind, start, holders }: RecordingCapacity): string {
       : t("From {time}", { time });
   }
 
-  return by ? t("Won't record: {holders}", { holders: by }) : t("Won't record");
+  // Missed is only as things stand: what plays now counts as holding its connection until stopped.
+  return by
+    ? t("Every connection is in use then, by {holders}.", { holders: by })
+    : t("Every connection is in use then.");
 }
 
 /**

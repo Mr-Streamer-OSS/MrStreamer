@@ -88,6 +88,7 @@ import { CaptureFailure, startCapture, type CaptureEnd } from "../recordings/cap
 import {
   comparePending,
   forecastCapacity,
+  type Holding,
   type PendingCapture,
   nextOccurrence,
   occurrences,
@@ -1844,17 +1845,24 @@ function make(deps: RecordingsDeps) {
     const priorityOf = (id: string) =>
       rules?.find((rule) => rule.id === ruleOf(id))?.plan.priority ?? RECORDING_PRIORITY_DEFAULT;
 
-    const pendingOf = (schedule: KeptSchedule, occurrence: Occurrence): PendingCapture => ({
+    /** A schedule's occurrence in the priority queue; a previewed one brings its own priority. */
+    const pendingOf = (
+      schedule: KeptSchedule & { readonly priority?: number },
+      occurrence: Occurrence,
+    ): PendingCapture => ({
       ...occurrence,
       id: schedule.id,
       channel: ownedKey(schedule.plan.channel),
       title: schedule.plan.title,
-      priority: priorityOf(schedule.id),
+      priority: schedule.priority ?? priorityOf(schedule.id),
       created: schedule.created,
     });
 
     /** Keep current owners protected; only unstarted occurrences enter the priority queue. */
-    const capacityOf = (kept: readonly (KeptSchedule & { priority?: number })[], now: number) =>
+    const capacityOf = (
+      kept: readonly (KeptSchedule & { readonly priority?: number })[],
+      now: number,
+    ) =>
       Effect.gen(function* () {
         const result = new Map<string, RecordingCapacity>();
 
@@ -1878,27 +1886,10 @@ function make(deps: RecordingsDeps) {
               .map((occurrence, i) => ({
                 ...pendingOf(each, occurrence),
                 id: i === 0 ? each.id : occurrenceKey(each.id, occurrence),
-                priority: each.priority ?? priorityOf(each.id),
               }));
           });
 
-          const protectedUses = [...active.entries()].flatMap(([id, capture]) => {
-            const record = records.get(id);
-
-            return record?.channel.subscriptionId === subscriptionId
-              ? [
-                  {
-                    channel: capture.key ?? `recording:${id}`,
-                    until: record.stop,
-                    holder: {
-                      kind: "recording",
-                      title: record.title,
-                      until: record.stop,
-                    } as ConnectionHolder,
-                  },
-                ]
-              : [];
-          });
+          const protectedUses: Holding[] = recordingHoldings(subscriptionId);
 
           const uses = yield* coordination.uses(subscriptionId);
           // Match current source keys, not just channel IDs: a replaced login or a different
@@ -1982,12 +1973,19 @@ function make(deps: RecordingsDeps) {
         return result;
       });
 
+    /** What each of the subscription's captures holds now: the source it reads, until it ends. */
     const recordingHoldings = (subscriptionId: string) =>
-      [...active.keys()].flatMap((id) => {
+      [...active.entries()].flatMap(([id, capture]) => {
         const record = records.get(id);
 
         return record?.channel.subscriptionId === subscriptionId
-          ? [{ holder: { kind: "recording", title: record.title, until: record.stop } as const }]
+          ? [
+              {
+                channel: capture.key ?? `recording:${id}`,
+                until: record.stop,
+                holder: { kind: "recording", title: record.title, until: record.stop } as const,
+              },
+            ]
           : [];
       });
 

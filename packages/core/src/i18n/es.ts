@@ -1770,8 +1770,6 @@ export const es: Translation = {
   "Connection free": "Conexión libre",
   "From {time}, after {holders}": "Desde las {time}, después de {holders}",
   "From {time}": "Desde las {time}",
-  "Won't record: {holders}": "No se grabará: {holders}",
-  "Won't record": "No se grabará",
   "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
     one: "{count} emisión coincide con otra. La prioridad más alta va primero, y no se detiene nada de lo que ya está en marcha.",
     many: "{count} de emisiones coinciden con otras. La prioridad más alta va primero, y no se detiene nada de lo que ya está en marcha.",

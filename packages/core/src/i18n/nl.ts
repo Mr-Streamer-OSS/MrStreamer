@@ -1697,8 +1697,6 @@ export const nl: Translation = {
   "Connection free": "Verbinding vrij",
   "From {time}, after {holders}": "Vanaf {time}, na {holders}",
   "From {time}": "Vanaf {time}",
-  "Won't record: {holders}": "Wordt niet opgenomen: {holders}",
-  "Won't record": "Wordt niet opgenomen",
   "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
     one: "{count} uitzending botst. Hogere prioriteit gaat voor, en wat al loopt, wordt niet gestopt.",
     other:

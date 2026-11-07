@@ -1713,8 +1713,6 @@ export const de: Translation = {
   "Connection free": "Verbindung frei",
   "From {time}, after {holders}": "Ab {time}, nach {holders}",
   "From {time}": "Ab {time}",
-  "Won't record: {holders}": "Wird nicht aufgenommen: {holders}",
-  "Won't record": "Wird nicht aufgenommen",
   "{count} airings clash. Higher priority goes first, and nothing already running is stopped.": {
     one: "{count} Ausstrahlung überschneidet sich. Höhere Priorität geht vor, und nichts, was schon läuft, wird gestoppt.",
     other:
