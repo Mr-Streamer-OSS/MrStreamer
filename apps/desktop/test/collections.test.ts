@@ -424,3 +424,20 @@ describe("personal collections", () => {
     expect(await reply).toEqual({ total: 1, members: [{ ...movie, available: true }] });
   });
 });
+
+it("does not resurrect collection members after an older build erases their viewing anchor", async () => {
+  const { open } = fixture();
+  const first = await open();
+  // Model the viewing record kept by released builds, which erase all account events.
+  first.db.exec(
+    "create table events (sequence integer primary key autoincrement, account text, type text, version integer, channel_id text, at integer, command_id text)",
+  );
+  await seed(first.service, first.context);
+  first.db.prepare("delete from events where account = ?").run("account-a");
+  await first.close();
+  const reopened = await open();
+  expect(await run(reopened.service.page(reopened.context, "one"))).toMatchObject({
+    total: 1,
+    members: [{ sourceId: "source-b" }],
+  });
+});

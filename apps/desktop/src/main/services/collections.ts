@@ -1,3 +1,16 @@
+import { defined } from "@mrstreamer/core/defined";
+import * as Exit from "effect/Exit";
+import * as Context from "effect/Context";
+import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
+import { ViewingErasure } from "@mrstreamer/core/viewing/service";
+import { CollectionsStore } from "../platform/collections-store.ts";
+import { AdmittedSettings, Settings } from "./preferences.ts";
+import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
+import { Subscriptions } from "./subscription.ts";
+import { OnDemand } from "./ondemand.ts";
+import type { Title } from "@mrstreamer/contracts/ondemand";
 import * as Effect from "effect/Effect";
 import { Failed } from "@mrstreamer/core/failure";
 import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
@@ -9,7 +22,7 @@ import {
   type CollectionTitle,
 } from "@mrstreamer/contracts/collections";
 import type { SavedSubscription } from "./subscription.ts";
-import type { CollectionsStore, StoredTitle } from "../platform/collections-store.ts";
+import type { StoredTitle } from "../platform/collections-store.ts";
 
 /** Main-process captured policy only. An empty approval list denies every member. */
 export interface CollectionVisibility {
@@ -22,7 +35,7 @@ export interface CollectionVisibility {
    * request upstream with a retryable failure, never supply an empty successful catalogue.
    * Filter before selecting labels or counting members.
    */
-  readonly catalogue: readonly CollectionTitle[];
+  readonly catalogue: readonly (CollectionTitle & { readonly title?: Title })[];
 }
 
 /**
@@ -69,6 +82,7 @@ export function makeCollections(
           name: title.name,
           year: title.year,
           adult: title.adult !== false,
+          ...defined({ title: title.title }),
         },
       ]),
     );
@@ -201,4 +215,216 @@ export function makeCollections(
         } else yield* store.change(command, current);
       }),
   };
+}
+
+/** Durable policy guard captured by the public handler, never resolved from the active profile. */
+export class CollectionCurrent extends Context.Service<
+  CollectionCurrent,
+  { readonly check: Effect.Effect<void, Failed> }
+>()("mrstreamer/CollectionCurrent") {}
+
+/** Public personal collections. Requires the real admitted context, including for adult requests. */
+export class Collections extends Context.Service<
+  Collections,
+  {
+    readonly list: Effect.Effect<
+      readonly { readonly id: string; readonly name: string; readonly total: number }[],
+      Failed
+    >;
+    readonly page: (
+      id: string,
+      offset: number,
+      limit: number,
+    ) => Effect.Effect<CollectionPage, Failed>;
+    readonly memberships: (title: CollectionIdentity) => Effect.Effect<readonly string[], Failed>;
+    readonly change: (change: CollectionChange) => Effect.Effect<void, Failed>;
+    readonly profileChanges: Stream.Stream<ActiveProfile>;
+  }
+>()("mrstreamer/Collections") {
+  static readonly layer = Layer.effect(
+    Collections,
+    Effect.gen(function* () {
+      const store = yield* CollectionsStore;
+      const subscriptions = yield* Subscriptions;
+      const onDemand = yield* OnDemand;
+      const settings = yield* Settings;
+      const changes = yield* PubSub.unbounded<ActiveProfile>();
+
+      const unavailable = () =>
+        new Failed({
+          error: {
+            kind: "unexpected",
+            detail: "Collection catalogue is unavailable; retry the request.",
+          },
+        });
+
+      const request = (extra: readonly CollectionIdentity[] = []) =>
+        Effect.gen(function* () {
+          const policy = yield* Effect.serviceOption(CollectionCurrent);
+
+          if (policy._tag === "None") return yield* unavailable();
+          yield* policy.value.check;
+          const admission = yield* Effect.serviceOption(AdmittedSettings);
+          const kids = yield* Effect.serviceOption(AdmittedKids);
+          const erasure = yield* Effect.serviceOption(ViewingErasure);
+
+          if (admission._tag === "None" || kids._tag === "None" || erasure._tag === "None")
+            return yield* unavailable();
+          const { owner, current } = admission.value;
+          const approved = kids.value.approved;
+          const sources = yield* subscriptions.saved;
+
+          const stands = () =>
+            current() &&
+            // The admitted policy read is synchronous. Recheck it inside the SQLite write
+            // transaction too, under the existing profile permit, after suspended catalogue work.
+            Exit.isSuccess(Effect.runSyncExit(policy.value.check)) &&
+            sources.every(
+              (source) => subscriptions.standsNow(source) && erasure.value.current(source.key),
+            );
+
+          if (!stands()) return yield* unavailable();
+          const saved = yield* store.read;
+
+          const identities = [
+            ...extra,
+            ...saved.flatMap((list) =>
+              list.members.flatMap((member) => {
+                const source = sources.find((source) => source.key === member.account);
+
+                return source
+                  ? [{ sourceId: source.id, kind: member.kind, titleId: member.titleId }]
+                  : [];
+              }),
+            ),
+          ];
+
+          const permitted = identities.filter((identity) =>
+            allowsApproval(approved, {
+              kind: identity.kind,
+              subscriptionId: identity.sourceId,
+              id: identity.titleId,
+            }),
+          );
+
+          const adult = approved === null && ((yield* settings.get).adultTitles ?? false);
+          const catalogue: (CollectionTitle & { readonly title: Title })[] = [];
+          // Resolve each exact saved version separately. The existing catalogue admission filters
+          // before grouping and artwork; a sibling version must never become this member's primary.
+          const statuses = yield* onDemand.status;
+
+          for (const identity of new Map(
+            permitted.map((item) => [collectionKey(item), item]),
+          ).values()) {
+            const status = statuses.lists.find(
+              (status) => status.subscriptionId === identity.sourceId,
+            );
+
+            if (!status || status.fetchedAt === null || status.failure) return yield* unavailable();
+
+            const titles = yield* onDemand
+              .titles(identity.kind, [{ subscriptionId: identity.sourceId, id: identity.titleId }])
+              .pipe(
+                Effect.provideService(AdmittedKids, {
+                  approved: [
+                    {
+                      kind: identity.kind,
+                      subscriptionId: identity.sourceId,
+                      id: identity.titleId,
+                    },
+                  ],
+                }),
+              );
+
+            let title = titles.find(
+              (title) =>
+                title.id === identity.titleId && title.subscriptionId === identity.sourceId,
+            );
+
+            // Exact adult rows stand alone in the unrestricted catalogue. Only a genuinely
+            // admitted adult with adult titles enabled may read these otherwise filtered facts.
+            if (!title && adult) {
+              const unrestricted = yield* onDemand.titles(identity.kind, [
+                { subscriptionId: identity.sourceId, id: identity.titleId },
+              ]);
+
+              title = unrestricted.find(
+                (title) =>
+                  title.adult &&
+                  title.id === identity.titleId &&
+                  title.subscriptionId === identity.sourceId,
+              );
+            }
+
+            if (title)
+              catalogue.push({
+                ...identity,
+                name: title.title,
+                year: title.year,
+                adult: title.adult,
+                title,
+              });
+          }
+
+          if (!stands()) return yield* unavailable();
+
+          const visibility: CollectionVisibility = {
+            owner,
+            sources,
+            adult,
+            // An omitted row can be newly adult as well as unavailable. Without permission to
+            // read adult facts, no saved label or count can stand in for current admission.
+            approved: adult ? "all" : catalogue,
+            catalogue,
+          };
+
+          yield* policy.value.check;
+
+          return { module: makeCollections(store, owner, stands), visibility, owner };
+        });
+
+      return {
+        list: Effect.flatMap(request(), ({ module, visibility }) => module.list(visibility)),
+        page: (id, offset, limit) =>
+          Effect.flatMap(request(), ({ module, visibility }) =>
+            module.page(visibility, id, offset, limit),
+          ),
+        memberships: (title) =>
+          Effect.gen(function* () {
+            const { module, visibility } = yield* request([title]);
+            const lists = yield* module.list(visibility);
+            const ids: string[] = [];
+
+            for (const list of lists) {
+              for (let offset = 0; offset < list.total; offset += 200) {
+                const page = yield* module.page(visibility, list.id, offset, 200);
+
+                if (page.members.some((member) => collectionKey(member) === collectionKey(title))) {
+                  ids.push(list.id);
+                  break;
+                }
+              }
+            }
+
+            return ids;
+          }),
+        change: (input) =>
+          Effect.gen(function* () {
+            const change = structuredClone(input);
+
+            const extra =
+              change.kind === "member"
+                ? [change.title]
+                : change.kind === "order-members"
+                  ? change.titles
+                  : [];
+
+            const { module, visibility, owner } = yield* request(extra);
+            yield* module.change(visibility, change);
+            yield* PubSub.publish(changes, owner);
+          }),
+        profileChanges: Stream.fromPubSub(changes),
+      } satisfies Collections["Service"];
+    }),
+  );
 }

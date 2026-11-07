@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { EVENT_VERSION } from "@mrstreamer/core/viewing/record";
 import type { DatabaseSync } from "node:sqlite";
 import { TITLE_KINDS } from "@mrstreamer/contracts/ondemand";
 import { type } from "arktype";
@@ -46,7 +48,7 @@ const storedKey = (title: StoredIdentity) => collectionKey({ ...title, sourceId:
 export class CollectionsStore extends Context.Service<
   CollectionsStore,
   {
-    /** Compose with ViewingErasure only after admitted source erasure is integrated. */
+    /** Erased under the captured profile drain alongside its viewing record. */
     readonly erase: (account: string) => Effect.Effect<void, Failed>;
     readonly read: Effect.Effect<readonly StoredCollection[], Failed>;
     readonly change: (
@@ -93,6 +95,7 @@ export const collectionsStoreLayer: Layer.Layer<CollectionsStore, never, Databas
 
 function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
   db.exec(`
+    create table if not exists collection_accounts (account text primary key, anchor integer not null);
     create table if not exists collection_receipts (id text primary key);
     create table if not exists personal_collections (id text primary key, name text not null, position integer not null);
     create table if not exists collection_members (
@@ -101,6 +104,58 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
       primary key (collection_id, account, kind, title_id)
     );
   `);
+
+  const hasEvents = () =>
+    !!db.prepare("select 1 from sqlite_master where type = 'table' and name = 'events'").get();
+
+  const anchor = (account: string) => {
+    // Standalone stores can precede the viewing record's initialization. The next read adopts
+    // their members once that existing record exists; production stores share its connection.
+    if (
+      !hasEvents() ||
+      db.prepare("select 1 from collection_accounts where account = ?").get(account)
+    )
+      return;
+
+    const sequence = db
+      .prepare(
+        "insert into events (account, type, version, channel_id, at, command_id) values (?, 'collection-anchor', ?, '', ?, ?)",
+      )
+      .run(account, EVENT_VERSION, Date.now(), randomUUID()).lastInsertRowid;
+
+    db.prepare("insert into collection_accounts values (?, ?)").run(account, sequence);
+  };
+
+  const reconcile = () => {
+    if (!hasEvents()) return;
+
+    const erased = db
+      .prepare(
+        "select account from collection_accounts as kept where not exists (select 1 from events where events.sequence = kept.anchor and events.account = kept.account and events.type = 'collection-anchor')",
+      )
+      .all();
+
+    if (erased.length) db.exec("pragma secure_delete = on");
+
+    try {
+      transaction(db, () => {
+        for (const row of erased) {
+          const account = type("string").assert(row.account);
+          db.prepare("delete from collection_members where account = ?").run(account);
+          db.prepare("delete from collection_accounts where account = ?").run(account);
+        }
+
+        for (const row of db.prepare("select distinct account from collection_members").all())
+          anchor(type("string").assert(row.account));
+      });
+    } finally {
+      if (erased.length) db.exec("pragma secure_delete = off");
+    }
+
+    if (erased.length) db.exec("pragma wal_checkpoint(truncate)");
+  };
+
+  reconcile();
 
   const lists = db.prepare("select id, name from personal_collections order by position, rowid");
 
@@ -123,15 +178,20 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
     });
 
   return {
-    read: attempt(read),
+    read: attempt(() => {
+      reconcile();
+
+      return read();
+    }),
     erase: (account) =>
       attempt(() => {
         db.exec("pragma secure_delete = on");
 
         try {
-          transaction(db, () =>
-            db.prepare("delete from collection_members where account = ?").run(account),
-          );
+          transaction(db, () => {
+            db.prepare("delete from collection_members where account = ?").run(account);
+            db.prepare("delete from collection_accounts where account = ?").run(account);
+          });
         } finally {
           db.exec("pragma secure_delete = off");
         }
@@ -220,7 +280,8 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
               if (!title.account || !title.titleId || !TITLE_KINDS.includes(title.kind))
                 throw new Error("Invalid title identity.");
 
-              if (change.present)
+              if (change.present) {
+                anchor(title.account);
                 db.prepare(
                   `insert into collection_members values (?, ?, ?, ?, ?, ?, ?, ?)
             on conflict(collection_id, account, kind, title_id) do update set name = excluded.name, year = excluded.year, adult = excluded.adult`,
@@ -240,7 +301,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
                   ),
                   title.adult === false ? 0 : 1,
                 );
-              else
+              } else
                 db.prepare(
                   "delete from collection_members where collection_id = ? and account = ? and kind = ? and title_id = ?",
                 ).run(change.id, title.account, title.kind, title.titleId);

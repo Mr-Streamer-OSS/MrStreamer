@@ -1,6 +1,9 @@
 // Composition root: creates the window and wires the services to IPC.
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
+import { collectionsHandlers } from "./handlers/collections.ts";
+import { Collections } from "./services/collections.ts";
+
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import {
@@ -690,6 +693,7 @@ async function start(): Promise<void> {
     viewing,
     watchlist,
     customLists,
+    collections,
     diagnostics,
     licences,
     downloads,
@@ -713,6 +717,7 @@ async function start(): Promise<void> {
       viewing: ViewingRecord,
       watchlist: Watchlist,
       customLists: CustomLists,
+      collections: Collections,
       diagnostics: Diagnostics,
       licences: Licences,
       downloads: Downloads,
@@ -1087,6 +1092,9 @@ async function start(): Promise<void> {
           if (legacy) emit(mainWindow.webContents, "watchlist.changed", null);
         }
 
+        if (change.kind === "collections" || change.kind === "erased")
+          emit(mainWindow.webContents, "collections.changed", { owner });
+
         if (change.kind === "lists" || change.kind === "erased") {
           emit(mainWindow.webContents, "profiles.listsChanged", { owner });
 
@@ -1345,6 +1353,17 @@ async function start(): Promise<void> {
       }),
       ...viewingHandlers({ viewing, settings }),
       ...customListHandlers({ customLists }),
+      ...collectionsHandlers({
+        collections,
+        current: Effect.fail(
+          new Failed({
+            error: {
+              kind: "unexpected",
+              detail: "Collection admission is required; retry the request.",
+            },
+          }),
+        ),
+      }),
       ...downloadHandlers({
         chooseFolder: async (current) => {
           const options: Electron.OpenDialogOptions = {
@@ -1462,6 +1481,7 @@ async function start(): Promise<void> {
           }),
           ...viewingHandlers({ viewing: scoped.viewing, settings: scoped.settings }),
           ...customListHandlers({ customLists: scoped.lists }),
+          ...collectionsHandlers({ collections: scoped.collections, current: admission.current }),
           ...playbackHandlers({
             playback,
             coordination,

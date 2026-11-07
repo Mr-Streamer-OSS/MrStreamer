@@ -1,3 +1,4 @@
+import { collectionsHandlers } from "../src/main/handlers/collections.ts";
 import { type } from "arktype";
 import { playbackHandlers } from "../src/main/handlers/playback.ts";
 import { outputHandlers } from "../src/main/handlers/output.ts";
@@ -216,6 +217,10 @@ async function fixture(
   const updates = await app.runPromise(Updates);
 
   const base: Partial<IpcHandlers> = {
+    ...collectionsHandlers({
+      collections: personal.services.collections,
+      current: personal.current,
+    }),
     ...updateHandlers({ updates, storeReview: null }),
     ...lifecycle,
     ...playbackHandlers({
@@ -264,6 +269,10 @@ async function fixture(
   registerIpc(app.runPromiseExit, base as IpcHandlers, () => true, {
     admit: sessions.admitFor,
     handlers: (admitted) => ({
+      ...collectionsHandlers({
+        collections: admitted.services.collections,
+        current: admitted.current,
+      }),
       ...playbackHandlers({
         playback,
         coordination,
@@ -1154,6 +1163,417 @@ it("keeps household services available while a database open failure denies pers
   expect(await app.runPromise(recordings.list)).toEqual([]);
   const reminders = await app.runPromise(Reminders);
   expect(await app.runPromise(reminders.list)).toMatchObject({ reminders: [] });
+});
+
+it("keeps collection memberships exact and filters restricted versions before labels, artwork, counts and pages", async () => {
+  const f = await fixture({
+    titlesOf: (built) => {
+      const base = built.movies.find((item) => !item.adult)!;
+
+      return {
+        ...built,
+        movies: [
+          { ...base, id: 90001, name: "Restricted primary", tmdb: "500" },
+          { ...base, id: 90002, name: "Approved version", tmdb: "500" },
+          { ...base, id: 90003, name: "Approved later", tmdb: "501" },
+          { ...base, id: 90011, name: "Adult secret", adult: true, tmdb: "502" },
+        ],
+      };
+    },
+  });
+
+  const unprotected = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(
+    await f.call(unprotected, "collections.change", { kind: "create", id: "one", name: "Films" }),
+  ).toMatchObject({ ok: true });
+
+  const title = (titleId: string) => ({
+    sourceId: f.source.id,
+    kind: "movie" as const,
+    titleId,
+    name: "Forged label",
+    year: null,
+    adult: false,
+  });
+
+  for (const titleId of ["90001", "90002", "90003"])
+    expect(
+      await f.call(unprotected, "collections.change", {
+        kind: "member",
+        id: "one",
+        title: title(titleId),
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  const adult = await f.app.runPromise(f.sessions.switch(f.adult.id, unprotected));
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: ["90002", "90003", "90011"].map((id) => ({
+            kind: "movie",
+            subscriptionId: f.source.id,
+            id,
+          })),
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, adult));
+  expect(await f.call(kid, "collections.list", undefined)).toEqual({
+    ok: true,
+    value: [{ id: "one", name: "Films", total: 2 }],
+  });
+  const page = await f.call(kid, "collections.page", { id: "one", offset: 0, limit: 1 });
+  expect(page).toMatchObject({
+    ok: true,
+    value: {
+      total: 2,
+      members: [
+        {
+          titleId: "90002",
+          name: "Approved version",
+          available: true,
+          title: {
+            id: "90002",
+            posterUrl: "https://image.example/p/90002.jpg",
+            versions: [{ id: "90002" }],
+          },
+        },
+      ],
+    },
+  });
+  expect(JSON.stringify(page)).not.toContain("Restricted primary");
+  expect(await f.call(kid, "collections.page", { id: "one", offset: 1, limit: 1 })).toMatchObject({
+    ok: true,
+    value: { total: 2, members: [{ titleId: "90003" }] },
+  });
+  expect(await f.call(kid, "collections.memberships", title("90002"))).toEqual({
+    ok: true,
+    value: ["one"],
+  });
+  expect(
+    await f.call(kid, "collections.change", {
+      kind: "member",
+      id: "one",
+      title: title("90001"),
+      present: true,
+    }),
+  ).toMatchObject({ ok: false });
+  expect(
+    await f.call(kid, "collections.change", {
+      kind: "member",
+      id: "one",
+      title: title("90011"),
+      present: true,
+    }),
+  ).toMatchObject({ ok: false });
+  const promoted = f.provider.titles.movies.find((movie) => movie.id === 90002)!;
+  const before = { ...promoted };
+  onTestFinished(() => {
+    Object.assign(promoted, before);
+  });
+  Object.assign(promoted, { adult: true, categoryId: "505" });
+  await f.app.runPromise(f.onDemand.refresh(f.source.id));
+  expect(await f.call(kid, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject({
+    ok: true,
+    value: { total: 1, members: [{ titleId: "90003" }] },
+  });
+  expect(await f.call(unprotected, "collections.list", undefined)).toMatchObject({ ok: false });
+  const managing = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  await f.app.runPromise(f.sessions.setPolicy({ current: managing, pin: "1234", profiles: [] }));
+  const unrestricted = await f.app.runPromise(f.sessions.switch(kid.id, managing));
+  const admission = await f.app.runPromise(f.sessions.admitFor(unrestricted));
+  await f.app.runPromise(admission.run(admission.services.settings.update({ adultTitles: true })));
+  expect(
+    await f.call(unrestricted, "collections.change", {
+      kind: "member",
+      id: "one",
+      title: title("90011"),
+      present: true,
+    }),
+  ).toMatchObject({ ok: true });
+  expect(
+    await f.call(unrestricted, "collections.page", { id: "one", offset: 0, limit: 48 }),
+  ).toMatchObject({
+    ok: true,
+    value: {
+      total: 4,
+      members: expect.arrayContaining([expect.objectContaining({ titleId: "90011", adult: true })]),
+    },
+  });
+});
+
+it("refuses pending, failed and stale collection reads and never commits a late policy mutation", async () => {
+  const f = await fixture();
+  const titles = await f.app.runPromise(f.onDemand.search("TEST"));
+  const movie = titles.movies[0]!;
+
+  const title = {
+    sourceId: movie.subscriptionId,
+    kind: movie.kind,
+    titleId: movie.id,
+    name: "Forged",
+    year: null,
+    adult: false,
+  };
+
+  expect(
+    await f.call(f.adult, "collections.change", { kind: "create", id: "one", name: "Films" }),
+  ).toMatchObject({ ok: true });
+  const original = f.onDemand.titles;
+  const originalStatus = f.onDemand.status;
+  onTestFinished(() => {
+    f.onDemand.titles = original;
+    Object.defineProperty(f.onDemand, "status", { value: originalStatus, configurable: true });
+  });
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => release.resolve());
+  f.onDemand.titles = (...args) =>
+    Effect.gen(function* () {
+      const answer = yield* original(...args);
+      arrived.resolve();
+      yield* Effect.promise(() => release.promise);
+
+      return answer;
+    });
+
+  const pending = f.call(f.adult, "collections.change", {
+    kind: "member",
+    id: "one",
+    title,
+    present: true,
+  });
+
+  await arrived.promise;
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [{ id: f.kid.id, approved: [] }],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  release.resolve();
+  expect(await pending).toMatchObject({ ok: false });
+  f.onDemand.titles = original;
+  const back = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  expect(await f.call(back, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject(
+    { ok: true, value: { total: 0 } },
+  );
+  expect(
+    await f.call(back, "collections.change", { kind: "member", id: "one", title, present: true }),
+  ).toMatchObject({ ok: true });
+  const status = f.onDemand.status;
+  Object.defineProperty(f.onDemand, "status", {
+    value: Effect.succeed({ lists: [], metadata: null }),
+    configurable: true,
+  });
+  expect(await f.call(back, "collections.list", undefined)).toMatchObject({
+    ok: false,
+    error: { kind: "unexpected" },
+  });
+  Object.defineProperty(f.onDemand, "status", { value: status, configurable: true });
+  f.onDemand.titles = () =>
+    Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Read failed; retry." } }));
+  expect(await f.call(back, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject(
+    { ok: false },
+  );
+  f.onDemand.titles = original;
+  expect(await f.call(back, "collections.list", undefined)).toMatchObject({
+    ok: true,
+    value: [{ total: 1 }],
+  });
+  const db = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+  onTestFinished(() => db.close());
+
+  const saved = type("string").assert(
+    db.prepare("SELECT value FROM kids_policy WHERE id = 1").get()!.value,
+  );
+
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run("broken");
+  expect(await f.call(back, "collections.list", undefined)).toMatchObject({ ok: false });
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run(saved);
+});
+
+it("isolates collection owners, reconnects exact account membership and erases every profile", async () => {
+  const f = await fixture();
+  const movie = (await f.app.runPromise(f.onDemand.search("TEST"))).movies[0]!;
+
+  const title = {
+    sourceId: f.source.id,
+    kind: movie.kind,
+    titleId: movie.id,
+    name: movie.title,
+    year: movie.year,
+    adult: false,
+  };
+
+  for (const owner of [f.adult, await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult))]) {
+    const current =
+      owner.id === f.adult.id
+        ? await f.app.runPromise(f.sessions.switch(f.adult.id))
+        : await f.app.runPromise(f.sessions.switch(f.kid.id));
+
+    expect(await f.call(current, "collections.list", undefined)).toEqual({ ok: true, value: [] });
+    expect(
+      await f.call(current, "collections.change", { kind: "create", id: "one", name: owner.id }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await f.call(current, "collections.change", {
+        kind: "member",
+        id: "one",
+        title,
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  }
+
+  const adult = await f.app.runPromise(f.sessions.switch(f.adult.id));
+  const roster = await f.app.runPromise(Roster);
+  await f.app.runPromise(roster.remove(f.source.id, false));
+  const source = await f.app.runPromise(roster.add(demoLogin(f.provider)));
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  expect(await f.call(adult, "collections.memberships", { ...title, sourceId: source.id })).toEqual(
+    { ok: true, value: ["one"] },
+  );
+  await f.app.runPromise(roster.remove(source.id, true));
+  const restored = await f.app.runPromise(roster.add(demoLogin(f.provider)));
+  await f.app.runPromise(f.onDemand.refresh(restored.id));
+
+  expect(await f.call(adult, "collections.list", undefined)).toMatchObject({
+    ok: true,
+    value: [{ total: 0 }],
+  });
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, adult));
+  expect(await f.call(kid, "collections.list", undefined)).toMatchObject({
+    ok: true,
+    value: [{ total: 0 }],
+  });
+  const back = await f.app.runPromise(f.sessions.switch(f.adult.id, kid));
+  expect(await f.call(back, "profiles.remove", { id: f.kid.id, current: back })).toMatchObject({
+    ok: true,
+  });
+  expect(await f.call(kid, "collections.list", undefined)).toMatchObject({ ok: false });
+});
+
+it("refuses a suspended collection mutation after the same owner's durable approvals change", async () => {
+  const f = await fixture();
+  const movie = (await f.app.runPromise(f.onDemand.search("TEST"))).movies[0]!;
+
+  const title = {
+    sourceId: f.source.id,
+    kind: movie.kind,
+    titleId: movie.id,
+    name: "Forged",
+    year: null,
+    adult: false,
+  };
+
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: [{ kind: movie.kind, subscriptionId: f.source.id, id: movie.id }],
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(
+    await f.call(kid, "collections.change", { kind: "create", id: "one", name: "Films" }),
+  ).toMatchObject({ ok: true });
+  const original = f.onDemand.titles;
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => {
+    release.resolve();
+    f.onDemand.titles = original;
+  });
+  f.onDemand.titles = (...args) =>
+    Effect.gen(function* () {
+      const answer = yield* original(...args);
+      arrived.resolve();
+      yield* Effect.promise(() => release.promise);
+
+      return answer;
+    });
+
+  const pending = f.call(kid, "collections.change", {
+    kind: "member",
+    id: "one",
+    title,
+    present: true,
+  });
+
+  await arrived.promise;
+  // Released management refuses active-kids edits; simulate an external durable policy change.
+  const db = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+  onTestFinished(() => db.close());
+
+  const saved = type("string").assert(
+    db.prepare("SELECT value FROM kids_policy WHERE id = 1").get()!.value,
+  );
+
+  const policy = type({
+    pin: "string",
+    salt: "string",
+    revision: "number",
+    profiles: "unknown[]",
+  }).assert(JSON.parse(saved));
+
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run(
+    JSON.stringify({ ...policy, profiles: [] }),
+  );
+  release.resolve();
+  expect(await pending).toMatchObject({ ok: false });
+  f.onDemand.titles = original;
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run(saved);
+  expect(await f.call(kid, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject({
+    ok: true,
+    value: { total: 0 },
+  });
+});
+
+it("publishes only the captured collection owner and refuses missing admitted context", async () => {
+  const f = await fixture();
+  const admitted = await f.app.runPromise(f.sessions.admitFor(f.adult));
+  expect((await f.app.runPromiseExit(admitted.services.collections.list))._tag).toBe("Failure");
+  const Stream = await import("effect/Stream");
+  const Fiber = await import("effect/Fiber");
+
+  const changes = await f.app.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pull = yield* Stream.toPull(
+          Stream.filter(f.sessions.changes, (change) => change.kind === "collections"),
+        );
+
+        const event = yield* Effect.forkScoped(pull);
+
+        const result = yield* Effect.promise(() =>
+          f.call(f.adult, "collections.change", {
+            kind: "create",
+            id: "one",
+            name: "Private name",
+          }),
+        );
+
+        expect(result).toMatchObject({ ok: true });
+
+        return yield* Fiber.join(event);
+      }),
+    ),
+  );
+
+  expect(changes).toEqual([{ kind: "collections", owner: f.adult }]);
 });
 
 it("keeps configured metadata available without exposing household progress to kids", async () => {

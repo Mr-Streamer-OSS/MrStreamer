@@ -1,3 +1,4 @@
+import { Collections } from "./services/collections.ts";
 import { join } from "node:path";
 import type { UsageObservers } from "./analytics/observers.ts";
 // The main process's services, assembled once from Layers. The app makes one runtime from
@@ -106,6 +107,7 @@ export type MainServices =
   | ViewingRecord
   | Watchlist
   | CustomLists
+  | Collections
   | Licences
   | DetailCache
   | VerifiedFiles
@@ -341,6 +343,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
 
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const customLists = CustomLists.layer.pipe(Layer.provide(stores));
+  const collections = Collections.layer.pipe(Layer.provide(stores), Layer.provide(services));
 
   // Downloads and recordings keep resume positions under the active profile.
   const sessions = ProfileSessions.layer({
@@ -348,7 +351,9 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     ...config.profiles,
     ...defined({ usage: config.usage }),
   }).pipe(
-    Layer.provide(Layer.mergeAll(database, viewingPorts, stores, viewing, watchlist, customLists)),
+    Layer.provide(
+      Layer.mergeAll(database, viewingPorts, stores, viewing, watchlist, customLists, collections),
+    ),
     Layer.provide(services),
   );
 
@@ -386,6 +391,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         viewing,
         watchlist,
         customLists,
+        collections,
         output,
         onlineSubtitles,
         downloads,

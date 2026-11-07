@@ -1,4 +1,4 @@
-import type { TitleKind } from "./ondemand.ts";
+import type { Title, TitleKind } from "./ondemand.ts";
 
 /** Current admitted subscription id, media type and provider id. Display names never identify members. */
 export interface CollectionIdentity {
@@ -25,6 +25,8 @@ export interface PersonalCollection {
 
 export interface CollectionMember extends CollectionTitle {
   readonly available: boolean;
+  /** Admitted exact version, with artwork selected only from permitted identities. */
+  readonly title?: Title;
 }
 
 export interface CollectionPage {

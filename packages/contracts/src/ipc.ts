@@ -1,3 +1,7 @@
+import type {
+  CollectionPage as PersonalCollectionPage,
+  PersonalCollection,
+} from "./collections.ts";
 // The typed contract between the UI and the main process.
 //
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
@@ -619,6 +623,25 @@ export const ipcInputs = {
   "watchlist.save": () => type({ kind: titleKind(), version: owned() }),
   /** A saved entry by its own id, as `WatchlistEntry` names it. */
   "watchlist.remove": () => type({ entry: owned() }),
+  "collections.list": none,
+  "collections.page": () =>
+    type({ id: listId(), offset: "number.integer >= 0", limit: "0 < number.integer <= 200" }),
+  "collections.memberships": () =>
+    type({ sourceId: "string > 0", kind: titleKind(), titleId: "string > 0" }),
+  "collections.change": () => {
+    const identity = type({ sourceId: "string > 0", kind: titleKind(), titleId: "string > 0" });
+
+    return type({ kind: "'create' | 'rename'", id: listId(), name: "string" })
+      .or({ kind: "'delete'", id: listId() })
+      .or({ kind: "'reorder'", ids: listId().array() })
+      .or({
+        kind: "'member'",
+        id: listId(),
+        title: identity.and({ name: "string", year: "number | null", "adult?": "boolean" }),
+        present: "boolean",
+      })
+      .or({ kind: "'order-members'", id: listId(), titles: identity.array() });
+  },
   "customLists.get": none,
   /**
    * A new list, under an id the window makes up for it: sent again, it answers the list it made.
@@ -1008,6 +1031,10 @@ export interface IpcOutputs {
    */
   "watchlist.remove": null;
   /** The viewer's channel lists, in their order, as the viewer may see them now. */
+  "collections.list": readonly (PersonalCollection & { readonly total: number })[];
+  "collections.page": PersonalCollectionPage;
+  "collections.memberships": readonly string[];
+  "collections.change": null;
   "customLists.get": readonly CustomList[];
   /**
    * Answers the lists once the new one is stored. Fails with `list-name-taken` when another is
@@ -1158,6 +1185,7 @@ export interface IpcEvents {
   /** A title was saved to the watchlist or taken out of it. */
   "watchlist.changed": null;
   /** A channel list was made, renamed, moved or deleted, or its channels changed. */
+  "collections.changed": { readonly owner: ActiveProfile };
   "customLists.changed": null;
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
