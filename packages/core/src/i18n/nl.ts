@@ -3,6 +3,13 @@
 import type { Translation } from "../i18n.ts";
 
 export const nl: Translation = {
+  "Collection admission has ended; retry the request.":
+    "De toegang tot collecties is verlopen. Probeer opnieuw.",
+  "Collection catalogue is unavailable; retry the request.":
+    "De collectiecatalogus is niet beschikbaar. Probeer opnieuw.",
+  "Collection admission is required; retry the request.":
+    "Toegang tot collecties is vereist. Probeer opnieuw.",
+
   "Kids policy could not be read or saved. Try again.":
     "Het kinderbeleid kon niet worden gelezen of opgeslagen. Probeer opnieuw.",
   "Kids policy: enter the correct PIN.": "Kinderbeleid: voer de juiste pincode in.",
@@ -1406,6 +1413,17 @@ export const nl: Translation = {
   "Delete {name}?": "{name} verwijderen?",
   Lists: "Lijsten",
   "Lists for {name}": "Lijsten voor {name}",
+  Collections: "Collecties",
+  "New collection": "Nieuwe collectie",
+  "Collection name": "Naam van de collectie",
+  "Delete collection": "Collectie verwijderen",
+  "Add to collection": "Aan collectie toevoegen",
+  "This title isn't available here.": "Deze titel is hier niet beschikbaar.",
+  "Collections for {name}": "Collecties voor {name}",
+  "In {count} collections": { one: "In {count} collectie", other: "In {count} collecties" },
+  "Remove from {name}": "Verwijderen uit {name}",
+  "Add movies and series to it from their details.":
+    "Voeg er films en series aan toe vanuit hun details.",
   "Not listed now": "Nu niet vermeld",
   "Not listed by {name} now": "Nu niet vermeld door {name}",
   "{count} channels are from a subscription that isn't saved.": {

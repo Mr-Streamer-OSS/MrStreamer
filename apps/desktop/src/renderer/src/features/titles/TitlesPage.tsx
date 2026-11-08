@@ -3,6 +3,8 @@ import { useSearchUsage } from "../../app/analytics.ts";
 // featured title, what's being watched, titles like the last one and the collections that suit
 // the viewer's language; New gathers what was added; Genres and Services are pages of tiles; 4K
 // and All are grids. A row's All, a genre or a service opens its collection, with Back to the tab.
+// Collections holds the viewer's own named collections of movies and series (see
+// features/collections/CollectionsPage.tsx); Watchlist stays its own page.
 // Genres and services come from TMDB, so they fill in as its metadata arrives.
 //   The field at the end of the tabs searches this kind only, by any of a title's names, and
 // shows what it finds in place of the tab; Escape clears it. ⌘K searches everything for the same.
@@ -44,6 +46,7 @@ import {
 import { useDebounced } from "../../lib/use-debounced.ts";
 import { useFit } from "../../lib/use-fit.ts";
 import { cn } from "../../lib/utils.ts";
+import { CollectionsPage } from "../collections/CollectionsPage.tsx";
 import { CollectionGrid, TitleGrid, useCollection } from "./CollectionGrid.tsx";
 import {
   FilterEmpty,
@@ -52,7 +55,7 @@ import {
   type TitleFilterControls,
 } from "./TitleFilters.tsx";
 
-type Tab = "for-you" | "new" | "genres" | "services" | "4k" | "adult" | "all";
+type Tab = "for-you" | "new" | "genres" | "services" | "4k" | "adult" | "all" | "collections";
 
 interface Place {
   readonly tab: Tab;
@@ -148,6 +151,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     ...(fourK.data?.total ? [{ value: "4k" as const, label: t("4K") }] : []),
     ...(adults && adult.data?.total ? [{ value: "adult" as const, label: t("Adults") }] : []),
     { value: "all", label: kind === "movie" ? t("All movies") : t("All series") },
+    { value: "collections", label: t("Collections") },
   ];
 
   const searching = place.query.trim() !== "";
@@ -277,6 +281,8 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
             <Rows kind={kind} tab={tab} onOpen={open} />
           ) : tab === "genres" || tab === "services" ? (
             <Tiles kind={kind} of={tab} onOpen={open} />
+          ) : tab === "collections" ? (
+            <CollectionsPage active={active} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col pl-10">
               <CollectionGrid

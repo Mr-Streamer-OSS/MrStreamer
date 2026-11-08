@@ -1,3 +1,4 @@
+import { collectionsHandlers } from "../src/main/handlers/collections.ts";
 import { type } from "arktype";
 import { playbackHandlers } from "../src/main/handlers/playback.ts";
 import { outputHandlers } from "../src/main/handlers/output.ts";
@@ -216,6 +217,10 @@ async function fixture(
   const updates = await app.runPromise(Updates);
 
   const base: Partial<IpcHandlers> = {
+    ...collectionsHandlers({
+      collections: personal.services.collections,
+      current: personal.current,
+    }),
     ...updateHandlers({ updates, storeReview: null }),
     ...lifecycle,
     ...playbackHandlers({
@@ -264,6 +269,10 @@ async function fixture(
   registerIpc(app.runPromiseExit, base as IpcHandlers, () => true, {
     admit: sessions.admitFor,
     handlers: (admitted) => ({
+      ...collectionsHandlers({
+        collections: admitted.services.collections,
+        current: admitted.current,
+      }),
       ...playbackHandlers({
         playback,
         coordination,
@@ -1155,6 +1164,986 @@ it("keeps household services available while a database open failure denies pers
   const reminders = await app.runPromise(Reminders);
   expect(await app.runPromise(reminders.list)).toMatchObject({ reminders: [] });
 });
+
+it("keeps collection memberships exact and filters restricted versions before labels, artwork, counts and pages", async () => {
+  const f = await fixture({
+    titlesOf: (built) => {
+      const base = built.movies.find((item) => !item.adult)!;
+
+      return {
+        ...built,
+        movies: [
+          { ...base, id: 90001, name: "Restricted primary", tmdb: "500" },
+          { ...base, id: 90002, name: "Approved version", tmdb: "500" },
+          { ...base, id: 90003, name: "Approved later", tmdb: "501" },
+          { ...base, id: 90011, name: "Adult secret", adult: true, tmdb: "502" },
+        ],
+      };
+    },
+  });
+
+  const unprotected = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(
+    await f.call(unprotected, "collections.change", { kind: "create", id: "one", name: "Films" }),
+  ).toMatchObject({ ok: true });
+
+  const title = (titleId: string) => ({
+    sourceId: f.source.id,
+    kind: "movie" as const,
+    titleId,
+    name: "Forged label",
+    year: null,
+    adult: false,
+  });
+
+  for (const titleId of ["90001", "90002", "90003"])
+    expect(
+      await f.call(unprotected, "collections.change", {
+        kind: "member",
+        id: "one",
+        title: title(titleId),
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  const adult = await f.app.runPromise(f.sessions.switch(f.adult.id, unprotected));
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: ["90002", "90003", "90011"].map((id) => ({
+            kind: "movie",
+            subscriptionId: f.source.id,
+            id,
+          })),
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, adult));
+  expect(await f.call(kid, "collections.list", undefined)).toEqual({
+    ok: true,
+    value: [{ id: "one", name: "Films", total: 2 }],
+  });
+  const page = await f.call(kid, "collections.page", { id: "one", offset: 0, limit: 1 });
+  expect(page).toMatchObject({
+    ok: true,
+    value: {
+      total: 2,
+      members: [
+        {
+          titleId: "90002",
+          name: "Approved version",
+          available: true,
+          title: {
+            id: "90002",
+            posterUrl: "https://image.example/p/90002.jpg",
+            versions: [{ id: "90002" }],
+          },
+        },
+      ],
+    },
+  });
+  expect(JSON.stringify(page)).not.toContain("Restricted primary");
+  expect(await f.call(kid, "collections.page", { id: "one", offset: 1, limit: 1 })).toMatchObject({
+    ok: true,
+    value: { total: 2, members: [{ titleId: "90003" }] },
+  });
+  expect(await f.call(kid, "collections.memberships", title("90002"))).toEqual({
+    ok: true,
+    value: ["one"],
+  });
+  expect(
+    await f.call(kid, "collections.change", {
+      kind: "member",
+      id: "one",
+      title: title("90001"),
+      present: true,
+    }),
+  ).toMatchObject({ ok: false });
+  expect(
+    await f.call(kid, "collections.change", {
+      kind: "member",
+      id: "one",
+      title: title("90011"),
+      present: true,
+    }),
+  ).toMatchObject({ ok: false });
+  const promoted = f.provider.titles.movies.find((movie) => movie.id === 90002)!;
+  const before = { ...promoted };
+  onTestFinished(() => {
+    Object.assign(promoted, before);
+  });
+  Object.assign(promoted, { adult: true, categoryId: "505" });
+  await f.app.runPromise(f.onDemand.refresh(f.source.id));
+  expect(await f.call(kid, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject({
+    ok: true,
+    value: { total: 1, members: [{ titleId: "90003" }] },
+  });
+  expect(await f.call(unprotected, "collections.list", undefined)).toMatchObject({ ok: false });
+  const managing = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  await f.app.runPromise(f.sessions.setPolicy({ current: managing, pin: "1234", profiles: [] }));
+  const unrestricted = await f.app.runPromise(f.sessions.switch(kid.id, managing));
+  const admission = await f.app.runPromise(f.sessions.admitFor(unrestricted));
+  await f.app.runPromise(admission.run(admission.services.settings.update({ adultTitles: true })));
+  expect(
+    await f.call(unrestricted, "collections.change", {
+      kind: "member",
+      id: "one",
+      title: title("90011"),
+      present: true,
+    }),
+  ).toMatchObject({ ok: true });
+  expect(
+    await f.call(unrestricted, "collections.page", { id: "one", offset: 0, limit: 48 }),
+  ).toMatchObject({
+    ok: true,
+    value: {
+      total: 4,
+      members: expect.arrayContaining([expect.objectContaining({ titleId: "90011", adult: true })]),
+    },
+  });
+});
+
+it("refuses pending, failed and stale collection reads and never commits a late policy mutation", async () => {
+  const f = await fixture();
+  const titles = await f.app.runPromise(f.onDemand.search("TEST"));
+  const movie = titles.movies[0]!;
+
+  const title = {
+    sourceId: movie.subscriptionId,
+    kind: movie.kind,
+    titleId: movie.id,
+    name: "Forged",
+    year: null,
+    adult: false,
+  };
+
+  expect(
+    await f.call(f.adult, "collections.change", { kind: "create", id: "one", name: "Films" }),
+  ).toMatchObject({ ok: true });
+  const original = f.onDemand.titles;
+  const originalStatus = f.onDemand.status;
+  onTestFinished(() => {
+    f.onDemand.titles = original;
+    Object.defineProperty(f.onDemand, "status", { value: originalStatus, configurable: true });
+  });
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => release.resolve());
+  f.onDemand.titles = (...args) =>
+    Effect.gen(function* () {
+      const answer = yield* original(...args);
+      arrived.resolve();
+      yield* Effect.promise(() => release.promise);
+
+      return answer;
+    });
+
+  const pending = f.call(f.adult, "collections.change", {
+    kind: "member",
+    id: "one",
+    title,
+    present: true,
+  });
+
+  await arrived.promise;
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [{ id: f.kid.id, approved: [] }],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  release.resolve();
+  expect(await pending).toMatchObject({ ok: false });
+  f.onDemand.titles = original;
+  const back = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  expect(await f.call(back, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject(
+    { ok: true, value: { total: 0 } },
+  );
+  expect(
+    await f.call(back, "collections.change", { kind: "member", id: "one", title, present: true }),
+  ).toMatchObject({ ok: true });
+  const status = f.onDemand.status;
+  Object.defineProperty(f.onDemand, "status", {
+    value: Effect.succeed({ lists: [], metadata: null }),
+    configurable: true,
+  });
+  expect(await f.call(back, "collections.list", undefined)).toMatchObject({
+    ok: false,
+    error: { kind: "unexpected" },
+  });
+  Object.defineProperty(f.onDemand, "status", { value: status, configurable: true });
+  f.onDemand.titles = () =>
+    Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Read failed; retry." } }));
+  expect(await f.call(back, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject(
+    { ok: false },
+  );
+  f.onDemand.titles = original;
+  expect(await f.call(back, "collections.list", undefined)).toMatchObject({
+    ok: true,
+    value: [{ total: 1 }],
+  });
+  const db = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+  onTestFinished(() => db.close());
+
+  const saved = type("string").assert(
+    db.prepare("SELECT value FROM kids_policy WHERE id = 1").get()!.value,
+  );
+
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run("broken");
+  expect(await f.call(back, "collections.list", undefined)).toMatchObject({ ok: false });
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run(saved);
+});
+
+it("isolates collection owners, reconnects exact account membership and erases every profile", async () => {
+  const f = await fixture();
+  const movie = (await f.app.runPromise(f.onDemand.search("TEST"))).movies[0]!;
+
+  const title = {
+    sourceId: f.source.id,
+    kind: movie.kind,
+    titleId: movie.id,
+    name: movie.title,
+    year: movie.year,
+    adult: false,
+  };
+
+  for (const owner of [f.adult, await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult))]) {
+    const current =
+      owner.id === f.adult.id
+        ? await f.app.runPromise(f.sessions.switch(f.adult.id))
+        : await f.app.runPromise(f.sessions.switch(f.kid.id));
+
+    expect(await f.call(current, "collections.list", undefined)).toEqual({ ok: true, value: [] });
+    expect(
+      await f.call(current, "collections.change", { kind: "create", id: "one", name: owner.id }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await f.call(current, "collections.change", {
+        kind: "member",
+        id: "one",
+        title,
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  }
+
+  const adult = await f.app.runPromise(f.sessions.switch(f.adult.id));
+  const roster = await f.app.runPromise(Roster);
+  await f.app.runPromise(roster.remove(f.source.id, false));
+  const source = await f.app.runPromise(roster.add(demoLogin(f.provider)));
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  expect(await f.call(adult, "collections.memberships", { ...title, sourceId: source.id })).toEqual(
+    { ok: true, value: ["one"] },
+  );
+  await f.app.runPromise(roster.remove(source.id, true));
+  const restored = await f.app.runPromise(roster.add(demoLogin(f.provider)));
+  await f.app.runPromise(f.onDemand.refresh(restored.id));
+
+  expect(await f.call(adult, "collections.list", undefined)).toMatchObject({
+    ok: true,
+    value: [{ total: 0 }],
+  });
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, adult));
+  expect(await f.call(kid, "collections.list", undefined)).toMatchObject({
+    ok: true,
+    value: [{ total: 0 }],
+  });
+  const back = await f.app.runPromise(f.sessions.switch(f.adult.id, kid));
+  expect(await f.call(back, "profiles.remove", { id: f.kid.id, current: back })).toMatchObject({
+    ok: true,
+  });
+  expect(await f.call(kid, "collections.list", undefined)).toMatchObject({ ok: false });
+});
+
+it("refuses a suspended collection mutation after the same owner's durable approvals change", async () => {
+  const f = await fixture();
+  const movie = (await f.app.runPromise(f.onDemand.search("TEST"))).movies[0]!;
+
+  const title = {
+    sourceId: f.source.id,
+    kind: movie.kind,
+    titleId: movie.id,
+    name: "Forged",
+    year: null,
+    adult: false,
+  };
+
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: [{ kind: movie.kind, subscriptionId: f.source.id, id: movie.id }],
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(
+    await f.call(kid, "collections.change", { kind: "create", id: "one", name: "Films" }),
+  ).toMatchObject({ ok: true });
+  const original = f.onDemand.titles;
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => {
+    release.resolve();
+    f.onDemand.titles = original;
+  });
+  f.onDemand.titles = (...args) =>
+    Effect.gen(function* () {
+      const answer = yield* original(...args);
+      arrived.resolve();
+      yield* Effect.promise(() => release.promise);
+
+      return answer;
+    });
+
+  const pending = f.call(kid, "collections.change", {
+    kind: "member",
+    id: "one",
+    title,
+    present: true,
+  });
+
+  await arrived.promise;
+  // Released management refuses active-kids edits; simulate an external durable policy change.
+  const db = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+  onTestFinished(() => db.close());
+
+  const saved = type("string").assert(
+    db.prepare("SELECT value FROM kids_policy WHERE id = 1").get()!.value,
+  );
+
+  const policy = type({
+    pin: "string",
+    salt: "string",
+    revision: "number",
+    profiles: "unknown[]",
+  }).assert(JSON.parse(saved));
+
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run(
+    JSON.stringify({ ...policy, profiles: [] }),
+  );
+  release.resolve();
+  expect(await pending).toMatchObject({ ok: false });
+  f.onDemand.titles = original;
+  db.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run(saved);
+  expect(await f.call(kid, "collections.page", { id: "one", offset: 0, limit: 48 })).toMatchObject({
+    ok: true,
+    value: { total: 0 },
+  });
+});
+
+it("publishes only the captured collection owner and refuses missing admitted context", async () => {
+  const f = await fixture();
+  const admitted = await f.app.runPromise(f.sessions.admitFor(f.adult));
+  expect((await f.app.runPromiseExit(admitted.services.collections.list))._tag).toBe("Failure");
+  const Stream = await import("effect/Stream");
+  const Fiber = await import("effect/Fiber");
+
+  const changes = await f.app.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pull = yield* Stream.toPull(
+          Stream.filter(f.sessions.changes, (change) => change.kind === "collections"),
+        );
+
+        const event = yield* Effect.forkScoped(pull);
+
+        const result = yield* Effect.promise(() =>
+          f.call(f.adult, "collections.change", {
+            kind: "create",
+            id: "one",
+            name: "Private name",
+          }),
+        );
+
+        expect(result).toMatchObject({ ok: true });
+
+        return yield* Fiber.join(event);
+      }),
+    ),
+  );
+
+  expect(changes).toEqual([{ kind: "collections", owner: f.adult }]);
+});
+
+it("keeps exact retained collection facts usable after a source refresh fails", async () => {
+  const f = await fixture();
+  const other = await fakeProvider();
+  const roster = await f.app.runPromise(Roster);
+  const source = await f.app.runPromise(roster.add(demoLogin(other)));
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  const movies = (await f.app.runPromise(f.onDemand.search("TEST"))).movies;
+
+  const first = movies.find((movie) =>
+    movie.versions.some((version) => version.subscriptionId === f.source.id),
+  )!;
+
+  const second = movies.find((movie) =>
+    movie.versions.some((version) => version.subscriptionId === source.id),
+  )!;
+
+  expect(
+    await f.call(f.adult, "collections.change", {
+      kind: "create",
+      id: "retained",
+      name: "Retained",
+    }),
+  ).toMatchObject({ ok: true });
+
+  for (const [movie, sourceId] of [
+    [first, f.source.id],
+    [second, source.id],
+  ] as const) {
+    const version = movie.versions.find((version) => version.subscriptionId === sourceId)!;
+    expect(
+      await f.call(f.adult, "collections.change", {
+        kind: "member",
+        id: "retained",
+        title: {
+          sourceId,
+          kind: movie.kind,
+          titleId: version.id,
+          name: "Forged",
+          year: null,
+          adult: false,
+        },
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  }
+
+  other.failTitles(503);
+  await f.app.runPromiseExit(f.onDemand.refresh(source.id));
+  const status = await f.app.runPromise(f.onDemand.status);
+  expect(status.lists.find((each) => each.subscriptionId === source.id)).toMatchObject({
+    failure: expect.anything(),
+    fetchedAt: expect.any(Number),
+  });
+
+  const result = await f.call(f.adult, "collections.page", {
+    id: "retained",
+    offset: 0,
+    limit: 48,
+  });
+
+  expect(result).toMatchObject({
+    ok: true,
+    value: {
+      total: 2,
+      members: expect.arrayContaining([
+        expect.objectContaining({ sourceId: f.source.id, available: true }),
+        expect.objectContaining({ sourceId: source.id, available: true }),
+      ]),
+    },
+  });
+
+  if (result.ok)
+    expect(
+      type({ members: type({ name: "string", adult: "boolean" }).array() })
+        .assert(result.value)
+        .members.every((member) => member.name !== "Forged" && member.adult === false),
+    ).toBe(true);
+});
+
+it("refuses absent initial collection lists and failed exact reads instead of empty success", async () => {
+  const f = await fixture();
+  const movie = (await f.app.runPromise(f.onDemand.search("TEST"))).movies[0]!;
+  expect(
+    await f.call(f.adult, "collections.change", { kind: "create", id: "initial", name: "Initial" }),
+  ).toMatchObject({ ok: true });
+
+  const command = {
+    kind: "member" as const,
+    id: "initial",
+    title: {
+      sourceId: f.source.id,
+      kind: movie.kind,
+      titleId: movie.id,
+      name: movie.title,
+      year: movie.year,
+      adult: false,
+    },
+    present: true,
+  };
+
+  const status = f.onDemand.status;
+  onTestFinished(() => {
+    Object.defineProperty(f.onDemand, "status", { value: status, configurable: true });
+  });
+  Object.defineProperty(f.onDemand, "status", {
+    value: Effect.map(status, (answer) => ({
+      ...answer,
+      lists: answer.lists.map((list) => ({ ...list, fetchedAt: null })),
+    })),
+    configurable: true,
+  });
+  expect(await f.call(f.adult, "collections.change", command)).toMatchObject({ ok: false });
+  Object.defineProperty(f.onDemand, "status", { value: status, configurable: true });
+  const titles = f.onDemand.titles;
+  onTestFinished(() => {
+    f.onDemand.titles = titles;
+  });
+  f.onDemand.titles = () =>
+    Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Read failed" } }));
+  expect(await f.call(f.adult, "collections.change", command)).toMatchObject({ ok: false });
+  f.onDemand.titles = titles;
+  expect(await f.call(f.adult, "collections.change", command)).toMatchObject({ ok: true });
+  expect(
+    await f.call(f.adult, "collections.page", { id: "initial", offset: 0, limit: 48 }),
+  ).toMatchObject({ ok: true, value: { total: 1 } });
+  f.onDemand.titles = () =>
+    Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Read failed" } }));
+  expect(
+    await f.call(f.adult, "collections.page", { id: "initial", offset: 0, limit: 48 }),
+  ).toMatchObject({ ok: false });
+  f.onDemand.titles = titles;
+  expect(
+    await f.call(f.adult, "collections.page", { id: "initial", offset: 0, limit: 48 }),
+  ).toMatchObject({ ok: true, value: { total: 1 } });
+});
+
+it("filters retained exact kids facts after adult reclassification and a failed refresh", async () => {
+  const f = await fixture({
+    titlesOf: (built) => {
+      const base = built.movies.find((movie) => !movie.adult)!;
+
+      return {
+        ...built,
+        movies: [
+          { ...base, id: 90101, name: "Kept safe", tmdb: "90101" },
+          { ...base, id: 90102, name: "Kept restricted", tmdb: "90102" },
+        ],
+      };
+    },
+  });
+
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: ["90101", "90102"].map((id) => ({
+            kind: "movie",
+            subscriptionId: f.source.id,
+            id,
+          })),
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(
+    await f.call(kid, "collections.change", { kind: "create", id: "safe", name: "Safe" }),
+  ).toMatchObject({ ok: true });
+
+  for (const titleId of ["90101", "90102"])
+    expect(
+      await f.call(kid, "collections.change", {
+        kind: "member",
+        id: "safe",
+        title: {
+          sourceId: f.source.id,
+          kind: "movie",
+          titleId,
+          name: "Forged",
+          year: null,
+          adult: false,
+        },
+        present: true,
+      }),
+    ).toMatchObject({ ok: true });
+  const restricted = f.provider.titles.movies.find((movie) => movie.id === 90102)!;
+  Object.assign(restricted, { adult: true, categoryId: "505" });
+  await f.app.runPromise(f.onDemand.refresh(f.source.id));
+  f.provider.failTitles(503);
+  await f.app.runPromiseExit(f.onDemand.refresh(f.source.id));
+  const page = await f.call(kid, "collections.page", { id: "safe", offset: 0, limit: 48 });
+  expect(page).toMatchObject({
+    ok: true,
+    value: { total: 1, members: [{ titleId: "90101", name: "Kept safe", adult: false }] },
+  });
+  expect(JSON.stringify(page)).not.toContain("Kept restricted");
+  expect(
+    await f.call(kid, "collections.change", {
+      kind: "member",
+      id: "safe",
+      title: {
+        sourceId: f.source.id,
+        kind: "movie",
+        titleId: "90102",
+        name: "Forged",
+        year: null,
+        adult: false,
+      },
+      present: true,
+    }),
+  ).toMatchObject({ ok: false });
+});
+
+it.each(["reply", "commit"] as const)(
+  "refuses a collection %s overtaken by accepted adult facts",
+  async (operation) => {
+    const f = await fixture({
+      titlesOf: (built) => {
+        const base = built.movies.find((movie) => !movie.adult)!;
+
+        return {
+          ...built,
+          movies: [
+            { ...base, id: 90201, name: "Previously safe", tmdb: "90201" },
+            { ...base, id: 90202, name: "Still safe", tmdb: "90202" },
+          ],
+        };
+      },
+    });
+
+    await f.app.runPromise(
+      f.sessions.setPolicy({
+        current: f.adult,
+        newPin: "1234",
+        profiles: [
+          {
+            id: f.kid.id,
+            approved: ["90201", "90202"].map((id) => ({
+              kind: "movie",
+              subscriptionId: f.source.id,
+              id,
+            })),
+          },
+        ],
+      }),
+    );
+    const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+    const title = (titleId: string) => ({
+      sourceId: f.source.id,
+      kind: "movie" as const,
+      titleId,
+      name: "Forged",
+      year: null,
+      adult: false,
+    });
+
+    expect(
+      await f.call(kid, "collections.change", { kind: "create", id: "currency", name: "Currency" }),
+    ).toMatchObject({ ok: true });
+
+    for (const titleId of ["90201", "90202"])
+      expect(
+        await f.call(kid, "collections.change", {
+          kind: "member",
+          id: "currency",
+          title: title(titleId),
+          present: true,
+        }),
+      ).toMatchObject({ ok: true });
+    const original = f.onDemand.titles;
+    const arrived = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    onTestFinished(() => {
+      release.resolve();
+      f.onDemand.titles = original;
+    });
+    let held = false;
+    f.onDemand.titles = (...args) =>
+      Effect.gen(function* () {
+        const answer = yield* original(...args);
+
+        if (!held) {
+          held = true;
+          arrived.resolve();
+          yield* Effect.promise(() => release.promise);
+        }
+
+        return answer;
+      });
+
+    const pending =
+      operation === "reply"
+        ? f.call(kid, "collections.page", { id: "currency", offset: 0, limit: 48 })
+        : f.call(kid, "collections.change", {
+            kind: "member",
+            id: "currency",
+            title: title("90201"),
+            present: true,
+          });
+
+    await arrived.promise;
+    const promoted = f.provider.titles.movies.find((movie) => movie.id === 90201)!;
+    Object.assign(promoted, { adult: true, categoryId: "505" });
+    await f.app.runPromise(f.onDemand.refresh(f.source.id));
+    release.resolve();
+    expect(await pending).toMatchObject({ ok: false });
+    f.onDemand.titles = original;
+    const page = await f.call(kid, "collections.page", { id: "currency", offset: 0, limit: 48 });
+    expect(page).toMatchObject({
+      ok: true,
+      value: { total: 1, members: [{ titleId: "90202", name: "Still safe" }] },
+    });
+    expect(JSON.stringify(page)).not.toContain("Previously safe");
+  },
+);
+
+it("binds public catalogue checkpoints to acceptance, retained data and worker lifetime", async () => {
+  const { Worker } = await import("node:worker_threads");
+  const { pathToFileURL } = await import("node:url");
+  const { inject } = await import("vitest");
+  const { gzipSync, gunzipSync } = await import("node:zlib");
+  const { writeFile } = await import("node:fs/promises");
+  const dataDir = await tempDir();
+  const provider = await fakeProvider();
+  const workers: import("node:worker_threads").Worker[] = [];
+
+  const entry =
+    inject("catalogueWorker") ??
+    new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url);
+
+  const url = type("string").allows(entry) ? pathToFileURL(entry).href : entry.href;
+
+  const start = async () => {
+    const app = runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        catalogueWorker: (setup) => {
+          const worker = new Worker(
+            `Date.now = () => 1900000000000; import(${JSON.stringify(url)});`,
+            { eval: true, workerData: setup },
+          );
+
+          workers.push(worker);
+
+          return worker;
+        },
+      }),
+    );
+
+    return {
+      app,
+      onDemand: await app.runPromise(OnDemand),
+      roster: await app.runPromise(Roster),
+      settings: await app.runPromise(Settings),
+      subscriptions: await app.runPromise(Subscriptions),
+    };
+  };
+
+  let f = await start();
+  const added = await f.app.runPromise(f.roster.add(demoLogin(provider)));
+  const source = await f.app.runPromise(f.subscriptions.sourceOf(added.id));
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  const checkpoint = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(checkpoint.current)._tag).toBe("Success");
+  const before = await f.app.runPromise(f.onDemand.status);
+  await f.app.runPromise(f.onDemand.refresh(source.id));
+  expect((await f.app.runPromise(f.onDemand.status)).lists[0]?.fetchedAt).toBe(
+    before.lists[0]?.fetchedAt,
+  );
+  expect(Effect.runSyncExit(checkpoint.current)._tag).toBe("Failure");
+  const retained = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  provider.failTitles(503);
+  await f.app.runPromiseExit(f.onDemand.refresh(source.id));
+  expect(Effect.runSyncExit(retained.current)._tag).toBe("Success");
+  expect((await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]))).current).toBeDefined();
+  provider.failTitles(null);
+  await f.app.dispose();
+  expect(Effect.runSyncExit(retained.current)._tag).toBe("Failure");
+  // Remove only the optional revision stamp from a real persisted catalogue.
+  const cache = join(source.dir, "ondemand.json.gz");
+
+  const disk = type({ catalogueStamp: "string", "[string]": "unknown" }).assert(
+    JSON.parse(gunzipSync(await readFile(cache)).toString()),
+  );
+
+  const { catalogueStamp: _, ...legacy } = disk;
+  await writeFile(cache, gzipSync(JSON.stringify(legacy)));
+  f = await start();
+  const loaded = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(loaded.current)._tag).toBe("Success");
+  expect(
+    (
+      await f.app.runPromise(
+        f.onDemand.titles("movie", [
+          { subscriptionId: source.id, id: String(provider.titles.movies[0]!.id) },
+        ]),
+      )
+    ).length,
+  ).toBe(1);
+  await workers.at(-1)!.terminate();
+  expect(Effect.runSyncExit(loaded.current)._tag).toBe("Failure");
+  // Starting another worker cannot bless an acquisition that crossed the restart.
+  expect((await f.app.runPromiseExit(f.onDemand.catalogueSnapshot([source.id])))._tag).toBe(
+    "Failure",
+  );
+  const restarted = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(restarted.current)._tag).toBe("Success");
+  await f.app.runPromise(f.settings.update({ tmdbKey: "changed-test-key" }));
+  await f.app.runPromise(f.onDemand.reconfigure);
+  expect(Effect.runSyncExit(restarted.current)._tag).toBe("Failure");
+  const configured = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(configured.current)._tag).toBe("Success");
+  await f.app.runPromise(f.subscriptions.add(demoLogin(provider)));
+  expect(Effect.runSyncExit(configured.current)._tag).toBe("Failure");
+  const replaced = await f.app.runPromise(f.onDemand.catalogueSnapshot([source.id]));
+  await f.app.runPromise(
+    f.onDemand.forget(await f.app.runPromise(f.subscriptions.sourceOf(source.id))),
+  );
+  expect(Effect.runSyncExit(replaced.current)._tag).toBe("Failure");
+  const absent = await fakeProvider();
+  absent.failTitles(503);
+  const missing = await f.app.runPromise(f.roster.add(demoLogin(absent)));
+  expect((await f.app.runPromiseExit(f.onDemand.catalogueSnapshot([missing.id])))._tag).toBe(
+    "Failure",
+  );
+  await f.app.runPromiseExit(f.onDemand.refresh(missing.id));
+  expect((await f.app.runPromiseExit(f.onDemand.catalogueSnapshot([missing.id])))._tag).toBe(
+    "Failure",
+  );
+});
+
+it("refuses checkpoints during acceptance and acquisitions crossed by acceptance", async () => {
+  const { Worker } = await import("node:worker_threads");
+  const { inject } = await import("vitest");
+  const dataDir = await tempDir();
+  const provider = await fakeProvider();
+
+  let gate: {
+    method: "finishRefresh" | "status";
+    arrived: ReturnType<typeof Promise.withResolvers<void>>;
+    release: ReturnType<typeof Promise.withResolvers<void>>;
+  } | null = null;
+
+  const releases: (() => void)[] = [];
+  onTestFinished(() => releases.forEach((release) => release()));
+
+  const hold = (method: "finishRefresh" | "status") => {
+    const next = {
+      method,
+      arrived: Promise.withResolvers<void>(),
+      release: Promise.withResolvers<void>(),
+    };
+
+    releases.push(next.release.resolve);
+    gate = next;
+
+    return next;
+  };
+
+  const app = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      catalogueWorker: (setup) => {
+        const worker = new Worker(
+          inject("catalogueWorker") ??
+            new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url),
+          { workerData: setup },
+        );
+
+        const send = worker.postMessage.bind(worker);
+        // The injected worker transport holds a dispatch; production acceptance must invalidate first.
+        worker.postMessage = (
+          value: import("../src/main/ondemand/protocol.ts").WorkerRequest,
+          transfers,
+        ) => {
+          if (gate && value.method === gate.method) {
+            const held = gate;
+            gate = null;
+            held.arrived.resolve();
+            void held.release.promise.then(() => send(value, transfers));
+          } else send(value, transfers);
+        };
+
+        return worker;
+      },
+    }),
+  );
+
+  const onDemand = await app.runPromise(OnDemand);
+  const roster = await app.runPromise(Roster);
+  const source = await app.runPromise(roster.add(demoLogin(provider)));
+  await app.runPromise(onDemand.refresh(source.id));
+  const before = await app.runPromise(onDemand.catalogueSnapshot([source.id]));
+  const accepting = hold("finishRefresh");
+  const refresh = app.runPromise(onDemand.refresh(source.id));
+  await accepting.arrived.promise;
+  expect(Effect.runSyncExit(before.current)._tag).toBe("Failure");
+  expect((await app.runPromiseExit(onDemand.catalogueSnapshot([source.id])))._tag).toBe("Failure");
+  accepting.release.resolve();
+  await refresh;
+  const accepted = await app.runPromise(onDemand.catalogueSnapshot([source.id]));
+  expect(Effect.runSyncExit(accepted.current)._tag).toBe("Success");
+  const reading = hold("status");
+  const snapshot = app.runPromiseExit(onDemand.catalogueSnapshot([source.id]));
+  await reading.arrived.promise;
+  await app.runPromise(onDemand.refresh(source.id));
+  reading.release.resolve();
+  expect((await snapshot)._tag).toBe("Failure");
+  expect(
+    Effect.runSyncExit((await app.runPromise(onDemand.catalogueSnapshot([source.id]))).current)
+      ._tag,
+  ).toBe("Success");
+});
+
+it.each(["cold", "reconfigure", "source replacement"])(
+  "allows concurrent first collection catalogue snapshots after %s without weakening currency",
+  async (transition) => {
+    const provider = await fakeProvider();
+    const dataDir = await tempDir();
+    let app = runtimeFor(mainLayer(testConfig(dataDir)));
+    onTestFinished(() => app.dispose());
+    let onDemand = await app.runPromise(OnDemand);
+    const roster = await app.runPromise(Roster);
+    const source = await app.runPromise(roster.add(demoLogin(provider)));
+    await app.runPromise(onDemand.refresh(source.id));
+    const before = await app.runPromise(onDemand.catalogueSnapshot([source.id]));
+
+    const loaded = await Promise.all(
+      [1, 2].map(() => app.runPromiseExit(onDemand.catalogueSnapshot([source.id]))),
+    );
+
+    expect(loaded.map((result) => result._tag)).toEqual(["Success", "Success"]);
+
+    if (transition === "cold") {
+      await app.dispose();
+      app = runtimeFor(mainLayer(testConfig(dataDir)));
+      onDemand = await app.runPromise(OnDemand);
+    } else if (transition === "reconfigure") {
+      const settings = await app.runPromise(Settings);
+      await app.runPromise(settings.update({ tmdbKey: "changed-test-key" }));
+      await app.runPromise(onDemand.reconfigure);
+    } else {
+      const subscriptions = await app.runPromise(Subscriptions);
+      await app.runPromise(subscriptions.add(demoLogin(provider)));
+    }
+
+    expect(Effect.runSyncExit(before.current)._tag).toBe("Failure");
+
+    const snapshots = await Promise.all(
+      [1, 2].map(() => app.runPromiseExit(onDemand.catalogueSnapshot([source.id]))),
+    );
+
+    expect(snapshots.map((result) => result._tag)).toEqual(["Success", "Success"]);
+
+    for (const result of snapshots)
+      if (result._tag === "Success")
+        expect(Effect.runSyncExit(result.value.current)._tag).toBe("Success");
+    await app.runPromise(onDemand.refresh(source.id));
+
+    for (const result of snapshots)
+      if (result._tag === "Success")
+        expect(Effect.runSyncExit(result.value.current)._tag).toBe("Failure");
+  },
+);
 
 it("keeps configured metadata available without exposing household progress to kids", async () => {
   const tmdb = await startFakeTmdb();

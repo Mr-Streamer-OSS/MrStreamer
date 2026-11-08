@@ -75,7 +75,7 @@ function applyChanges(
     if (adult) {
       if (!after.adultTitles) consumers.get(client)?.hideAdults();
 
-      for (const group of ["library", "guide", "watchlist"]) {
+      for (const group of ["library", "guide", "watchlist", "collections"]) {
         void client.resetQueries({
           queryKey: [group],
           predicate: (query) => group !== "watchlist" || query.queryKey[1] !== "availability",

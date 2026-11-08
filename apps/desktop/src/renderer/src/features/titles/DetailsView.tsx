@@ -2,7 +2,9 @@
 // behind it: the facts, the actions, the story, the cast with their photos, and a series'
 // episodes. Resume is the main action for anything partly watched, and From the beginning plays
 // at once, without asking. Save puts the movie or the whole series on the watchlist and takes it
-// off again; it goes by the title in the lists, so it works before the details arrive. A title
+// off again; it goes by the title in the lists, so it works before the details arrive. Beside it,
+// the collections menu puts the version that plays in the viewer's collections and takes it out
+// (see features/collections/TitleCollections.tsx). A title
 // with several versions plays the one picked with the arrow beside Play, else the one it was
 // opened on, as from the 4K tab, else the one that suits best; the sheet shows that version, so a
 // series lists its episodes. The versions can be of several subscriptions: the menu then names
@@ -79,6 +81,7 @@ import {
 import { SeriesDownload } from "../downloads/SeriesDownload.tsx";
 import { transferred, useDownloadOf } from "../../lib/downloads.ts";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
+import { TitleCollections } from "../collections/TitleCollections.tsx";
 import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
 import { RelatedTitles } from "./RelatedTitles.tsx";
 import { VersionMenu } from "./VersionMenu.tsx";
@@ -99,6 +102,7 @@ interface SheetPlace {
 interface Versions {
   /** The title from the lists, with every version; null when they don't have it. */
   readonly title: Title | null;
+  readonly pending: boolean;
   readonly playing: OwnedId;
   readonly picked: OwnedId | null;
   /** The version Automatic plays, which its line in the menu names. */
@@ -243,10 +247,25 @@ export function DetailsView({
 
   return (
     <Sheet onClose={closeDetails} bar={bar} scroller={scroller}>
+      {listed.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {describeError(appError(listed.error))}{" "}
+          <button onClick={() => void listed.refetch()} className="text-white underline">
+            {t("Try again")}
+          </button>
+        </p>
+      )}
       {details.data && ready ? (
         <Content
           details={details.data}
-          versions={{ title, playing, picked, automatic, onPick: chooseVersion }}
+          versions={{
+            title,
+            pending: !listed.isSuccess,
+            playing,
+            picked,
+            automatic,
+            onPick: chooseVersion,
+          }}
           switching={details.isPlaceholderData}
           saving={saving}
           place={place}
@@ -569,6 +588,11 @@ function SeriesActions({
         <div className="flex flex-wrap items-center gap-3">
           {download}
           <SaveButton state={saving} />
+          <TitleCollections
+            title={versions.title}
+            pending={versions.pending}
+            version={versions.playing}
+          />
         </div>
         <SaveError state={saving} />
         {error && (
@@ -592,6 +616,11 @@ function SeriesActions({
         <div className="flex flex-wrap items-center gap-3">
           {download}
           <SaveButton state={saving} />
+          <TitleCollections
+            title={versions.title}
+            pending={versions.pending}
+            version={versions.playing}
+          />
         </div>
         <SaveError state={saving} />
         <p className="mt-6 text-[0.9375rem] text-muted-foreground">{t("No episodes yet.")}</p>
@@ -701,6 +730,7 @@ function Actions({
         )}
         {download}
         <SaveButton state={saving} />
+        <TitleCollections title={title} pending={versions.pending} version={playing} />
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>
             {t("Remove from Continue watching")}

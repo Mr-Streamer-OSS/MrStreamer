@@ -4,6 +4,7 @@ import { Library } from "./library.ts";
 import { OnDemand } from "./ondemand.ts";
 import { Watchlist } from "./watchlist.ts";
 import { CustomLists } from "./custom-lists.ts";
+import { Collections } from "./collections.ts";
 import { type } from "arktype";
 import {
   KidsProfilePolicySchema,
@@ -42,6 +43,7 @@ import * as Semaphore from "effect/Semaphore";
 import { profileDirectory, profileStorage } from "../platform/profile-store.ts";
 import { WatchlistStore, watchlistStoreLayer } from "../platform/watchlist-store.ts";
 import { CustomListStore, customListStoreLayer } from "../platform/custom-lists-store.ts";
+import { CollectionsStore, collectionsStoreLayer } from "../platform/collections-store.ts";
 import {
   Settings,
   AdmittedSettings,
@@ -79,6 +81,7 @@ export function personalStoresLayer({
     observedViewingStoreLayer(usage),
     watchlistStoreLayer,
     customListStoreLayer,
+    collectionsStoreLayer,
   ).pipe(Layer.provide(database ?? databaseLayer(profileDirectory(dataDir, profileId))));
 }
 
@@ -97,13 +100,18 @@ const PROFILE_OPERATIONS = Number.MAX_SAFE_INTEGER;
 type ProfileUpdate =
   | { readonly kind: "active"; readonly active: ActiveProfile }
   | { readonly kind: "viewing"; readonly owner: ActiveProfile | null; readonly sequence: number }
-  | { readonly kind: "watchlist" | "lists" | "erased"; readonly owner: ActiveProfile | null };
+  | {
+      readonly kind: "watchlist" | "lists" | "collections" | "erased";
+      readonly owner: ActiveProfile | null;
+    };
 
 /** The complete personal service environment an admitted operation may use. */
 type PersonalServices =
   | ViewingStore
   | WatchlistStore
   | CustomListStore
+  | CollectionsStore
+  | Collections
   | Settings
   | ViewingRecord
   | Watchlist
@@ -117,6 +125,7 @@ export interface ProfileAdmission {
     readonly viewing: ViewingRecord["Service"];
     readonly watchlist: Watchlist["Service"];
     readonly lists: CustomLists["Service"];
+    readonly collections: Collections["Service"];
     readonly settings: Settings["Service"];
   };
   /** A retained admission never resolves the active owner again, even when run much later. */
@@ -321,6 +330,7 @@ export function makeProfiles({
           ),
           Watchlist.layer,
           CustomLists.layer,
+          Collections.layer,
         ).pipe(Layer.provideMerge(personal), Layer.provide(Layer.succeedContext(shared)));
 
         const runtime = id === DEFAULT_PROFILE_ID ? null : ManagedRuntime.make(features);
@@ -354,8 +364,12 @@ export function makeProfiles({
         const viewing = Context.get(context, ViewingRecord);
         const watchlist = Context.get(context, Watchlist);
         const lists = Context.get(context, CustomLists);
+        const collections = Context.get(context, Collections);
 
         const watches = [
+          Stream.runForEach(collections.profileChanges, (owner) =>
+            PubSub.publish(events, { kind: "collections", owner }),
+          ),
           Stream.runForEach(
             viewing.profileChanges ??
               Stream.map(viewing.changes, (sequence) => ({ owner: null, sequence })),
@@ -483,6 +497,7 @@ export function makeProfiles({
               viewing: Context.get(handle.context, ViewingRecord),
               watchlist: Context.get(handle.context, Watchlist),
               lists: Context.get(handle.context, CustomLists),
+              collections: Context.get(handle.context, Collections),
               settings: Context.get(handle.context, Settings),
             },
           } satisfies ProfileAdmission;
@@ -784,9 +799,12 @@ export function makeProfiles({
             for (const row of rows) {
               const handle = yield* opened(row.id);
               yield* handle.one.withPermits(PROFILE_OPERATIONS)(
-                row.id === DEFAULT_PROFILE_ID && defaultErase
-                  ? defaultErase
-                  : Context.get(handle.context, ViewingRecord).erase(account),
+                Effect.andThen(
+                  row.id === DEFAULT_PROFILE_ID && defaultErase
+                    ? defaultErase
+                    : Context.get(handle.context, ViewingRecord).erase(account),
+                  Context.get(handle.context, CollectionsStore).erase(account),
+                ),
               );
               yield* PubSub.publish(events, {
                 kind: "erased",

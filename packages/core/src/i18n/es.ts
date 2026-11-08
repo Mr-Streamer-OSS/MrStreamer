@@ -3,6 +3,13 @@
 import type { Translation } from "../i18n.ts";
 
 export const es: Translation = {
+  "Collection admission has ended; retry the request.":
+    "El acceso a las colecciones ha caducado. Inténtalo de nuevo.",
+  "Collection catalogue is unavailable; retry the request.":
+    "El catálogo de colecciones no está disponible. Inténtalo de nuevo.",
+  "Collection admission is required; retry the request.":
+    "Se necesita acceso a las colecciones. Inténtalo de nuevo.",
+
   "Kids policy could not be read or saved. Try again.":
     "No se pudo leer o guardar la política infantil. Inténtalo de nuevo.",
   "Kids policy: enter the correct PIN.": "Política infantil: introduce el PIN correcto.",
@@ -1480,6 +1487,20 @@ export const es: Translation = {
   "Delete {name}?": "¿Eliminar {name}?",
   Lists: "Listas",
   "Lists for {name}": "Listas para {name}",
+  Collections: "Colecciones",
+  "New collection": "Nueva colección",
+  "Collection name": "Nombre de la colección",
+  "Delete collection": "Eliminar colección",
+  "Add to collection": "Añadir a una colección",
+  "This title isn't available here.": "Este título no está disponible aquí.",
+  "Collections for {name}": "Colecciones para {name}",
+  "In {count} collections": {
+    one: "En {count} colección",
+    many: "En {count} de colecciones",
+    other: "En {count} colecciones",
+  },
+  "Remove from {name}": "Quitar de {name}",
+  "Add movies and series to it from their details.": "Añade películas y series desde sus detalles.",
   "Not listed now": "Ya no figuran",
   "Not listed by {name} now": "{name} ya no lo ofrece",
   "{count} channels are from a subscription that isn't saved.": {

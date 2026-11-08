@@ -60,6 +60,7 @@ import { subtitleHandlers } from "./handlers/subtitles.ts";
 import { outputHandlers } from "./handlers/output.ts";
 import { viewingHandlers } from "./handlers/viewing.ts";
 import { customListHandlers } from "./handlers/custom-lists.ts";
+import { collectionsHandlers } from "./handlers/collections.ts";
 import { downloadHandlers } from "./handlers/downloads.ts";
 import { recordingHandlers } from "./handlers/recordings.ts";
 import { profileHandlers } from "./handlers/profiles.ts";
@@ -110,6 +111,7 @@ import { Subscriptions } from "./services/subscription.ts";
 import { DEFAULT_SCHEDULE, Updates, type UpdatesConfig } from "./services/updates.ts";
 import { Watchlist } from "./services/watchlist.ts";
 import { CustomLists } from "./services/custom-lists.ts";
+import { Collections } from "./services/collections.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
@@ -690,6 +692,7 @@ async function start(): Promise<void> {
     viewing,
     watchlist,
     customLists,
+    collections,
     diagnostics,
     licences,
     downloads,
@@ -713,6 +716,7 @@ async function start(): Promise<void> {
       viewing: ViewingRecord,
       watchlist: Watchlist,
       customLists: CustomLists,
+      collections: Collections,
       diagnostics: Diagnostics,
       licences: Licences,
       downloads: Downloads,
@@ -1087,6 +1091,9 @@ async function start(): Promise<void> {
           if (legacy) emit(mainWindow.webContents, "watchlist.changed", null);
         }
 
+        if (change.kind === "collections" || change.kind === "erased")
+          emit(mainWindow.webContents, "collections.changed", { owner });
+
         if (change.kind === "lists" || change.kind === "erased") {
           emit(mainWindow.webContents, "profiles.listsChanged", { owner });
 
@@ -1345,6 +1352,17 @@ async function start(): Promise<void> {
       }),
       ...viewingHandlers({ viewing, settings }),
       ...customListHandlers({ customLists }),
+      ...collectionsHandlers({
+        collections,
+        current: Effect.fail(
+          new Failed({
+            error: {
+              kind: "unexpected",
+              detail: t("Collection admission is required; retry the request."),
+            },
+          }),
+        ),
+      }),
       ...downloadHandlers({
         chooseFolder: async (current) => {
           const options: Electron.OpenDialogOptions = {
@@ -1462,6 +1480,7 @@ async function start(): Promise<void> {
           }),
           ...viewingHandlers({ viewing: scoped.viewing, settings: scoped.settings }),
           ...customListHandlers({ customLists: scoped.lists }),
+          ...collectionsHandlers({ collections: scoped.collections, current: admission.current }),
           ...playbackHandlers({
             playback,
             coordination,
