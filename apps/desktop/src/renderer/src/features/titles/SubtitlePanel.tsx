@@ -4,7 +4,7 @@
 // chosen track says Loading or Unavailable as the note over the picture does (`useSubtitleNote`).
 //   Up and Down walk its rows, Tab reaches its fields, Escape closes it from anywhere.
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { SubtitleServiceFailure } from "@mrstreamer/contracts/online-subtitles";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
@@ -80,8 +80,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
   // leaves the panel with it. Settings and search over the title keep their own Escape. One
   // listener for as long as the panel is open: the title's own key handler runs first and can
   // render the view again, and a listener put back in that moment would miss the key.
-  const close = useRef(onClose);
-  close.current = onClose;
+  const close = useEffectEvent(onClose);
   useEffect(() => {
     if (!open) return;
 
@@ -93,7 +92,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
       if (ui.searchOpen || ui.settings || ui.updateDialog) return;
       event.preventDefault();
       event.stopPropagation();
-      close.current();
+      close();
     };
 
     window.addEventListener("keydown", onKey, { capture: true });

@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, createElement } from "react";
+import { act, createElement, Fragment, startTransition, Suspense, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
@@ -158,6 +159,103 @@ afterEach(async () => {
 });
 
 describe("subtitle choices while the picture plays", () => {
+  it("keeps Escape on committed A while B suspends, then uses committed C after abandoning B", async () => {
+    await opened();
+    const closed: string[] = [];
+    let attemptedB = false;
+    const held = new Promise<void>(() => {});
+
+    function CommitLabel({ label }: { label: string }) {
+      if (label === "B") {
+        attemptedB = true;
+        throw held;
+      }
+
+      return createElement("span", { "data-committed": label }, label);
+    }
+
+    function View() {
+      const [label, setLabel] = useState("A");
+
+      return createElement(
+        Fragment,
+        null,
+        createElement("button", { onClick: () => startTransition(() => setLabel("B")) }, "Try B"),
+        createElement("button", { onClick: () => setLabel("C") }, "Commit C"),
+        createElement(
+          Suspense,
+          { fallback: createElement("span", null, "Waiting") },
+          createElement(SubtitlePanel, { open: true, onClose: () => closed.push(label) }),
+          createElement(CommitLabel, { label }),
+        ),
+      );
+    }
+
+    await render(createElement(View));
+    await press("Escape", document.body);
+    expect(closed).toEqual(["A"]);
+    await act(async () => button("Try B").click());
+    expect(attemptedB).toBe(true);
+    expect(container?.querySelector("[data-committed]")?.textContent).toBe("A");
+    expect(container?.textContent).not.toContain("Waiting");
+    await press("Escape", document.body);
+    expect(closed).toEqual(["A", "A"]);
+    await act(async () => button("Commit C").click());
+    expect(container?.querySelector("[data-committed]")?.textContent).toBe("C");
+    await press("Escape", document.body);
+    expect(closed).toEqual(["A", "A", "C"]);
+  });
+
+  it("handles the same Escape after an earlier capture handler commits a replacement callback, then cleans up", async () => {
+    await opened();
+    const closed: string[] = [];
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const panel = (open: boolean, label: string) =>
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(SubtitlePanel, { open, onClose: () => closed.push(label) }),
+      );
+
+    const replace = () => flushSync(() => root!.render(panel(true, "B")));
+    window.addEventListener("keydown", replace, { capture: true, once: true });
+
+    try {
+      container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(panel(true, "A"));
+        await settle();
+      });
+
+      const escape = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      });
+
+      await act(async () => {
+        document.body.dispatchEvent(escape);
+      });
+      expect(escape.defaultPrevented).toBe(true);
+      expect(closed).toEqual(["B"]);
+      await act(async () => root!.render(panel(false, "C")));
+      await press("Escape", document.body);
+      expect(closed).toEqual(["B"]);
+      await act(async () => root!.render(panel(true, "C")));
+      await press("Escape", document.body);
+      expect(closed).toEqual(["B", "C"]);
+      await act(async () => root!.unmount());
+      root = null;
+      await press("Escape", document.body);
+      expect(closed).toEqual(["B", "C"]);
+    } finally {
+      window.removeEventListener("keydown", replace, { capture: true });
+    }
+  });
+
   it("does not search on open, shows complete results, keeps the panel after choosing and cancels a pending request on close", async () => {
     await opened();
     const closed = vi.fn();

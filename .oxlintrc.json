@@ -77,6 +77,15 @@
       }
     },
     {
+      "files": ["apps/desktop/src/renderer/src/features/titles/SubtitlePanel.tsx"],
+      "plugins": ["import", "typescript", "react", "promise", "oxc"],
+      "rules": {
+        "react/purity": "error",
+        "react/refs": "error",
+        "react/set-state-in-render": "error"
+      }
+    },
+    {
       "files": ["packages/**"],
       "rules": {
         "no-restricted-imports": [
