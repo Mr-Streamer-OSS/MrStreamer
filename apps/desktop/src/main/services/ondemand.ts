@@ -161,8 +161,6 @@ export interface CollectionQuery {
   readonly offset: number;
   readonly limit: number;
   readonly filters?: TitleFilters;
-  /** Main-process retention hint from the already captured smart collections, never sent to the worker. */
-  readonly ruleCacheSize?: number;
 }
 
 /** Where a movie or episode streams from. Contains the login, so it stays in the main process. */
@@ -261,8 +259,8 @@ export class OnDemand extends Context.Service<
       kind: TitleKind,
       of: "genres" | "services",
     ): Effect.Effect<readonly CollectionTile[], Failed>;
-    /** One page of a collection. */
-    collection(query: CollectionQuery): Effect.Effect<CollectionPage, Failed>;
+    /** One page of a collection; retention is an internal cache hint, separate from the renderer query. */
+    collection(query: CollectionQuery, retention?: number): Effect.Effect<CollectionPage, Failed>;
     /**
      * A page of the watchlist that what `subscriptions` saved makes together: each entry with
      * the title it is in their lists now, without titles for adults unless the viewer shows them.
@@ -1723,15 +1721,10 @@ function make(deps: OnDemandDeps) {
         }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
         loaded((owners, language) => call("tiles", { owners, language, kind, of }), true),
-      collection: ({
-        kind,
-        id,
-        sort,
-        offset,
-        limit,
-        filters,
-        ruleCacheSize: retention,
-      }: CollectionQuery) =>
+      collection: (
+        { kind, id, sort, offset, limit, filters }: CollectionQuery,
+        retention?: number,
+      ) =>
         loaded(
           (owners, language) =>
             Effect.gen(function* () {
@@ -1741,7 +1734,8 @@ function make(deps: OnDemandDeps) {
               }
 
               // Collections already read their store; ordinary discovery never depends on it.
-              if (retention !== undefined) ruleCacheSize = retention;
+              if (retention !== undefined)
+                ruleCacheSize = Number.isFinite(retention) ? Math.max(2, Math.floor(retention)) : 2;
               const files = filters ? yield* knownFiles(kind) : undefined;
               const watched = yield* watchedFiles(kind, filters, owners, language);
 

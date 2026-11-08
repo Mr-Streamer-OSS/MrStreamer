@@ -417,21 +417,23 @@ export class Collections extends Context.Service<
             if (!list.rules) continue;
             const matches: CollectionTitle[] = [];
 
-            const page = yield* onDemand.collection({
-              kind: list.rules.kind,
-              ruleCacheSize,
-              id: "all",
-              offset: 0,
-              limit: Number.MAX_SAFE_INTEGER,
-              // A source first accepted during this read belongs to the next snapshot.
-              filters: {
-                ...list.rules.filters,
-                sourceIds: loadedSources.filter(
-                  (id) =>
-                    !list.rules?.filters.sourceIds || list.rules.filters.sourceIds.includes(id),
-                ),
+            const page = yield* onDemand.collection(
+              {
+                kind: list.rules.kind,
+                id: "all",
+                offset: 0,
+                limit: Number.MAX_SAFE_INTEGER,
+                // A source first accepted during this read belongs to the next snapshot.
+                filters: {
+                  ...list.rules.filters,
+                  sourceIds: loadedSources.filter(
+                    (id) =>
+                      !list.rules?.filters.sourceIds || list.rules.filters.sourceIds.includes(id),
+                  ),
+                },
               },
-            });
+              ruleCacheSize,
+            );
 
             for (const title of page.titles) {
               const member = {
