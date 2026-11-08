@@ -69,9 +69,15 @@ export interface KnownFile {
   readonly tags?: readonly string[];
 }
 
+/** This profile's progress on one exact movie version or episode file, by its owned key. */
+export interface WatchedFile {
+  readonly key: string;
+  readonly state: "watched" | "in-progress";
+}
+
 interface FilterQuery {
   readonly filters?: TitleFilters;
-  readonly watched?: readonly { readonly key: string; readonly state: "watched" | "in-progress" }[];
+  readonly watched?: readonly WatchedFile[];
   readonly files?: readonly KnownFile[];
 }
 

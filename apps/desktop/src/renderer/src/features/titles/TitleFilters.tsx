@@ -199,8 +199,7 @@ export function TitleChoiceMenu<V extends string>({
   disabled = false,
   clearable = false,
   showLabel = true,
-  defaultOpen,
-  onOpenChange,
+  ...opening
 }: {
   label: string;
   description?: string;
@@ -215,10 +214,7 @@ export function TitleChoiceMenu<V extends string>({
 
   return (
     <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
-      <Menu.Root
-        {...(defaultOpen ? { defaultOpen } : {})}
-        {...(onOpenChange ? { onOpenChange } : {})}
-      >
+      <Menu.Root {...opening}>
         <Menu.Trigger
           disabled={disabled}
           aria-label={[label, selected?.label].filter(Boolean).join(": ")}
@@ -273,8 +269,7 @@ function ManyChoiceMenu({
   value,
   onChange,
   disabled = false,
-  defaultOpen,
-  onOpenChange,
+  ...opening
 }: {
   label: string;
   description: string;
@@ -298,10 +293,7 @@ function ManyChoiceMenu({
 
   return (
     <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
-      <Menu.Root
-        {...(defaultOpen ? { defaultOpen } : {})}
-        {...(onOpenChange ? { onOpenChange } : {})}
-      >
+      <Menu.Root {...opening}>
         <Menu.Trigger
           disabled={disabled}
           aria-label={[label, text].filter(Boolean).join(": ")}

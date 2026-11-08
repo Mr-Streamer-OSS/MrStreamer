@@ -63,6 +63,7 @@ import { metadataStore, type Wanted } from "./metadata.ts";
 import type {
   CatalogueOwner,
   KnownFile,
+  WatchedFile,
   WorkerCalls,
   WorkerEvent,
   WorkerRequest,
@@ -514,12 +515,21 @@ function shownOf(members: readonly Loaded[], language: string): Shown {
   return shown;
 }
 
+/** TMDB's genre names for a title, once its metadata is loaded; null before. */
+function genresFor(title: Title): string[] | null {
+  const meta = title.tmdbId
+    ? metadata.get(title.kind === "movie" ? "movie" : "tv", title.tmdbId)
+    : null;
+
+  return meta ? genresOf(meta) : null;
+}
+
 /** Last-read tracks count only while their exact file remains in these owners' current lists. */
 function filterFiles(
   found: Shown,
   kind: TitleKind,
   known: readonly KnownFile[],
-  watched?: readonly { readonly key: string; readonly state: "watched" | "in-progress" }[],
+  watched?: readonly WatchedFile[],
 ): FilterFiles {
   const result = new Map<string, FilterFile[]>();
   const progress = watched ? new Map(watched.map((entry) => [entry.key, entry.state])) : undefined;
@@ -575,11 +585,7 @@ function filterFiles(
   }
 
   for (const title of kindOf(found.index, kind).titles) {
-    const meta = title.tmdbId
-      ? metadata.get(kind === "movie" ? "movie" : "tv", title.tmdbId)
-      : null;
-
-    const genres = meta ? genresOf(meta) : [];
+    const genres = genresFor(title) ?? [];
 
     for (const version of title.versions) {
       const key = ownedKey(version);
@@ -926,11 +932,9 @@ const handlers: {
     const indexed = kindOf(found.index, kind).titles;
 
     const titles = (adults ? indexed : indexed.filter((title) => !title.adult)).map((title) => {
-      const meta = title.tmdbId
-        ? metadata.get(kind === "movie" ? "movie" : "tv", title.tmdbId)
-        : null;
+      const genres = genresFor(title);
 
-      return meta ? { ...title, genres: genresOf(meta) } : title;
+      return genres ? { ...title, genres } : title;
     });
 
     return filterOptions(titles, filterFiles(found, kind, files));

@@ -37,9 +37,9 @@ export interface CollectionVisibility {
    * request upstream with a retryable failure, never supply an empty successful catalogue.
    * Filter before selecting labels or counting members.
    */
+  readonly catalogue: readonly (CollectionTitle & { readonly title?: Title })[];
   /** Current rule results from the admitted catalogue; never persisted as manual members. */
   readonly smart?: ReadonlyMap<string, readonly CollectionTitle[]>;
-  readonly catalogue: readonly (CollectionTitle & { readonly title?: Title })[];
 }
 
 /**

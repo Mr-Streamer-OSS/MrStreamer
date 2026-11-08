@@ -189,7 +189,7 @@ interface Editing {
   readonly kind: "create" | "rename" | "delete";
   readonly id: string;
   /** A new smart collection's name: it becomes a draft to give rules, not a change. */
-  readonly smart?: true;
+  readonly smart?: boolean;
 }
 
 /** A smart collection named but not stored yet, until its first rule is saved. */
@@ -385,13 +385,7 @@ export function CollectionNav({
         <NewCollection
           triggerRef={focusIfDue(NEW)}
           // One id per field, so sending a refused create again cannot make a second collection.
-          onPick={(smart) =>
-            begin(
-              smart
-                ? { kind: "create", id: crypto.randomUUID(), smart }
-                : { kind: "create", id: crypto.randomUUID() },
-            )
-          }
+          onPick={(smart) => begin({ kind: "create", id: crypto.randomUUID(), smart })}
         />
       ) : (
         <button
@@ -426,7 +420,7 @@ function NewCollection({
   onPick,
 }: {
   triggerRef: (node: HTMLButtonElement | null) => void;
-  onPick: (smart: true | null) => void;
+  onPick: (smart: boolean) => void;
 }) {
   const picked = useRef(false);
   const item = cn(menuItem, "flex flex-col gap-0.5 p-2");
@@ -449,7 +443,7 @@ function NewCollection({
           >
             {(
               [
-                [null, t("Collection"), t("Titles you add")],
+                [false, t("Collection"), t("Titles you add")],
                 [true, t("Smart collection"), t("Titles that match rules")],
               ] as const
             ).map(([smart, name, hint]) => (

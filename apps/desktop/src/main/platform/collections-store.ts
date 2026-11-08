@@ -3,7 +3,6 @@ import { EVENT_VERSION } from "@mrstreamer/core/viewing/record";
 import type { DatabaseSync } from "node:sqlite";
 import { TITLE_KINDS } from "@mrstreamer/contracts/ondemand";
 import { type } from "arktype";
-import { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { defined } from "@mrstreamer/core/defined";
 import { normalize } from "@mrstreamer/core/text";
 import * as Context from "effect/Context";
@@ -16,7 +15,7 @@ import {
   type CollectionChange,
   type CollectionTitle,
   type PersonalCollection,
-  type SmartCollectionRules,
+  SmartCollectionRules,
 } from "@mrstreamer/contracts/collections";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
 
@@ -60,8 +59,6 @@ export class CollectionsStore extends Context.Service<
     ) => Effect.Effect<void, Failed>;
   }
 >()("mrstreamer/CollectionsStore") {}
-
-const Rules = type({ kind: type.enumerated(...TITLE_KINDS), filters: TitleFilters() });
 
 const Row = type({ id: "string", name: "string" });
 
@@ -188,7 +185,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
         .get(row.id);
 
       const rules = saved
-        ? Rules.assert(JSON.parse(type("string").assert(saved.rules)))
+        ? SmartCollectionRules().assert(JSON.parse(type("string").assert(saved.rules)))
         : undefined;
 
       return {
@@ -234,7 +231,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
             throw new Error("Smart collection membership is determined by its rules.");
 
           const saveRules = (id: string, rules: SmartCollectionRules) => {
-            const parsed = Rules.assert(rules);
+            const parsed = SmartCollectionRules().assert(rules);
 
             if (
               !Object.keys(parsed.filters).length ||

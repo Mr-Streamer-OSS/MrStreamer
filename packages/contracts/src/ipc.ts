@@ -3,7 +3,11 @@
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
-import type { CollectionPage as PersonalCollectionPage, CollectionSummary } from "./collections.ts";
+import {
+  SmartCollectionRules,
+  type CollectionPage as PersonalCollectionPage,
+  type CollectionSummary,
+} from "./collections.ts";
 import { GuideSearchPageInput, SavedGuideQuery } from "./guide-query.ts";
 import {
   analyticsFeatures,
@@ -628,7 +632,7 @@ export const ipcInputs = {
   "collections.change": () => {
     const identity = type({ sourceId: "string > 0", kind: titleKind(), titleId: "string > 0" });
 
-    const rules = type({ kind: titleKind(), filters: TitleFilters() });
+    const rules = SmartCollectionRules();
 
     return type({ kind: "'create'", id: listId(), name: "string", "rules?": rules })
       .or({ kind: "'rename'", id: listId(), name: "string" })

@@ -165,7 +165,7 @@ function OwnedSave({ kind, filters }: { kind: TitleKind; filters: TitleFilters }
  * A smart collection open in the Collections tab: its name and count, its rules inline and, while
  * they differ from the saved ones, the Rules changed bar over a preview of what they match.
  * `saved` is null for a new one not stored yet, which saves as `change` creates it. `children` is
- * the saved matches, shown while nothing is changed.
+ * the saved matches, shown while nothing is changed; a new one has none.
  */
 export function SmartPane({
   kind,
@@ -188,7 +188,7 @@ export function SmartPane({
   active: boolean;
   /** Under the rules, such as a failed refresh of the saved matches. */
   notes?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const [edit, setEdit] = useState<TitleFilters | null>(null);
   // Rules just stored stay shown, without the bar, until the collections read again has them.

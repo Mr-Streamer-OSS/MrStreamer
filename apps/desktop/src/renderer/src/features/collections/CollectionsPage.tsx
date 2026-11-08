@@ -57,11 +57,11 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
   // A smart collection named here and given no saved rule yet.
   const [draft, setDraft] = useState<(SmartDraft & { kind: TitleKind }) | null>(null);
 
-  // Once stored, the draft is a collection like the others.
+  // Once stored, the draft is a collection like the others. Setting state here re-renders before
+  // anything is shown, so the rest of this render never sees a stored draft.
   if (draft && collections?.some((each) => each.id === draft.id)) setDraft(null);
 
-  const drafting =
-    draft && opened === draft.id && !collections?.some((each) => each.id === draft.id);
+  const drafting = draft && opened === draft.id;
 
   const lastOpen = useRef<string | null>(null);
 
@@ -106,9 +106,7 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
           })}
           onDiscard={() => setDraft(null)}
           active={active}
-        >
-          {null}
-        </SmartPane>
+        />
       ) : (
         id && (
           <Members

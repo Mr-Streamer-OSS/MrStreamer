@@ -1,5 +1,7 @@
-import type { TitleFilters } from "./title-filters.ts";
-import type { Title, TitleKind } from "./ondemand.ts";
+import { type } from "arktype";
+import { lazy, type Infer } from "./lazy.ts";
+import { TitleFilters } from "./title-filters.ts";
+import { TITLE_KINDS, type Title, type TitleKind } from "./ondemand.ts";
 
 /** Current admitted subscription id, media type and provider id. Display names never identify members. */
 export interface CollectionIdentity {
@@ -19,10 +21,12 @@ export interface CollectionTitle extends CollectionIdentity {
 /** The most characters a collection's name has, once trimmed. */
 export const COLLECTION_NAME_MAX = 120;
 
-export interface SmartCollectionRules {
-  readonly kind: TitleKind;
-  readonly filters: TitleFilters;
-}
+/** One kind's saved discovery filters. A collection with rules is smart: they pick its members. */
+export const SmartCollectionRules = lazy(() =>
+  type({ kind: type.enumerated(...TITLE_KINDS), filters: TitleFilters() }),
+);
+
+export type SmartCollectionRules = Infer<typeof SmartCollectionRules>;
 
 export interface PersonalCollection {
   readonly id: string;
