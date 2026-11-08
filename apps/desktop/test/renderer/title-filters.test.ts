@@ -12,6 +12,7 @@ import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { syncViewing, queries } from "../../src/renderer/src/lib/queries.ts";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import type { DetailsTarget } from "../../src/renderer/src/app/ui-store.ts";
+import { RuleMenus } from "../../src/renderer/src/features/titles/TitleFilters.tsx";
 
 const options: FilterOptions = {
   qualities: ["4k", "full-hd", "hd", "unknown"],
@@ -682,4 +683,52 @@ it("announces a collection's count when filtering changes it", async () => {
   ipc.always("ondemand.collection", { name: "Drama", titles: [], total: 2, unfiltered: 10 });
   await page.click("4K", "Quality");
   await page.until(() => expect(count?.textContent).toBe("2 of 10"));
+});
+
+it("returns to Add rule on Escape and hands a picked rule its own menu's focus", async () => {
+  vi.useRealTimers();
+  ipc.always("subscription.list", [SAVED]);
+  ipc.always("ondemand.filterOptions", options);
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  const onFilters = vi.fn();
+  cleanup = view.unmount;
+  await view.render(
+    createElement(RuleMenus, { kind: "movie", filters: {}, onFilters, setOnly: true }),
+  );
+
+  const trigger = view.container.querySelector<HTMLButtonElement>("button[aria-label='Add rule']")!;
+  const popup = () => document.querySelector<HTMLElement>("[role=menu][aria-label='Add rule']");
+  await act(async () => {
+    trigger.focus();
+    trigger.click();
+  });
+  await vi.waitFor(() => expect(popup()?.contains(document.activeElement)).toBe(true));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  });
+  await vi.waitFor(() => expect(popup()).toBeNull());
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(onFilters).not.toHaveBeenCalled();
+
+  await act(async () => {
+    trigger.click();
+  });
+  await vi.waitFor(() => expect(popup()?.contains(document.activeElement)).toBe(true));
+
+  const rating = [...popup()!.querySelectorAll<HTMLElement>("[role=menuitem]")].find(
+    (item) => item.textContent === "Rating",
+  )!;
+
+  await act(async () => rating.click());
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector("[role=menu][aria-label=Rating]")?.contains(document.activeElement),
+    ).toBe(true),
+  );
+  expect(popup()).toBeNull();
+  expect(onFilters).not.toHaveBeenCalled();
 });

@@ -6,7 +6,7 @@ import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Plus } from "lucide-react";
-import { Fragment, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import {
   QUALITY_HINTS,
@@ -718,10 +718,11 @@ export function RuleMenus({
 /** + Rule: the rules not set yet. The one picked opens its own menu next. */
 function AddRule({ rules, onAdd }: { rules: readonly Rule[]; onAdd: (rule: Rule) => void }) {
   const label = t("Add rule");
+  const picked = useRef(false);
 
   return (
     <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
-      <Menu.Root>
+      <Menu.Root onOpenChange={(open) => open && (picked.current = false)}>
         <Menu.Trigger aria-label={label} className={triggerClass}>
           <Plus aria-hidden className="size-3.5 flex-none" />
           {t("Rule")}
@@ -730,8 +731,8 @@ function AddRule({ rules, onAdd }: { rules: readonly Rule[]; onAdd: (rule: Rule)
           <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
             <Menu.Popup
               aria-label={label}
-              // The added rule's own menu takes the focus.
-              finalFocus={false}
+              // A picked rule takes the focus; cancellation returns it to this trigger.
+              finalFocus={() => !picked.current}
               className={popupClass}
               onKeyDown={popupKeys}
             >
@@ -739,7 +740,10 @@ function AddRule({ rules, onAdd }: { rules: readonly Rule[]; onAdd: (rule: Rule)
                 <Menu.Item
                   key={rule}
                   closeOnClick
-                  onClick={() => onAdd(rule)}
+                  onClick={() => {
+                    picked.current = true;
+                    onAdd(rule);
+                  }}
                   className={cn(itemClass, "px-2")}
                 >
                   {rule === "verified" ? t("Verified sound or subtitles") : t(RULE_NAMES[rule])}
