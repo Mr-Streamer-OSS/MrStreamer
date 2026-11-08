@@ -740,6 +740,8 @@ describe("a title's collections menu in its details", () => {
     "suspends a retained title after an actual refetch error and retries its %s with fresh facts",
     async (operation) => {
       mainCollections([{ name: "Private films", members: [] }], [{ ...film, id: "4k" }]);
+      const lists = ipc.hold("collections.list");
+      const memberships = ipc.hold("collections.memberships");
       const client = await details();
       const stop = syncOnDemand(client);
       const close = unmount;
@@ -748,7 +750,20 @@ describe("a title's collections menu in its details", () => {
         close();
       };
 
+      // Text also matches the loading placeholder; both reads must admit the real trigger.
       await vi.waitFor(() => expect(button("Add to collection")).toBeTruthy());
+      expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
+      await act(async () => button("Add to collection").click());
+      expect(() => button("New collection")).toThrow();
+      await act(async () => lists.resolve([{ id: "c0", name: "Private films", total: 0 }]));
+      expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
+      await act(async () => memberships.resolve([]));
+      await vi.waitFor(() =>
+        expect(
+          document.querySelector("[aria-label='Collections for Night Harbour']"),
+        ).not.toBeNull(),
+      );
+      expect(button("Add to collection").hasAttribute("disabled")).toBe(false);
       await act(async () => button("Add to collection").click());
       const held = ipc.hold("collections.change");
 
