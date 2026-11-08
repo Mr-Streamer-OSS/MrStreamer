@@ -9,7 +9,7 @@ import { Output } from "../src/main/services/output.ts";
 import { PlaybackCoordination } from "../src/main/services/playback-coordination.ts";
 import { analyticsFixture } from "./e2e/analytics-fixture.ts";
 import { Failed } from "@mrstreamer/core/failure";
-import type { FakeProviderOptions } from "./fake-provider.ts";
+import type { FakeProvider, FakeProviderOptions } from "./fake-provider.ts";
 import { startFakeTmdb } from "./fake-tmdb.ts";
 import { defined } from "@mrstreamer/core/defined";
 import { describe, expect, it, vi, onTestFinished } from "vitest";
@@ -150,6 +150,7 @@ async function fixture(
     live?: boolean;
     notifier?: Notifier;
     now?: number;
+    guideXml?: (provider: FakeProvider) => string;
     titlesOf?: FakeProviderOptions["titlesOf"];
     tmdb?: { readonly key: string; readonly api: string };
   } = {},
@@ -194,6 +195,9 @@ async function fixture(
     live: options.live ?? false,
     ...defined({ titlesOf: options.titlesOf }),
   });
+
+  // Subscription startup may download the guide before the fixture returns.
+  if (options.guideXml) provider.serveGuide(options.guideXml(provider));
 
   const roster = await app.runPromise(Roster);
   const subscriptions = await app.runPromise(Subscriptions);
@@ -616,8 +620,23 @@ it("suppresses restricted notifications and closes existing ones without changin
   const closed: string[] = [];
   const now = Date.parse("2026-10-02T20:10:00+02:00");
 
+  const guided = (provider: FakeProvider) =>
+    provider.catalogue.channels.find(
+      (item) => item.streamId >= 2000 && !item.offline && item.guideId && !item.adult,
+    )!;
+
+  const guideXml = (provider: FakeProvider) => {
+    const channel = guided(provider);
+
+    const programme = (start: string, stop: string, title: string) =>
+      `<programme start="20261002${start}00 +0200" stop="20261002${stop}00 +0200" channel="${channel.guideId}"><title>${title}</title></programme>`;
+
+    return `<?xml version="1.0"?><tv>${programme("2030", "2130", "Restricted first")}${programme("2130", "2300", "Restricted second")}</tv>`;
+  };
+
   const f = await fixture({
     now,
+    guideXml,
     notifier: {
       supported: true,
       show: (notice, events) => {
@@ -630,16 +649,8 @@ it("suppresses restricted notifications and closes existing ones without changin
     },
   });
 
-  const channel = f.provider.catalogue.channels.find(
-    (item) => item.streamId >= 2000 && !item.offline && item.guideId && !item.adult,
-  )!;
+  const channel = guided(f.provider);
 
-  const programme = (start: string, stop: string, title: string) =>
-    `<programme start="20261002${start}00 +0200" stop="20261002${stop}00 +0200" channel="${channel.guideId}"><title>${title}</title></programme>`;
-
-  f.provider.serveGuide(
-    `<?xml version="1.0"?><tv>${programme("2030", "2130", "Restricted first")}${programme("2130", "2300", "Restricted second")}</tv>`,
-  );
   await f.app.runPromise(f.guide.refresh(f.source.id));
   expect(
     await f.call(f.adult, "guide.searchPage", {
