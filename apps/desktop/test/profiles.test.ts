@@ -1,3 +1,6 @@
+import { collectionsHandlers } from "../src/main/handlers/collections.ts";
+import { Collections } from "../src/main/services/collections.ts";
+import * as Deferred from "effect/Deferred";
 import { Failed } from "@mrstreamer/core/failure";
 import type { IpcMainInvokeEvent } from "electron";
 import type { Json } from "@mrstreamer/contracts/json";
@@ -396,6 +399,161 @@ describe("admitted personal stores", () => {
     const restarted = await open("viewer-b");
     expect((await restarted.settings.ofSubscription(second.id)).lastChannelId).toBe("B");
   });
+});
+
+it.for(["failure", "cancellation"] as const)(
+  "releases collection acquisition after startup %s and admits a working retry",
+  async (mode, { signal }) => {
+    const dataDir = await tempDir();
+    const entered = await Effect.runPromise(Deferred.make<void>());
+    const closed = await Effect.runPromise(Deferred.make<void>());
+    const abort = new AbortController();
+    const onAbort = () => abort.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    const originalLayer = ProfileSessions.layer;
+    let first = true;
+    const factory = vi.spyOn(ProfileSessions, "layer").mockImplementationOnce((options) =>
+      originalLayer(options).pipe(
+        Layer.provide(
+          Layer.effect(
+            Collections,
+            Effect.map(Collections, (collections) => ({
+              ...collections,
+              profileChanges: Effect.gen(function* () {
+                const stream = yield* collections.profileChanges;
+                if (!first) return stream;
+                first = false;
+                // Refuse only this public acquisition, after its real resource is acquired.
+                yield* Effect.addFinalizer(() => Deferred.succeed(closed, undefined));
+                yield* Deferred.succeed(entered, undefined);
+                if (mode === "failure") return yield* Effect.die("collection startup refused");
+
+                return yield* Effect.never;
+              }),
+            })),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      const layer = mainLayer(testConfig(dataDir));
+      factory.mockRestore();
+      const runtime = runtimeFor(layer);
+      const sessions = await runtime.runPromise(ProfileSessions);
+      const owner = await runtime.runPromise(sessions.active);
+      const pending = runtime.runPromiseExit(sessions.admitFor(owner), { signal: abort.signal });
+      await Effect.runPromise(Deferred.await(entered), { signal });
+      if (mode === "cancellation") abort.abort();
+      const refused = await pending;
+      expect(Exit.isFailure(refused)).toBe(true);
+      if (Exit.isFailure(refused)) {
+        if (mode === "failure")
+          expect(Cause.pretty(refused.cause)).toContain("collection startup refused");
+        else expect(Cause.hasInterrupts(refused.cause)).toBe(true);
+      }
+      await Effect.runPromise(Deferred.await(closed), { signal });
+
+      const admitted = await runtime.runPromise(sessions.admitFor(owner), { signal });
+      const commands = collectionsHandlers({
+        collections: admitted.services.collections,
+        current: admitted.current,
+      });
+      const changes = await runtime.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* sessions.changes;
+            const pull = yield* Stream.toPull(
+              Stream.filter(stream, (change) => change.kind === "collections"),
+            );
+            yield* admitted.run(
+              commands["collections.change"]({ kind: "create", id: "retry", name: "Retry" }, "test"),
+            );
+
+            return yield* pull;
+          }),
+        ),
+        { signal },
+      );
+      expect(changes).toEqual([{ kind: "collections", owner }]);
+      expect(
+        await runtime.runPromise(admitted.run(commands["collections.list"](undefined, "test"))),
+      ).toEqual([expect.objectContaining({ id: "retry", name: "Retry" })]);
+    } finally {
+      abort.abort();
+      signal.removeEventListener("abort", onAbort);
+      factory.mockRestore();
+    }
+  },
+);
+
+it("retains the collection acquisition past caller scope closure and releases it on runtime disposal", async ({
+  signal,
+}) => {
+  const dataDir = await tempDir();
+  let released = false;
+  const originalLayer = ProfileSessions.layer;
+  const factory = vi.spyOn(ProfileSessions, "layer").mockImplementationOnce((options) =>
+    originalLayer(options).pipe(
+      Layer.provide(
+        Layer.effect(
+          Collections,
+          Effect.map(Collections, (collections) => ({
+            ...collections,
+            profileChanges: Effect.gen(function* () {
+              const stream = yield* collections.profileChanges;
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  released = true;
+                }),
+              );
+
+              return stream;
+            }),
+          })),
+        ),
+      ),
+    ),
+  );
+
+  try {
+    const layer = mainLayer(testConfig(dataDir));
+    factory.mockRestore();
+    const runtime = runtimeFor(layer);
+    const sessions = await runtime.runPromise(ProfileSessions);
+    const admitted = await runtime.runPromise(Effect.scoped(sessions.admit), { signal });
+    const commands = collectionsHandlers({
+      collections: admitted.services.collections,
+      current: admitted.current,
+    });
+    expect(released).toBe(false);
+    const changes = await runtime.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const stream = yield* sessions.changes;
+          const pull = yield* Stream.toPull(
+            Stream.filter(stream, (change) => change.kind === "collections"),
+          );
+          yield* admitted.run(
+            commands["collections.change"]({ kind: "create", id: "retained", name: "Retained" }, "test"),
+          );
+
+          return yield* pull;
+        }),
+      ),
+      { signal },
+    );
+    expect(changes).toEqual([{ kind: "collections", owner: admitted.owner }]);
+    expect(released).toBe(false);
+    await runtime.dispose();
+    expect(released).toBe(true);
+    const refused = await Effect.runPromiseExit(admitted.run(Effect.void));
+    expect(Exit.isFailure(refused)).toBe(true);
+    if (Exit.isFailure(refused))
+      expect(Cause.pretty(refused.cause)).toContain("This profile admission has ended");
+  } finally {
+    factory.mockRestore();
+  }
 });
 
 describe("profile lifecycle before UI enablement", () => {

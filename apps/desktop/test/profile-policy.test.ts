@@ -1608,7 +1608,7 @@ it("retains a successful collection mutation while its acquired forwarder has no
           Collections,
           Effect.map(Collections, (collections) => ({
             ...collections,
-            profileChanges: holdConsumption(collections.profileChanges),
+            profileChanges: Effect.map(collections.profileChanges, holdConsumption),
           })),
         ),
       ),
