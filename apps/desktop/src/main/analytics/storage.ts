@@ -45,6 +45,10 @@ export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
  */
 const FormatOne = lazy(() => type({ format: "1", pending: "unknown[]" }));
 const LegacySummary = lazy(() => type({ event: { event: "'app_summary_day'" } }));
+const Format = lazy(() => type({ format: "number.integer" }));
+
+/** The only load failure the app sees: stored values and file causes stay private. */
+const unavailable = () => new Error("Analytics state unavailable.");
 
 // Analytics state is private. Never use storage diagnostics that print a parse failure's values.
 export function analyticsStore(dataDir: string) {
@@ -52,11 +56,7 @@ export function analyticsStore(dataDir: string) {
 
   return {
     async load(): Promise<AnalyticsRecord | null> {
-      const read = await readJsonResult(
-        path,
-        decodeAnalytics,
-        () => new Error("Analytics state unavailable."),
-      );
+      const read = await readJsonResult(path, decodeAnalytics, unavailable);
 
       if (read.kind === "missing") return null;
 
@@ -66,11 +66,7 @@ export function analyticsStore(dataDir: string) {
 
       // The discarded counts leave the disk now, not at the next unrelated write.
       if (migrated) {
-        const write = await writeJsonResult(
-          path,
-          record,
-          () => new Error("Analytics state unavailable."),
-        );
+        const write = await writeJsonResult(path, record, unavailable);
 
         if (write.kind === "refused") throw write.error;
       }
@@ -88,16 +84,10 @@ export function analyticsStore(dataDir: string) {
 /** Interprets only analytics formats and salvages optional work without exposing stored values. */
 const decodeAnalytics: Decode<{ record: AnalyticsRecord; migrated: boolean }, Error> = (parsed) => {
   // A later envelope need not retain the current record's fields.
-  if (
-    type.keywords.object.root.allows(parsed) &&
-    !Array.isArray(parsed) &&
-    "format" in parsed &&
-    type.keywords.number.integer.allows(parsed.format) &&
-    parsed.format > 2
-  )
-    return { kind: "newer", error: new Error("Analytics state unavailable.") };
+  const format = Format()(parsed);
 
-  let record: AnalyticsRecord;
+  if (!(format instanceof type.errors) && format.format > 2)
+    return { kind: "newer", error: unavailable() };
 
   try {
     const legacy = FormatOne()(parsed);
@@ -153,7 +143,7 @@ const decodeAnalytics: Decode<{ record: AnalyticsRecord; migrated: boolean }, Er
       checked.pending.some((item) => item.event.distinct_id !== checked.installationId)
     )
       throw new Error();
-    record = checked;
+    let record: AnalyticsRecord = checked;
     // Optional new work cannot turn valid .15 consent into an unavailable preference.
     const optional = type({ "summaries?": "unknown" })(current);
 
@@ -227,6 +217,6 @@ const decodeAnalytics: Decode<{ record: AnalyticsRecord; migrated: boolean }, Er
 
     return { kind: "read", value: { record, migrated } };
   } catch {
-    return { kind: "unreadable", error: new Error("Analytics state unavailable.") };
+    return { kind: "unreadable", error: unavailable() };
   }
 };
