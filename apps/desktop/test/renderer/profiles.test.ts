@@ -407,6 +407,96 @@ it.each(["Cancel", "Close", "Escape", "Save"] as const)(
   },
 );
 
+it.each(["editable", "loading"] as const)(
+  "keeps a reopened %s manager open when a cancelled visit's Save succeeds",
+  async (reopened) => {
+    const policy = { protected: false, profiles: [] };
+    ipc.always("profiles.list", [{ id: A.id, name: "Default", deleting: false }]);
+    ipc.always("profiles.policy", policy);
+    ipc.always("profiles.setPolicy", { protected: true, profiles: [] });
+    await openMenu();
+    const ui = menu();
+    const triggerName = t("Profile: {name}", { name: t("Default") });
+    const trigger = ui.named(triggerName);
+
+    const passwords = () => [
+      ...document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[type="password"]'),
+    ];
+
+    const enterPin = (pin: string) =>
+      act(async () => {
+        for (const field of passwords()) {
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+            field,
+            pin,
+          );
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+
+    await ui.press(t("Manage profiles") + t("PIN"));
+    await vi.waitFor(() => expect(passwords()).toHaveLength(2));
+    await enterPin("1234");
+    const earlierSave = ipc.hold("profiles.setPolicy");
+    await ui.press(t("Save"));
+    await vi.waitFor(() => expect(ui.named(t("Saving…"))?.getAttribute("aria-busy")).toBe("true"));
+    expect(ui.named(t("Cancel"))?.disabled).toBe(false);
+    await ui.press(t("Cancel"));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+
+    const read = reopened === "loading" ? ipc.hold("profiles.policy") : null;
+
+    try {
+      await ui.press(triggerName);
+      await ui.press(t("Manage profiles") + t("PIN"));
+
+      if (read) {
+        await vi.waitFor(() =>
+          expect(document.querySelector('[role="dialog"] [aria-busy]')?.textContent).toBe(
+            t("Loading…"),
+          ),
+        );
+      } else {
+        await vi.waitFor(() => expect(passwords()).toHaveLength(2));
+        await enterPin("5678");
+      }
+
+      const dialog = document.querySelector('[role="dialog"]');
+      expect(dialog).not.toBeNull();
+      await act(async () => {
+        earlierSave.resolve({ protected: true, profiles: [] });
+        // Wait for the original Save's completion, not just its bridge reply.
+        await vi.waitFor(() => expect(client.isMutating()).toBe(read ? 1 : 0));
+      });
+      expect(document.querySelector('[role="dialog"]')).toBe(dialog);
+      expect(document.activeElement).not.toBe(trigger);
+      expect(ipc.argsOf("profiles.setPolicy")).toEqual([
+        { current: A, newPin: "1234", profiles: [] },
+      ]);
+
+      if (read) {
+        expect(dialog?.querySelector("[aria-busy]")?.textContent).toBe(t("Loading…"));
+        await act(async () => read.resolve(policy));
+        await vi.waitFor(() => expect(passwords()).toHaveLength(2));
+        await enterPin("5678");
+      }
+
+      expect(passwords().map((field) => field.value)).toEqual(["5678", "5678"]);
+      await ui.press(t("Save"));
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+      await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+      expect(ipc.argsOf("profiles.setPolicy")).toEqual([
+        { current: A, newPin: "1234", profiles: [] },
+        { current: A, newPin: "5678", profiles: [] },
+      ]);
+    } finally {
+      earlierSave.resolve({ protected: true, profiles: [] });
+      read?.resolve(policy);
+    }
+  },
+);
+
 it("creates a profile and keeps a refused deletion listed with Retry until it succeeds", async () => {
   let rows: LocalProfile[] = [
     { id: A.id, name: "Default", deleting: false },
