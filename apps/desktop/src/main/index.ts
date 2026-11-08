@@ -43,8 +43,8 @@ import { Guide } from "@mrstreamer/core/guide/service";
 import { updatesInApp } from "@mrstreamer/contracts/updates";
 import { discovery, metadataFileFor } from "@mrstreamer/core/updates/feed";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
-import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
 import { WINDOW_BAR } from "../shared/window-bar.ts";
@@ -1068,7 +1068,7 @@ async function start(): Promise<void> {
     Effect.scoped(
       Effect.gen(function* () {
         const changes = yield* profileSessions.changes.pipe(
-          Effect.onExit((exit) => Deferred.done(profileEventsAcquired, Exit.asVoid(exit))),
+          Effect.ensuring(Deferred.succeed(profileEventsAcquired, undefined)),
         );
 
         yield* Stream.runForEach(changes, (change) =>
@@ -1113,7 +1113,7 @@ async function start(): Promise<void> {
     ),
   );
   // Acquisition settles even on failure; startup never waits for an event or a drain.
-  await runtime.runPromiseExit(Deferred.await(profileEventsAcquired));
+  await runtime.runPromise(Deferred.await(profileEventsAcquired));
   forward(updates.changes, "updates.changed", (status) => {
     analytics.setUpdateChannel(updatesInApp(status.distribution) ? status.channel : "none");
 
