@@ -41,6 +41,8 @@ type ReadError = Extract<AppError, { kind: "reminder" }> & {
   readonly reason: "unreadable" | "newer";
 };
 
+const UNREADABLE: ReadError = { kind: "reminder", reason: "unreadable" };
+
 /** One reminder as stored, without the subscription it is kept under. */
 const Entry = lazy(() =>
   type({
@@ -59,7 +61,7 @@ const Entry = lazy(() =>
 
 /** Reads the file without interpreting absence as permission to initialize. */
 export function loadReminders(path: string): Promise<FileRead<RemindersFile, ReadError>> {
-  return readJsonResult(path, decodeReminders, () => ({ kind: "reminder", reason: "unreadable" }));
+  return readJsonResult(path, decodeReminders, () => UNREADABLE);
 }
 
 /** Legacy reader: a confirmed missing file holds no reminders. */
@@ -79,10 +81,10 @@ const decodeReminders: Decode<RemindersFile, ReadError> = (data) => {
 
   if (!(version instanceof type.errors) && version.version > VERSION)
     return { kind: "newer", error: { kind: "reminder", reason: "newer" } };
+
   const head = Head()(data);
 
-  if (head instanceof type.errors)
-    return { kind: "unreadable", error: { kind: "reminder", reason: "unreadable" } };
+  if (head instanceof type.errors) return { kind: "unreadable", error: UNREADABLE };
   const reminders: KeptReminder[] = [];
   const unread = new Map<string, Json[]>();
 

@@ -71,6 +71,7 @@ export async function readJson(path: string): Promise<Json | null> {
   return null;
 }
 
+/** Reads and parses `path`, keeping whether an unreadable file failed reading or parsing. */
 async function readParsedJson(path: string) {
   let bytes: Buffer;
 
