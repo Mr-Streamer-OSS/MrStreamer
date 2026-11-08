@@ -1,3 +1,6 @@
+import * as Effect from "effect/Effect";
+import { CollectionsStore } from "../src/main/platform/collections-store.ts";
+import { Failed } from "@mrstreamer/core/failure";
 import { ProfileSessions } from "../src/main/services/profiles.ts";
 import { describe, expect, it } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
@@ -647,7 +650,17 @@ it("filters watched movies using only the admitted profile record", async () => 
   const before = asked(provider);
 
   const watched = await app.runtime.runPromise(
-    admission.run(onDemand.collection({ ...query, filters: { watched: "watched" } })),
+    admission.run(
+      Effect.provideService(
+        onDemand.collection({ ...query, filters: { watched: "watched" } }),
+        CollectionsStore,
+        {
+          read: Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Store refused" } })),
+          change: () => Effect.void,
+          erase: () => Effect.void,
+        },
+      ),
+    ),
   );
 
   expect(watched.titles.map((title) => title.id)).toEqual([first.id]);

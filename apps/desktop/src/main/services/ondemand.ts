@@ -1,5 +1,4 @@
 import { episodeStates } from "@mrstreamer/core/viewing/episodes";
-import { CollectionsStore } from "../platform/collections-store.ts";
 import { STARTED_SECONDS } from "@mrstreamer/core/viewing/titles";
 import { AdmittedKids } from "./profile-policy.ts";
 import { ArkErrors } from "arktype";
@@ -162,6 +161,8 @@ export interface CollectionQuery {
   readonly offset: number;
   readonly limit: number;
   readonly filters?: TitleFilters;
+  /** Main-process retention hint from the already captured smart collections, never sent to the worker. */
+  readonly ruleCacheSize?: number;
 }
 
 /** Where a movie or episode streams from. Contains the login, so it stays in the main process. */
@@ -353,6 +354,7 @@ function make(deps: OnDemandDeps) {
     // Bounded full-rule answers avoid repeating catalogue work and large IPC transfers.
     // Keys include captured policy and all local facts; worker content/lifetime changes clear them.
     const rulePages = new Map<string, WorkerCalls["collection"]["result"]>();
+    let ruleCacheSize = 2;
     let ruleCurrency = 0;
 
     const clearRulePages = () => {
@@ -651,12 +653,7 @@ function make(deps: OnDemandDeps) {
           args,
         ]);
 
-        const store = yield* Effect.serviceOption(CollectionsStore);
-
-        const capacity =
-          store._tag === "Some"
-            ? (yield* store.value.read).filter((list) => list.rules).length + 2
-            : 2;
+        const capacity = ruleCacheSize;
 
         while (rulePages.size > capacity) rulePages.delete(rulePages.keys().next().value!);
         const kept = rulePages.get(key);
@@ -1498,9 +1495,7 @@ function make(deps: OnDemandDeps) {
 
         const versions = page.titles.flatMap((title) => title.versions);
 
-        const progress = yield* record.progress(
-          kind === "movie" ? { movies: versions } : { series: versions },
-        );
+        const progress = kind === "movie" ? yield* record.progress({ movies: versions }) : [];
 
         const watched = new Map(
           progress
@@ -1515,7 +1510,6 @@ function make(deps: OnDemandDeps) {
         );
 
         if (kind === "series") {
-          watched.clear();
           const files = yield* knownFiles(kind);
 
           for (const version of versions) {
@@ -1729,7 +1723,15 @@ function make(deps: OnDemandDeps) {
         }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
         loaded((owners, language) => call("tiles", { owners, language, kind, of }), true),
-      collection: ({ kind, id, sort, offset, limit, filters }: CollectionQuery) =>
+      collection: ({
+        kind,
+        id,
+        sort,
+        offset,
+        limit,
+        filters,
+        ruleCacheSize: retention,
+      }: CollectionQuery) =>
         loaded(
           (owners, language) =>
             Effect.gen(function* () {
@@ -1738,6 +1740,8 @@ function make(deps: OnDemandDeps) {
                 return { name: "For adults", total: 0, titles: [] };
               }
 
+              // Collections already read their store; ordinary discovery never depends on it.
+              if (retention !== undefined) ruleCacheSize = retention;
               const files = filters ? yield* knownFiles(kind) : undefined;
               const watched = yield* watchedFiles(kind, filters, owners, language);
 

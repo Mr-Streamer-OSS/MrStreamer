@@ -45,6 +45,13 @@ const RULE_NAMES = {
 
 type Rule = keyof typeof RULE_NAMES;
 
+const NEEDS_OPTIONS = [
+  "genres",
+  "quality",
+  "language",
+  "verified",
+] as const satisfies readonly Rule[];
+
 const RULES: readonly Rule[] = [
   "genres",
   "year",
@@ -564,7 +571,10 @@ export function RuleMenus({
   const opening = (rule: Rule): Opening =>
     rule === adding ? { defaultOpen: true, onOpenChange: (open) => open || setAdding(null) } : {};
 
+  const needsOptions = (rule: Rule) => NEEDS_OPTIONS.some((dependent) => dependent === rule);
+
   const menu = (rule: Rule) => {
+    const disabled = !options && needsOptions(rule);
     const label = t(RULE_NAMES[rule]);
 
     switch (rule) {
@@ -576,7 +586,7 @@ export function RuleMenus({
             choices={choices.genres}
             value={filters.genres}
             onChange={(value) => change("genres", value)}
-            disabled={!options}
+            disabled={disabled}
             {...opening(rule)}
           />
         );
@@ -649,7 +659,7 @@ export function RuleMenus({
             value={filters.quality}
             onChange={(value) => change("quality", value)}
             clearable
-            disabled={!options}
+            disabled={disabled}
             {...opening(rule)}
           />
         );
@@ -662,7 +672,7 @@ export function RuleMenus({
             value={filters.language}
             onChange={(value) => change("language", value)}
             clearable
-            disabled={!options}
+            disabled={disabled}
             {...opening(rule)}
           />
         );
@@ -682,7 +692,7 @@ export function RuleMenus({
               change("verified", choices.verified.find((each) => each.value === value)?.entry)
             }
             clearable
-            disabled={!options}
+            disabled={disabled}
             {...opening(rule)}
           />
         );
@@ -693,11 +703,7 @@ export function RuleMenus({
     ? RULES.filter((rule) => filters[rule] !== undefined || rule === adding)
     : RULES;
 
-  const unset = RULES.filter(
-    (rule) =>
-      !shown.includes(rule) &&
-      (options || !["genres", "quality", "language", "verified"].includes(rule)),
-  );
+  const unset = RULES.filter((rule) => !shown.includes(rule) && (options || !needsOptions(rule)));
 
   return (
     <>

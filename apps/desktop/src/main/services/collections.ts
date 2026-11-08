@@ -411,6 +411,7 @@ export class Collections extends Context.Service<
           }
 
           const smart = new Map<string, CollectionTitle[]>();
+          const ruleCacheSize = saved.filter((collection) => collection.rules).length + 2;
 
           for (const list of evaluating) {
             if (!list.rules) continue;
@@ -418,6 +419,7 @@ export class Collections extends Context.Service<
 
             const page = yield* onDemand.collection({
               kind: list.rules.kind,
+              ruleCacheSize,
               id: "all",
               offset: 0,
               limit: Number.MAX_SAFE_INTEGER,
