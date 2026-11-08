@@ -1553,17 +1553,74 @@ it("refuses a suspended collection mutation after the same owner's durable appro
   });
 });
 
-it("publishes only the captured collection owner and refuses missing admitted context", async () => {
+it("publishes only the captured collection owner and refuses missing admitted context", async ({
+  signal,
+  task,
+}) => {
+  // Failure-only observation of this public case, not a readiness or timeout repair.
+  const readMonotonic = process.hrtime.bigint;
+  const started = readMonotonic();
+  const history: { sequence: number; label: string; elapsedNs: string }[] = [];
+  let pendingPhase = "body-entry";
+  const phase = (label: string) => {
+    pendingPhase = label;
+    if (history.length < 40) {
+      history.push({
+        sequence: history.length,
+        label,
+        elapsedNs: String(readMonotonic() - started),
+      });
+    }
+  };
+  const capture = (
+    witness: "runner-abort" | "finished-failure",
+    kind: "test-timeout-5000" | "hook-timeout" | "cancellation-or-other" | "failed-result",
+  ) =>
+    Object.freeze({
+      witness,
+      kind,
+      phase: pendingPhase,
+      elapsedNs: String(readMonotonic() - started),
+      entries: Object.freeze(history.map((entry) => Object.freeze({ ...entry }))),
+    });
+  let firstSnapshot: ReturnType<typeof capture> | undefined;
+  const report = (...args: Parameters<typeof capture>) => {
+    if (firstSnapshot) return;
+    firstSnapshot = capture(...args);
+    console.error("[818 failure chronology]", JSON.stringify(firstSnapshot));
+  };
+  const onAbort = () => {
+    const reason: unknown = signal.reason;
+    const kind =
+      reason instanceof Error && reason.message.startsWith("Test timed out in 5000ms")
+        ? "test-timeout-5000"
+        : reason instanceof Error && reason.message.startsWith("Hook timed out in ")
+          ? "hook-timeout"
+          : "cancellation-or-other";
+    report("runner-abort", kind);
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  onTestFinished(() => {
+    signal.removeEventListener("abort", onAbort);
+    if (task.result?.state === "fail") report("finished-failure", "failed-result");
+  });
+  phase("fixture");
   const f = await fixture();
+  phase("admission");
   const admitted = await f.app.runPromise(f.sessions.admitFor(f.adult));
+  phase("missing-context-refusal-and-assertion");
   expect((await f.app.runPromiseExit(admitted.services.collections.list))._tag).toBe("Failure");
+  phase("stream-import");
   const Stream = await import("effect/Stream");
 
+  phase("caller-scope-entry");
   const changes = await f.app.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
+        phase("profile-hub-acquisition");
         const stream = yield* f.sessions.changes;
 
+        phase("mutation");
         const result = yield* Effect.promise(() =>
           f.call(f.adult, "collections.change", {
             kind: "create",
@@ -1572,21 +1629,30 @@ it("publishes only the captured collection owner and refuses missing admitted co
           }),
         );
 
+        phase("mutation-result-assertion");
         expect(result).toMatchObject({ ok: true });
 
+        phase("toPull");
         const pull = yield* Stream.toPull(
           Stream.filter(stream, (change) => change.kind === "collections"),
         );
 
-        return yield* pull;
+        phase("pull");
+        const pulled = yield* pull;
+        phase("caller-scope-close");
+        return pulled;
       }),
     ),
   );
 
+  phase("owner-assertion");
   expect(changes).toEqual([{ kind: "collections", owner: f.adult }]);
 
+  phase("closed-acquisition-or-close");
   const closed = await f.app.runPromise(Effect.scoped(f.sessions.changes));
+  phase("closed-stream-drain");
   expect(await f.app.runPromise(Stream.runCollect(closed))).toEqual([]);
+  phase("body:done");
 });
 
 it("keeps exact retained collection facts usable after a source refresh fails", async () => {
