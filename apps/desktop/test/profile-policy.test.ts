@@ -1547,16 +1547,11 @@ it("publishes only the captured collection owner and refuses missing admitted co
   const admitted = await f.app.runPromise(f.sessions.admitFor(f.adult));
   expect((await f.app.runPromiseExit(admitted.services.collections.list))._tag).toBe("Failure");
   const Stream = await import("effect/Stream");
-  const Fiber = await import("effect/Fiber");
 
   const changes = await f.app.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const pull = yield* Stream.toPull(
-          Stream.filter(f.sessions.changes, (change) => change.kind === "collections"),
-        );
-
-        const event = yield* Effect.forkScoped(pull);
+        const stream = yield* f.sessions.changes;
 
         const result = yield* Effect.promise(() =>
           f.call(f.adult, "collections.change", {
@@ -1568,12 +1563,19 @@ it("publishes only the captured collection owner and refuses missing admitted co
 
         expect(result).toMatchObject({ ok: true });
 
-        return yield* Fiber.join(event);
+        const pull = yield* Stream.toPull(
+          Stream.filter(stream, (change) => change.kind === "collections"),
+        );
+
+        return yield* pull;
       }),
     ),
   );
 
   expect(changes).toEqual([{ kind: "collections", owner: f.adult }]);
+
+  const closed = await f.app.runPromise(Effect.scoped(f.sessions.changes));
+  expect(await f.app.runPromise(Stream.runCollect(closed))).toEqual([]);
 });
 
 it("keeps exact retained collection facts usable after a source refresh fails", async () => {
