@@ -1753,4 +1753,65 @@ export const en = {
   "The recording rule limit was reached.": "The recording rule limit was reached.",
   "A rule sets this schedule. Change the rule instead.":
     "A rule sets this schedule. Change the rule instead.",
+  // Smart collections and discovery rules
+  "rules.source": "Source",
+  Genre: "Genre",
+  Year: "Year",
+  Runtime: "Runtime",
+  Rating: "Rating",
+  Unwatched: "Unwatched",
+  "In progress": "In progress",
+  "Under 90 min": "Under 90 min",
+  "Under 100 min": "Under 100 min",
+  "Under 2 h": "Under 2 h",
+  "2 h or more": "2 h or more",
+  "{rating}+": "{rating}+",
+  "{from} to {to}": "{from} to {to}",
+  "{year} or later": "{year} or later",
+  "{year} or earlier": "{year} or earlier",
+  From: "From",
+  To: "To",
+  Removed: "Removed",
+  "Leave one empty for no limit. Titles without a year never match.":
+    "Leave one empty for no limit. Titles without a year never match.",
+  "Matches any picked genre. Titles without TMDB genres never match.":
+    "Matches any picked genre. Titles without TMDB genres never match.",
+  "Titles without a known runtime never match.": "Titles without a known runtime never match.",
+  "The provider's rating out of 10. Titles without one never match.":
+    "The provider's rating out of 10. Titles without one never match.",
+  "From this profile's progress.": "From this profile's progress.",
+  "A version from this source must meet every other rule.":
+    "A version from this source must meet every other rule.",
+  "Add rule": "Add rule",
+  Rule: "Rule",
+  "Verified sound or subtitles": "Verified sound or subtitles",
+  "A title matches when one of its versions meets every rule.":
+    "A title matches when one of its versions meets every rule.",
+  "{count} titles have no runtime yet and are left out.": {
+    one: "{count} title has no runtime yet and is left out.",
+    other: "{count} titles have no runtime yet and are left out.",
+  },
+  "Save as collection": "Save as collection",
+  "{count} movies now.": { one: "{count} movie now.", other: "{count} movies now." },
+  "{count} series now.": { one: "{count} series now.", other: "{count} series now." },
+  "Updates as your sources change.": "Updates as your sources change.",
+  "{count} match, {before} before": {
+    one: "{count} matches, {before} before",
+    other: "{count} match, {before} before",
+  },
+  "Add a rule to save": "Add a rule to save",
+  "New smart collection": "New smart collection",
+  "Rules changed": "Rules changed",
+  "Couldn't save. Your changes are kept.": "Couldn't save. Your changes are kept.",
+  Discard: "Discard",
+  "Save rules": "Save rules",
+  "Smart collection": "Smart collection",
+  Collection: "Collection",
+  "Titles you add": "Titles you add",
+  "Titles that match rules": "Titles that match rules",
+  "No titles match these rules.": "No titles match these rules.",
+  "Titles appear here when your sources add them.":
+    "Titles appear here when your sources add them.",
+  "Couldn't refresh your sources. Showing matches from {time}.":
+    "Couldn't refresh your sources. Showing matches from {time}.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

@@ -1,3 +1,7 @@
+import * as Effect from "effect/Effect";
+import { CollectionsStore } from "../src/main/platform/collections-store.ts";
+import { Failed } from "@mrstreamer/core/failure";
+import { ProfileSessions } from "../src/main/services/profiles.ts";
 import { describe, expect, it } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
@@ -129,6 +133,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       await titles.refresh(second.id);
 
       const choices = {
+        genres: [],
+        unknownRuntime: 2,
         qualities: ["4k", "full-hd", "hd", "unknown"],
         languages: ["de", "en", "nl", "unknown"],
         verified: [],
@@ -137,6 +143,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
 
       expect(await titles.filterOptions("movie")).toEqual(choices);
       expect(await titles.filterOptions("series")).toEqual({
+        genres: [],
+        unknownRuntime: 0,
         qualities: [],
         languages: [],
         verified: [],
@@ -171,6 +179,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       await settings.update({ adultTitles: true });
       expect(await titles.filterOptions("movie")).toEqual({
         ...observed,
+        unknownRuntime: 4,
         qualities: ["4k", "full-hd", "hd", "sd", "unknown"],
         languages: ["de", "en", "fr", "nl", "pl", "unknown"],
       });
@@ -206,6 +215,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       const before = asked(provider, other);
       expect(await titles.filterOptions("movie")).toEqual(choices);
       expect(await titles.filterOptions("series")).toEqual({
+        genres: [],
+        unknownRuntime: 0,
         qualities: [],
         languages: [],
         verified: [],
@@ -229,7 +240,16 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
 
     try {
       const saved = await subscriptions.add(demoLogin(provider));
-      const empty = { qualities: [], languages: [], verified: [], files: 0 };
+
+      const empty = {
+        genres: [],
+        unknownRuntime: 0,
+        qualities: [],
+        languages: [],
+        verified: [],
+        files: 0,
+      };
+
       expect(await titles.filterOptions("movie")).toEqual(empty);
       const held = provider.hold("titles");
       const refresh = titles.refresh(saved.id);
@@ -243,7 +263,16 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       }
 
       await refresh;
-      const loaded = { qualities: ["hd"], languages: ["en"], verified: [], files: 0 };
+
+      const loaded = {
+        genres: [],
+        unknownRuntime: 1,
+        qualities: ["hd"],
+        languages: ["en"],
+        verified: [],
+        files: 0,
+      };
+
       expect(await titles.filterOptions("movie")).toEqual(loaded);
       provider.failTitles(503);
       await expect(titles.refresh(saved.id)).rejects.toThrow();
@@ -567,4 +596,235 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     ).toBe(0);
     await app.runtime.dispose();
   });
+});
+
+it("uses only current loaded movie runtime while filtering without requesting details or files", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  await app.titles.refresh(source.id);
+
+  const query = {
+    kind: "movie" as const,
+    id: "all" as const,
+    offset: 0,
+    limit: 48,
+    filters: { runtime: { min: 6000, max: 6000 } },
+  };
+
+  const before = asked(provider);
+  expect((await app.titles.collection(query)).total).toBe(0);
+  expect(asked(provider)).toEqual(before);
+  const all = await app.titles.collection({ ...query, filters: {} });
+  const first = all.titles[0]!;
+  await app.titles.details("movie", { subscriptionId: source.id, id: first.id });
+  const loaded = asked(provider);
+  expect((await app.titles.collection(query)).titles.map((title) => title.id)).toEqual([first.id]);
+  expect(asked(provider)).toEqual(loaded);
+  await app.titles.refresh(source.id);
+  expect((await app.titles.collection(query)).total).toBe(0);
+});
+
+it("filters watched movies using only the admitted profile record", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  await app.titles.refresh(source.id);
+  const sessions = await app.runtime.runPromise(ProfileSessions);
+  const admission = await app.runtime.runPromise(sessions.admit);
+  const onDemand = await app.runtime.runPromise(OnDemand);
+  const query = { kind: "movie" as const, id: "all" as const, offset: 0, limit: 48 };
+  const all = await app.titles.collection(query);
+  const first = all.titles[0]!;
+  await app.runtime.runPromise(
+    admission.run(
+      admission.services.viewing.recordProgress(
+        "watch-movie",
+        { kind: "movie", subscriptionId: source.id, id: first.id },
+        5999,
+        6000,
+        Date.now(),
+      ),
+    ),
+  );
+  const before = asked(provider);
+
+  const watched = await app.runtime.runPromise(
+    admission.run(
+      Effect.provideService(
+        onDemand.collection({ ...query, filters: { watched: "watched" } }),
+        CollectionsStore,
+        {
+          read: Effect.fail(new Failed({ error: { kind: "unexpected", detail: "Store refused" } })),
+          change: () => Effect.void,
+          erase: () => Effect.void,
+        },
+      ),
+    ),
+  );
+
+  expect(watched.titles.map((title) => title.id)).toEqual([first.id]);
+
+  const unwatched = await app.runtime.runPromise(
+    admission.run(onDemand.collection({ ...query, filters: { watched: "unwatched" } })),
+  );
+
+  expect(unwatched.titles.some((title) => title.id === first.id)).toBe(false);
+  expect(asked(provider)).toEqual(before);
+});
+
+it("counts a movie as in progress only after the public started threshold", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  await app.titles.refresh(source.id);
+  const sessions = await app.runtime.runPromise(ProfileSessions);
+  const admission = await app.runtime.runPromise(sessions.admit);
+  const onDemand = await app.runtime.runPromise(OnDemand);
+
+  const query = {
+    kind: "movie" as const,
+    id: "all" as const,
+    offset: 0,
+    limit: 48,
+    filters: { watched: "in-progress" as const },
+  };
+
+  const first = (await app.titles.collection({ ...query, filters: {} })).titles[0]!;
+
+  for (const [position, total] of [
+    [5, 0],
+    [120, 1],
+  ] as const) {
+    await app.runtime.runPromise(
+      admission.run(
+        admission.services.viewing.recordProgress(
+          `sample-${position}`,
+          { kind: "movie", subscriptionId: source.id, id: first.id },
+          position,
+          6000,
+          Date.now(),
+        ),
+      ),
+    );
+    expect((await app.runtime.runPromise(admission.run(onDemand.collection(query)))).total).toBe(
+      total,
+    );
+  }
+});
+
+it("includes manual episode marks only on currently loaded exact series files", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  await app.titles.refresh(source.id);
+  const seriesId = String(provider.titles.series[0]!.id);
+  const details = await app.titles.details("series", { subscriptionId: source.id, id: seriesId });
+
+  if (details.kind !== "series") throw new Error("Expected series");
+  const first = details.seasons[0]!.episodes[0]!;
+  const sessions = await app.runtime.runPromise(ProfileSessions);
+  const admission = await app.runtime.runPromise(sessions.admit);
+  const onDemand = await app.runtime.runPromise(OnDemand);
+  await app.runtime.runPromise(
+    admission.run(
+      admission.services.viewing.markEpisode(
+        "mark",
+        {
+          kind: "episode",
+          subscriptionId: source.id,
+          id: first.id,
+          seriesId: first.seriesId,
+          season: first.season,
+          episode: first.number,
+        },
+        true,
+      ),
+    ),
+  );
+  const before = asked(provider);
+  expect(
+    (
+      await app.runtime.runPromise(
+        admission.run(
+          onDemand.collection({
+            kind: "series",
+            id: "all",
+            offset: 0,
+            limit: 48,
+            filters: { watched: "watched" },
+          }),
+        ),
+      )
+    ).titles.map((title) => title.id),
+  ).toContain(seriesId);
+  expect(asked(provider)).toEqual(before);
+});
+
+it("lets a newer alternate episode play override its mark without counting unloaded marks", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  provider.serveTitles((all) => ({
+    ...all,
+    series: all.series.map((series) => ({
+      ...series,
+      seasons: series.seasons.map((episodes, index) =>
+        index === 0
+          ? [
+              { ...episodes[0]!, number: 1 },
+              { ...episodes[0]!, id: 987654, number: 1 },
+            ]
+          : episodes,
+      ),
+    })),
+  }));
+  const app = await started();
+
+  try {
+    const source = await app.subscriptions.add(demoLogin(provider));
+    await app.titles.refresh(source.id);
+    const seriesId = String(provider.titles.series[0]!.id);
+    const sessions = await app.runtime.runPromise(ProfileSessions);
+    const admission = await app.runtime.runPromise(sessions.admit);
+    const onDemand = await app.runtime.runPromise(OnDemand);
+
+    const title = {
+      kind: "episode" as const,
+      subscriptionId: source.id,
+      id: String(provider.titles.series[0]!.seasons[0]![0]!.id),
+      seriesId,
+      season: 1,
+      episode: 1,
+    };
+
+    const run = <A>(effect: import("effect/Effect").Effect<A, unknown>) =>
+      app.runtime.runPromise(admission.run(effect));
+
+    await run(admission.services.viewing.markEpisode("mark", title, true));
+    await app.titles.refresh(source.id);
+    const query = { kind: "series" as const, id: "all" as const, offset: 0, limit: 48 };
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "watched" } }))).total,
+    ).toBe(0);
+    await app.titles.details("series", { subscriptionId: source.id, id: seriesId });
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "watched" } }))).total,
+    ).toBe(1);
+    await run(
+      admission.services.viewing.recordProgress(
+        "alternate",
+        { ...title, id: "987654" },
+        600,
+        2700,
+        Date.now() + 1000,
+      ),
+    );
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "watched" } }))).total,
+    ).toBe(0);
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "in-progress" } }))).total,
+    ).toBe(1);
+  } finally {
+    await app.runtime.dispose();
+  }
 });

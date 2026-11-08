@@ -1,4 +1,7 @@
-import type { Title, TitleKind } from "./ondemand.ts";
+import { type } from "arktype";
+import { lazy, type Infer } from "./lazy.ts";
+import { TitleFilters } from "./title-filters.ts";
+import { TITLE_KINDS, type Title, type TitleKind } from "./ondemand.ts";
 
 /** Current admitted subscription id, media type and provider id. Display names never identify members. */
 export interface CollectionIdentity {
@@ -18,9 +21,17 @@ export interface CollectionTitle extends CollectionIdentity {
 /** The most characters a collection's name has, once trimmed. */
 export const COLLECTION_NAME_MAX = 120;
 
+/** One kind's saved discovery filters. A collection with rules is smart: they pick its members. */
+export const SmartCollectionRules = lazy(() =>
+  type({ kind: type.enumerated(...TITLE_KINDS), filters: TitleFilters() }),
+);
+
+export type SmartCollectionRules = Infer<typeof SmartCollectionRules>;
+
 export interface PersonalCollection {
   readonly id: string;
   readonly name: string;
+  readonly rules?: SmartCollectionRules;
 }
 
 /** A collection as the viewer may see it, with how many of its members they may see. */
@@ -41,7 +52,13 @@ export interface CollectionPage {
 
 /** Commands are atomic. Orders name every visible item exactly once; hidden member slots retain their positions. */
 export type CollectionChange =
-  | { readonly kind: "create"; readonly id: string; readonly name: string }
+  | {
+      readonly kind: "create";
+      readonly id: string;
+      readonly name: string;
+      readonly rules?: SmartCollectionRules;
+    }
+  | { readonly kind: "rules"; readonly id: string; readonly rules: SmartCollectionRules }
   | { readonly kind: "rename"; readonly id: string; readonly name: string }
   | { readonly kind: "delete"; readonly id: string }
   | { readonly kind: "reorder"; readonly ids: readonly string[] }

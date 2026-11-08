@@ -128,6 +128,7 @@ export function CollectionGrid({
   onFilters,
   sortControl,
   hideCount,
+  action,
 }: {
   kind: TitleKind;
   id: CollectionId;
@@ -135,6 +136,8 @@ export function CollectionGrid({
   active: boolean;
   sortControl?: ReactNode;
   hideCount?: boolean;
+  /** Beside the filters' count, such as All's Save as collection. */
+  action?: ReactNode;
 } & Partial<TitleFilterControls>) {
   const listed = useCollection(kind, id, sort, filters);
 
@@ -157,6 +160,7 @@ export function CollectionGrid({
           unfiltered={listed.unfiltered}
           sortControl={sortControl}
           hideCount={hideCount ?? false}
+          action={action}
         />
       )}
       {listed.error ? (

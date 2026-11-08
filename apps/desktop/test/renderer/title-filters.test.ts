@@ -9,9 +9,10 @@ import type { Title, TitleKind, MovieDetails } from "@mrstreamer/contracts/ondem
 import { defaultSubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { openCollection, TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
-import { queries } from "../../src/renderer/src/lib/queries.ts";
+import { syncViewing, queries } from "../../src/renderer/src/lib/queries.ts";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import type { DetailsTarget } from "../../src/renderer/src/app/ui-store.ts";
+import { RuleMenus } from "../../src/renderer/src/features/titles/TitleFilters.tsx";
 
 const options: FilterOptions = {
   qualities: ["4k", "full-hd", "hd", "unknown"],
@@ -540,6 +541,139 @@ it("Shift+Enter inside an open filter menu does not open a poster", async () => 
   expect(useUi.getState().details).toBeNull();
 });
 
+/** Sets a text field's value as typing does. */
+async function typeInto(input: HTMLInputElement, text: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+const enter = (input: HTMLElement) =>
+  act(async () => {
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+  });
+
+it("saves All's rules as a smart collection of this kind once, also after a refusal", async () => {
+  const page = await mount();
+  ipc.always("collections.list", []);
+  expect(page.container.textContent).not.toContain("Save as collection");
+
+  await page.click("Unwatched", "Watched");
+  await page.click("Under 2 h", "Runtime");
+  await page.until(() =>
+    expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({
+      watched: "unwatched",
+      runtime: { max: 7199 },
+    }),
+  );
+
+  await page.click("Save as collection");
+
+  const name = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLInputElement>("input[aria-label='Collection name']");
+    expect(found).not.toBeNull();
+
+    return found!;
+  });
+
+  const popup = () =>
+    document.querySelector<HTMLElement>("[aria-label='Save as collection'][role=dialog]");
+
+  await page.until(() => expect(popup()?.textContent).toContain("10 movies now."));
+  expect(popup()?.textContent).toContain("Under 2 h · Unwatched");
+
+  await typeInto(name, "Short unwatched");
+  const refused = ipc.hold("collections.change");
+  await enter(name);
+  await act(async () => refused.reject({ kind: "unexpected", detail: "disk" }));
+  await page.until(() =>
+    expect(popup()?.querySelector("[role=alert]")?.textContent).toBe("Couldn't save."),
+  );
+
+  ipc.always("collections.change", null);
+
+  const retry = [...popup()!.querySelectorAll("button")].find(
+    (each) => each.textContent === "Retry",
+  );
+
+  await act(async () => retry!.click());
+  await page.until(() => expect(popup()).toBeNull());
+
+  const sent = ipc.argsOf("collections.change");
+  expect(sent).toHaveLength(2);
+  expect(sent[0]).toEqual({
+    kind: "create",
+    id: expect.any(String),
+    name: "Short unwatched",
+    rules: { kind: "movie", filters: { watched: "unwatched", runtime: { max: 7199 } } },
+  });
+  // Retry sends the same collection, so it is stored once.
+  expect(sent[1]).toEqual(sent[0]);
+});
+
+it("applies a typed year range only once it is confirmed", async () => {
+  const page = await mount();
+  const trigger = page.group("Year").querySelector<HTMLButtonElement>("button")!;
+  await act(async () => trigger.click());
+
+  const [, to] = await vi.waitFor(() => {
+    const fields = [
+      ...document.querySelectorAll<HTMLInputElement>("[role=dialog][aria-label=Year] input"),
+    ];
+
+    expect(fields).toHaveLength(2);
+
+    return fields;
+  });
+
+  const reads = ipc.argsOf("ondemand.collection").length;
+  await typeInto(to!, "2015");
+  await enter(to!);
+  await page.until(() =>
+    expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({ year: { max: 2015 } }),
+  );
+  await act(async () => trigger.click());
+
+  const reopened = [
+    ...document.querySelectorAll<HTMLInputElement>("[role=dialog][aria-label=Year] input"),
+  ];
+
+  await typeInto(reopened[0]!, "2026");
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(ipc.argsOf("ondemand.collection")).toHaveLength(reads + 1);
+
+  await enter(reopened[0]!);
+  // Bounds are inclusive and kept in order, whichever field holds which.
+  await page.until(() =>
+    expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({
+      year: { min: 2015, max: 2026 },
+    }),
+  );
+  await page.until(() => expect(trigger.getAttribute("aria-label")).toBe("Year: 2015 to 2026"));
+  expect(ipc.methods()).not.toContain("ondemand.details");
+});
+
+it("cancels an obsolete watched-filter read on a viewing event without a catalogue event", async () => {
+  const page = await mount();
+  const stop = syncViewing(page.client);
+
+  try {
+    const held = ipc.hold("ondemand.collection");
+    await page.click("Unwatched", "Watched");
+    ipc.always("ondemand.collection", { name: "All", titles: [], total: 3 });
+    await act(async () => ipc.emit("viewing.changed", { sequence: 1 }));
+    await page.until(() => expect(page.container.textContent).toContain("3 of 3"));
+    await act(async () => held.resolve({ name: "All", titles: [], total: 99 }));
+    expect(page.container.textContent).toContain("3 of 3");
+    expect(page.container.textContent).not.toContain("99 of 99");
+  } finally {
+    stop();
+  }
+});
+
 it("announces a collection's count when filtering changes it", async () => {
   const page = await mount();
   await act(async () => openCollection("movie", "genre:Drama"));
@@ -549,4 +683,165 @@ it("announces a collection's count when filtering changes it", async () => {
   ipc.always("ondemand.collection", { name: "Drama", titles: [], total: 2, unfiltered: 10 });
   await page.click("4K", "Quality");
   await page.until(() => expect(count?.textContent).toBe("2 of 10"));
+});
+
+it("returns to Add rule on Escape and hands a picked rule its own menu's focus", async () => {
+  vi.useRealTimers();
+  ipc.always("subscription.list", [SAVED]);
+  ipc.always("ondemand.filterOptions", options);
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  const onFilters = vi.fn();
+  cleanup = view.unmount;
+  await view.render(
+    createElement(RuleMenus, { kind: "movie", filters: {}, onFilters, setOnly: true }),
+  );
+
+  const trigger = view.container.querySelector<HTMLButtonElement>("button[aria-label='Add rule']")!;
+  const popup = () => document.querySelector<HTMLElement>("[role=menu][aria-label='Add rule']");
+  await act(async () => {
+    trigger.focus();
+    trigger.click();
+  });
+  await vi.waitFor(() => expect(popup()?.contains(document.activeElement)).toBe(true));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  });
+  await vi.waitFor(() => expect(popup()).toBeNull());
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(onFilters).not.toHaveBeenCalled();
+
+  await act(async () => {
+    trigger.click();
+  });
+  await vi.waitFor(() => expect(popup()?.contains(document.activeElement)).toBe(true));
+
+  const rating = [...popup()!.querySelectorAll<HTMLElement>("[role=menuitem]")].find(
+    (item) => item.textContent === "Rating",
+  )!;
+
+  await act(async () => rating.click());
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector("[role=menu][aria-label=Rating]")?.contains(document.activeElement),
+    ).toBe(true),
+  );
+  expect(popup()).toBeNull();
+  expect(onFilters).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["Rating", "menu"],
+  ["Year", "dialog"],
+])("returns to Add rule when an empty new %s rule is cancelled", async (rule, role) => {
+  vi.useRealTimers();
+  ipc.always("subscription.list", [SAVED]);
+  ipc.always("ondemand.filterOptions", options);
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  cleanup = view.unmount;
+  await view.render(
+    createElement(RuleMenus, { kind: "movie", filters: {}, onFilters: () => {}, setOnly: true }),
+  );
+
+  const trigger = view.container.querySelector<HTMLButtonElement>("button[aria-label='Add rule']")!;
+  await act(async () => {
+    trigger.focus();
+    trigger.click();
+  });
+
+  const popup = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLElement>("[role=menu][aria-label='Add rule']");
+    expect(found).not.toBeNull();
+
+    return found!;
+  });
+
+  const choice = [...popup.querySelectorAll<HTMLElement>("[role=menuitem]")].find(
+    (item) => item.textContent === rule,
+  )!;
+
+  await act(async () => choice.click());
+
+  const editor = () => document.querySelector<HTMLElement>(`[role=${role}][aria-label='${rule}']`);
+  await vi.waitFor(() => expect(editor()?.contains(document.activeElement)).toBe(true));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  });
+  await vi.waitFor(() => expect(editor()).toBeNull());
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(view.container.querySelector(`[role=group][aria-label='${rule}']`)).toBeNull();
+});
+
+it("returns to Add rule after cancelling its last offered rule", async () => {
+  vi.useRealTimers();
+  ipc.always("subscription.list", [SAVED]);
+  ipc.always("ondemand.filterOptions", options);
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  cleanup = view.unmount;
+  await view.render(
+    createElement(RuleMenus, {
+      kind: "movie",
+      filters: {
+        genres: ["Drama"],
+        year: { max: 2024 },
+        runtime: { max: 7199 },
+        watched: "unwatched",
+        sourceIds: [SUBSCRIPTION],
+        quality: "4k",
+        language: "en",
+        verified: { kind: "audio", language: "en" },
+      },
+      onFilters: () => {},
+      setOnly: true,
+    }),
+  );
+
+  await act(async () => {
+    const trigger = view.container.querySelector<HTMLButtonElement>(
+      "button[aria-label='Add rule']",
+    )!;
+
+    trigger.focus();
+    trigger.click();
+  });
+
+  const choice = await vi.waitFor(() => {
+    const items = document.querySelectorAll<HTMLElement>(
+      "[role=menu][aria-label='Add rule'] [role=menuitem]",
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.textContent).toBe("Rating");
+
+    return items[0]!;
+  });
+
+  await act(async () => choice.click());
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector("[role=menu][aria-label=Rating]")?.contains(document.activeElement),
+    ).toBe(true),
+  );
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  });
+  await vi.waitFor(() =>
+    expect(view.container.querySelector("[role=group][aria-label=Rating]")).toBeNull(),
+  );
+  await vi.waitFor(() => {
+    const returned = view.container.querySelector("button[aria-label='Add rule']");
+    expect(returned).not.toBeNull();
+    expect(document.activeElement).toBe(returned);
+  });
 });

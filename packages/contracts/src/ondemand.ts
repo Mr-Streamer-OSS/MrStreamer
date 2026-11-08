@@ -109,6 +109,9 @@ export interface TitleVersion {
   readonly addedAt?: number | null;
   /** Its position in this subscription's original list. */
   readonly listedOrder?: number;
+  /** Exact provider version facts, before another version fills display gaps. */
+  readonly year?: number | null;
+  readonly rating?: number | null;
   /** Current files opened on this device. Series facts describe only those read files, including episode alternatives. */
   readonly observed?: {
     readonly files: number;

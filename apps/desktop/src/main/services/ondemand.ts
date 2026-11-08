@@ -1,3 +1,5 @@
+import { episodeStates } from "@mrstreamer/core/viewing/episodes";
+import { STARTED_SECONDS } from "@mrstreamer/core/viewing/titles";
 import { AdmittedKids } from "./profile-policy.ts";
 import { ArkErrors } from "arktype";
 import { workerResults } from "../ondemand/protocol.ts";
@@ -54,6 +56,7 @@ import {
 import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { titleName } from "@mrstreamer/core/ondemand/names";
+import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { qualityHint } from "@mrstreamer/core/ondemand/filters";
 import type { FilterOptions, TitleFilters } from "@mrstreamer/contracts/title-filters";
 import type { SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
@@ -256,8 +259,8 @@ export class OnDemand extends Context.Service<
       kind: TitleKind,
       of: "genres" | "services",
     ): Effect.Effect<readonly CollectionTile[], Failed>;
-    /** One page of a collection. */
-    collection(query: CollectionQuery): Effect.Effect<CollectionPage, Failed>;
+    /** One page of a collection; retention is an internal cache hint, separate from the renderer query. */
+    collection(query: CollectionQuery, retention?: number): Effect.Effect<CollectionPage, Failed>;
     /**
      * A page of the watchlist that what `subscriptions` saved makes together: each entry with
      * the title it is in their lists now, without titles for adults unless the viewer shows them.
@@ -346,6 +349,17 @@ function make(deps: OnDemandDeps) {
       fetching: false,
     };
 
+    // Bounded full-rule answers avoid repeating catalogue work and large IPC transfers.
+    // Keys include captured policy and all local facts; worker content/lifetime changes clear them.
+    const rulePages = new Map<string, WorkerCalls["collection"]["result"]>();
+    let ruleCacheSize = 2;
+    let ruleCurrency = 0;
+
+    const clearRulePages = () => {
+      ruleCurrency++;
+      rulePages.clear();
+    };
+
     // Acceptance and worker lifetime own currency, independently of wall-clock timestamps.
     let incarnation = {};
     let workerAvailable = false;
@@ -360,6 +374,7 @@ function make(deps: OnDemandDeps) {
     >();
 
     const invalidateWorker = () => {
+      clearRulePages();
       incarnation = {};
       catalogues.clear();
     };
@@ -380,6 +395,7 @@ function make(deps: OnDemandDeps) {
                 : null,
             }),
           (event) => {
+            if (event.content) clearRulePages();
             metadataProgress = event.status;
             // New content has the UI refetch what it shows, with the lists' status. Without, the
             // UI only takes TMDB's progress, and reads nothing again.
@@ -557,6 +573,10 @@ function make(deps: OnDemandDeps) {
 
     const call = <M extends WorkerMethod>(method: M, args: WorkerCalls[M]["args"]) =>
       Effect.gen(function* () {
+        const changesCatalogue =
+          method === "refresh" || method === "finishRefresh" || method === "forget";
+
+        if (changesCatalogue) clearRulePages();
         const admitted = yield* Effect.serviceOption(AdmittedSettings);
         const policy = yield* Effect.serviceOption(AdmittedKids);
         // Only owner-scoped reads carry this selection; storage and household work use the full catalogue.
@@ -598,7 +618,57 @@ function make(deps: OnDemandDeps) {
             return worker.call(method, selected);
           },
           catch: failedWith,
-        });
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              // Concurrent reads begun while acceptance was in flight cannot survive its completion.
+              if (changesCatalogue) clearRulePages();
+            }),
+          ),
+        );
+      });
+
+    const rulePage = (args: WorkerCalls["collection"]["args"]) =>
+      Effect.gen(function* () {
+        if (args.limit !== Number.MAX_SAFE_INTEGER) return yield* call("collection", args);
+        const admitted = yield* Effect.serviceOption(AdmittedSettings);
+        const kids = yield* Effect.serviceOption(AdmittedKids);
+
+        if (admitted._tag === "Some" && !admitted.value.current())
+          return yield* new Failed({
+            error: {
+              kind: "unexpected",
+              detail: "Viewing profile changed; retry this catalogue read.",
+            },
+          });
+        const currency = ruleCurrency;
+
+        const key = JSON.stringify([
+          currency,
+          admitted._tag === "Some" ? admitted.value.owner : null,
+          kids._tag === "Some" ? kids.value.approved : null,
+          (yield* preferences).adultTitles ?? false,
+          args,
+        ]);
+
+        const capacity = ruleCacheSize;
+
+        while (rulePages.size > capacity) rulePages.delete(rulePages.keys().next().value!);
+        const kept = rulePages.get(key);
+
+        if (kept) {
+          keep(rulePages, key, kept, capacity);
+
+          return kept;
+        }
+
+        const page = yield* call("collection", args);
+
+        if (currency === ruleCurrency) {
+          keep(rulePages, key, page, capacity);
+        }
+
+        return page;
       });
 
     /** Whose lists a call to the worker is about. */
@@ -1245,19 +1315,73 @@ function make(deps: OnDemandDeps) {
     /** No provider reads: cached episode listings must still belong to the saved source and lists. */
     const knownFiles = (kind: TitleKind, onlyRead = false) =>
       Effect.gen(function* () {
-        if (!verifiedFiles) return [];
         const files: KnownFile[] = [];
         const now = yield* Clock.currentTimeMillis;
-        const found = kind === "series" && details.size > 0 ? yield* held : [];
+        const viewer = yield* language;
+        const found = details.size > 0 ? yield* held : [];
 
         for (const source of yield* listed) {
-          const known = yield* verifiedFiles
-            .read(source.key, source.fileRevision)
-            .pipe(Effect.orElseSucceed(() => []));
+          const known = verifiedFiles
+            ? yield* verifiedFiles
+                .read(source.key, source.fileRevision)
+                .pipe(Effect.orElseSucceed(() => []))
+            : [];
 
           if (kind === "movie") {
+            const loaded = [...details.values()].filter(
+              (entry) =>
+                entry.title.kind === "movie" &&
+                entry.version.subscriptionId === source.id &&
+                entry.sourceRevision === source.revision &&
+                currentDetails(
+                  source,
+                  entry,
+                  found.find((each) => each.subscription.id === source.id)?.worked.catalogueStamp,
+                  now,
+                ),
+            );
+
+            for (const entry of loaded) {
+              const version = entry.title.versions.find(
+                (version) =>
+                  version.id === entry.version.id && version.subscriptionId === source.id,
+              );
+
+              const listingKey = listedFileKey("movie", {
+                id: entry.version.id,
+                name: version?.name ?? entry.title.name,
+                container: version?.container ?? null,
+              });
+
+              const evidence = known.find(
+                (file) =>
+                  file.kind === "movie" &&
+                  file.id === entry.version.id &&
+                  file.listingKey === listingKey,
+              );
+
+              files.push({
+                subscriptionId: source.id,
+                kind: "movie",
+                id: entry.version.id,
+                listingKey,
+                runtime: movieDetails(
+                  entry.title,
+                  entry.raw,
+                  entry.title.tmdbId
+                    ? validAbout(aboutKey("movie", entry.title.tmdbId, viewer), now)
+                    : null,
+                ).duration,
+                ...defined({
+                  tracks: evidence
+                    ? { audio: evidence.audio, subtitles: evidence.subtitles }
+                    : undefined,
+                }),
+              });
+            }
+
             for (const file of known)
-              if (file.kind === "movie")
+              if (file.kind === "movie" && !loaded.some((entry) => entry.version.id === file.id))
                 files.push({
                   subscriptionId: source.id,
                   kind: "movie",
@@ -1325,8 +1449,11 @@ function make(deps: OnDemandDeps) {
                 kind: "episode",
                 id: episode.id,
                 seriesId: held.version.id,
+                season: episode.season,
+                episode: episode.number,
                 listingKey,
                 tags: hints,
+                runtime: episode.duration,
                 ...defined({ tracks }),
               });
             }
@@ -1334,6 +1461,85 @@ function make(deps: OnDemandDeps) {
         }
 
         return files;
+      });
+
+    const watchedFiles = (
+      kind: TitleKind,
+      filters: TitleFilters | undefined,
+      owners: readonly CatalogueOwner[],
+      language: string,
+    ) =>
+      Effect.gen(function* () {
+        if (!filters?.watched) return undefined;
+        const admitted = yield* Effect.serviceOption(ViewingRecord);
+
+        if (admitted._tag === "None")
+          return yield* new Failed({
+            error: {
+              kind: "unexpected",
+              detail: "Viewing record is unavailable; retry the request.",
+            },
+          });
+        const record = admitted.value;
+
+        const page = yield* rulePage({
+          owners,
+          language,
+          kind,
+          id: "all",
+          offset: 0,
+          limit: Number.MAX_SAFE_INTEGER,
+        });
+
+        const versions = page.titles.flatMap((title) => title.versions);
+
+        const progress = kind === "movie" ? yield* record.progress({ movies: versions }) : [];
+
+        const watched = new Map(
+          progress
+            .filter((entry) => entry.finished || entry.position >= STARTED_SECONDS)
+            .map((entry) => [
+              ownedKey(entry.title),
+              {
+                key: ownedKey(entry.title),
+                state: entry.finished ? ("watched" as const) : ("in-progress" as const),
+              },
+            ]),
+        );
+
+        if (kind === "series") {
+          const files = yield* knownFiles(kind);
+
+          for (const version of versions) {
+            const exact = files.filter(
+              (file) =>
+                file.subscriptionId === version.subscriptionId && file.seriesId === version.id,
+            );
+
+            if (exact.length === 0) continue;
+            const viewing = yield* record.episodes(version);
+
+            const loaded = new Set(exact.map((file) => file.id));
+
+            const stateOf = episodeStates(
+              viewing.progress.filter((entry) => loaded.has(entry.title.id)),
+              viewing.marks,
+            );
+
+            for (const file of exact) {
+              if (file.season === undefined || file.episode === undefined) continue;
+              const state = stateOf({ season: file.season, number: file.episode });
+              const key = ownedKey(file);
+              watched.delete(key);
+
+              if (state.kind === "watched") watched.set(key, { key, state: "watched" });
+              else if (state.kind === "partial" && state.progress.position >= STARTED_SECONDS)
+                watched.set(key, { key, state: "in-progress" });
+            }
+          }
+        }
+
+        return [...watched.values()];
       });
 
     /** One read of validated observations decorates each season without joining rows by id. */
@@ -1515,7 +1721,10 @@ function make(deps: OnDemandDeps) {
         }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
         loaded((owners, language) => call("tiles", { owners, language, kind, of }), true),
-      collection: ({ kind, id, sort, offset, limit, filters }: CollectionQuery) =>
+      collection: (
+        { kind, id, sort, offset, limit, filters }: CollectionQuery,
+        retention?: number,
+      ) =>
         loaded(
           (owners, language) =>
             Effect.gen(function* () {
@@ -1524,16 +1733,20 @@ function make(deps: OnDemandDeps) {
                 return { name: "For adults", total: 0, titles: [] };
               }
 
+              // Collections already read their store; ordinary discovery never depends on it.
+              if (retention !== undefined)
+                ruleCacheSize = Number.isFinite(retention) ? Math.max(2, Math.floor(retention)) : 2;
               const files = filters ? yield* knownFiles(kind) : undefined;
+              const watched = yield* watchedFiles(kind, filters, owners, language);
 
-              return yield* call("collection", {
+              return yield* rulePage({
                 owners,
                 language,
                 kind,
                 id,
                 offset,
                 limit,
-                ...defined({ sort, filters, files }),
+                ...defined({ sort, filters, files, watched }),
               });
             }),
           true,
@@ -1545,6 +1758,7 @@ function make(deps: OnDemandDeps) {
           (owners, language) =>
             Effect.gen(function* () {
               const files = filters ? yield* knownFiles(kind) : undefined;
+              const watched = yield* watchedFiles(kind, filters, owners, language);
 
               return yield* call("searchKind", {
                 owners,
@@ -1552,7 +1766,7 @@ function make(deps: OnDemandDeps) {
                 kind,
                 query,
                 limit: SEARCH_PAGE,
-                ...defined({ filters, files }),
+                ...defined({ filters, files, watched }),
               });
             }),
           true,

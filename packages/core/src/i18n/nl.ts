@@ -1792,4 +1792,65 @@ export const nl: Translation = {
   "The recording rule limit was reached.": "Het maximum aantal opnameregels is bereikt.",
   "A rule sets this schedule. Change the rule instead.":
     "Een regel bepaalt deze planning. Wijzig de regel.",
+  // Smart collections and discovery rules
+  "rules.source": "Bron",
+  Genre: "Genre",
+  Year: "Jaar",
+  Runtime: "Duur",
+  Rating: "Beoordeling",
+  Unwatched: "Niet bekeken",
+  "In progress": "Bezig",
+  "Under 90 min": "Onder 90 min",
+  "Under 100 min": "Onder 100 min",
+  "Under 2 h": "Onder 2 u",
+  "2 h or more": "2 u of langer",
+  "{rating}+": "{rating}+",
+  "{from} to {to}": "{from} tot {to}",
+  "{year} or later": "{year} of later",
+  "{year} or earlier": "{year} of eerder",
+  From: "Van",
+  To: "Tot",
+  Removed: "Verwijderd",
+  "Leave one empty for no limit. Titles without a year never match.":
+    "Laat er een leeg voor geen grens. Titels zonder jaar passen nooit.",
+  "Matches any picked genre. Titles without TMDB genres never match.":
+    "Past bij elk gekozen genre. Titels zonder TMDB-genres passen nooit.",
+  "Titles without a known runtime never match.": "Titels zonder bekende duur passen nooit.",
+  "The provider's rating out of 10. Titles without one never match.":
+    "De beoordeling van de provider op 10. Titels zonder beoordeling passen nooit.",
+  "From this profile's progress.": "Volgens de voortgang van dit profiel.",
+  "A version from this source must meet every other rule.":
+    "Een versie van deze bron moet aan elke andere regel voldoen.",
+  "Add rule": "Regel toevoegen",
+  Rule: "Regel",
+  "Verified sound or subtitles": "Gecontroleerd geluid of ondertitels",
+  "A title matches when one of its versions meets every rule.":
+    "Een titel past als een van zijn versies aan elke regel voldoet.",
+  "{count} titles have no runtime yet and are left out.": {
+    one: "{count} titel heeft nog geen duur en valt weg.",
+    other: "{count} titels hebben nog geen duur en vallen weg.",
+  },
+  "Save as collection": "Bewaren als collectie",
+  "{count} movies now.": { one: "Nu {count} film.", other: "Nu {count} films." },
+  "{count} series now.": { one: "Nu {count} serie.", other: "Nu {count} series." },
+  "Updates as your sources change.": "Werkt bij als je bronnen veranderen.",
+  "{count} match, {before} before": {
+    one: "{count} past, eerst {before}",
+    other: "{count} passen, eerst {before}",
+  },
+  "Add a rule to save": "Voeg een regel toe om te bewaren",
+  "New smart collection": "Nieuwe slimme collectie",
+  "Rules changed": "Regels gewijzigd",
+  "Couldn't save. Your changes are kept.": "Bewaren mislukt. Je wijzigingen blijven staan.",
+  Discard: "Verwerpen",
+  "Save rules": "Regels bewaren",
+  "Smart collection": "Slimme collectie",
+  Collection: "Collectie",
+  "Titles you add": "Titels die je toevoegt",
+  "Titles that match rules": "Titels die aan regels voldoen",
+  "No titles match these rules.": "Geen titels passen bij deze regels.",
+  "Titles appear here when your sources add them.":
+    "Titels verschijnen hier zodra je bronnen ze toevoegen.",
+  "Couldn't refresh your sources. Showing matches from {time}.":
+    "Je bronnen vernieuwen mislukt. Overeenkomsten van {time} getoond.",
 };

@@ -3,6 +3,7 @@ import { EVENT_VERSION } from "@mrstreamer/core/viewing/record";
 import type { DatabaseSync } from "node:sqlite";
 import { TITLE_KINDS } from "@mrstreamer/contracts/ondemand";
 import { type } from "arktype";
+import { defined } from "@mrstreamer/core/defined";
 import { normalize } from "@mrstreamer/core/text";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -14,6 +15,7 @@ import {
   type CollectionChange,
   type CollectionTitle,
   type PersonalCollection,
+  SmartCollectionRules,
 } from "@mrstreamer/contracts/collections";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
 
@@ -96,6 +98,7 @@ export const collectionsStoreLayer: Layer.Layer<CollectionsStore, never, Databas
 function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
   db.exec(`
     create table if not exists collection_accounts (account text primary key, anchor integer not null);
+    create table if not exists collection_rules (collection_id text primary key, rules text not null);
     create table if not exists collection_receipts (id text primary key);
     create table if not exists personal_collections (id text primary key, name text not null, position integer not null);
     create table if not exists collection_members (
@@ -177,8 +180,17 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
     lists.all().map((raw) => {
       const row = Row.assert(raw);
 
+      const saved = db
+        .prepare("select rules from collection_rules where collection_id = ?")
+        .get(row.id);
+
+      const rules = saved
+        ? SmartCollectionRules().assert(JSON.parse(type("string").assert(saved.rules)))
+        : undefined;
+
       return {
         ...row,
+        ...defined({ rules }),
         members: members.all(row.id).map((raw) => {
           const member = Member.assert(raw);
 
@@ -215,7 +227,30 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
           if (change.kind !== "create" && change.kind !== "reorder" && !found)
             throw new Failed({ error: { kind: "no-list" } });
 
+          if ((change.kind === "member" || change.kind === "order-members") && found?.rules)
+            throw new Error("Smart collection membership is determined by its rules.");
+
+          const saveRules = (id: string, rules: SmartCollectionRules) => {
+            const parsed = SmartCollectionRules().assert(rules);
+
+            if (
+              !Object.keys(parsed.filters).length ||
+              [parsed.filters.year, parsed.filters.runtime, parsed.filters.rating].some(
+                (range) =>
+                  range?.min !== undefined && range.max !== undefined && range.min > range.max,
+              )
+            )
+              throw new Error("Invalid smart collection rules.");
+            db.prepare(
+              "insert into collection_rules values (?, ?) on conflict(collection_id) do update set rules = excluded.rules",
+            ).run(id, JSON.stringify(parsed));
+          };
+
           switch (change.kind) {
+            case "rules":
+              if (!found?.rules) throw new Error("This collection is manual.");
+              saveRules(change.id, change.rules);
+              break;
             case "create":
             case "rename": {
               const name = change.name.trim();
@@ -252,10 +287,13 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
                   name,
                   change.id,
                 );
+
+              if (change.kind === "create" && change.rules) saveRules(change.id, change.rules);
               break;
             }
 
             case "delete":
+              db.prepare("delete from collection_rules where collection_id = ?").run(change.id);
               db.prepare("delete from collection_members where collection_id = ?").run(change.id);
               db.prepare("delete from personal_collections where id = ?").run(change.id);
               break;

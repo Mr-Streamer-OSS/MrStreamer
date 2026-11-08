@@ -444,7 +444,7 @@ function added(entry: Ranked): number {
 }
 
 /** Genre names, once each, in TMDB's order. */
-function genresOf(meta: TitleMetadata): string[] {
+export function genresOf(meta: TitleMetadata): string[] {
   return [...new Set(meta.genres.flatMap((id) => GENRES[id] ?? []))];
 }
 

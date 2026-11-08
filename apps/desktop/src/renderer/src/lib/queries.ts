@@ -952,6 +952,19 @@ export function syncViewing(client: QueryClient): () => void {
     const owner = profileOwner();
     const cached = client.getQueryData(queries.viewing().queryKey);
 
+    // Progress also changes watched discovery rules and saved smart membership/counts.
+    // Cancel obsolete first reads before invalidating, including preview grids and searches.
+    const watched = {
+      predicate: (query) =>
+        query.queryKey[0] === "collections" ||
+        (query.queryKey[0] === "ondemand" &&
+          ["collection", "searchKind"].includes(String(query.queryKey[1]))),
+    } satisfies QueryFilters;
+
+    void client.cancelQueries(watched).then(() => {
+      if (currentProfile(owner)) void client.invalidateQueries(watched);
+    });
+
     if (cached && cached.sequence >= sequence) return;
 
     // The prefix covers progress too. A first read under way can still answer an older sequence.

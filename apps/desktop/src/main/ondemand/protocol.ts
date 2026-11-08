@@ -60,7 +60,11 @@ export interface KnownFile {
   readonly kind: "movie" | "episode";
   readonly id: string;
   readonly seriesId?: string;
+  /** Exact episode numbers from the current loaded listing, for admitted manual marks. */
+  readonly season?: number;
+  readonly episode?: number;
   readonly listingKey: string;
+  readonly runtime?: number | null;
   readonly tracks?: {
     readonly audio: readonly (string | null)[];
     readonly subtitles: readonly (string | null)[];
@@ -68,8 +72,15 @@ export interface KnownFile {
   readonly tags?: readonly string[];
 }
 
+/** This profile's progress on one exact movie version or episode file, by its owned key. */
+export interface WatchedFile {
+  readonly key: string;
+  readonly state: "watched" | "in-progress";
+}
+
 interface FilterQuery {
   readonly filters?: TitleFilters;
+  readonly watched?: readonly WatchedFile[];
   readonly files?: readonly KnownFile[];
 }
 
@@ -261,6 +272,8 @@ const Version = type({
   "container?": "string | null",
   "addedAt?": "number | null",
   "listedOrder?": "number",
+  "year?": "number | null",
+  "rating?": "number | null",
   "observed?": { files: "number", audio: "(string | null)[]", subtitles: "(string | null)[]" },
   "episodeFiles?": "string[]",
 });

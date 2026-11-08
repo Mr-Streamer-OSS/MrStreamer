@@ -231,6 +231,8 @@ function* indexKind(
         container: item.container,
         addedAt: item.addedAt,
         listedOrder,
+        year: name.year,
+        rating: item.rating,
         ...defined({ episodeFiles: item.episodeFiles }),
       });
     }

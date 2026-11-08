@@ -13,6 +13,9 @@ import { languageHints } from "./languages.ts";
 export interface FilterFile {
   /** Episode name hints can differ from the series name; movie files use their version's. */
   readonly tags: readonly string[];
+  readonly genres?: readonly string[];
+  readonly runtime?: number | null;
+  readonly watched?: "watched" | "unwatched" | "in-progress";
   readonly tracks?: {
     readonly audio: readonly (string | null)[];
     readonly subtitles: readonly (string | null)[];
@@ -53,14 +56,28 @@ export function filterTitles(
   files: FilterFiles,
   eligible: (version: TitleVersion) => boolean = () => true,
 ): readonly Title[] {
-  if (!filters.quality && !filters.language && !filters.verified) return titles;
+  if (Object.keys(filters).length === 0) return titles;
+
+  const inRange = (value: number | null | undefined, range: TitleFilters["runtime"]) =>
+    !range ||
+    (value != null &&
+      Number.isFinite(value) &&
+      (range.min === undefined || value >= range.min) &&
+      (range.max === undefined || value <= range.max));
 
   return titles.flatMap((title) => {
     const match = title.versions.find(
       (version) =>
         eligible(version) &&
+        (!filters.sourceIds || filters.sourceIds.includes(version.subscriptionId)) &&
+        inRange(version.year, filters.year) &&
+        inRange(version.rating, filters.rating) &&
         filesOf(version, files).some(
           (file) =>
+            (!filters.genres ||
+              filters.genres.some((genre) => (file.genres ?? title.genres).includes(genre))) &&
+            inRange(file.runtime, filters.runtime) &&
+            (!filters.watched || file.watched === filters.watched) &&
             (!filters.quality || qualityHint(file.tags) === filters.quality) &&
             (!filters.language || languageHints(file.tags).includes(filters.language)) &&
             (!filters.verified ||
@@ -107,6 +124,15 @@ export function filterOptions(titles: readonly Title[], files: FilterFiles): Fil
     [...values].sort((a, b) => (a === "unknown" ? 1 : b === "unknown" ? -1 : a.localeCompare(b)));
 
   return {
+    genres: [...new Set(titles.flatMap((title) => title.genres))].sort(),
+    unknownRuntime: titles.filter(
+      (title) =>
+        !title.versions.some((version) =>
+          filesOf(version, files).some(
+            (file) => file.runtime != null && Number.isFinite(file.runtime),
+          ),
+        ),
+    ).length,
     qualities: QUALITY_HINTS.filter((value) => qualities.has(value)),
     languages: sorted(languages),
     verified: verifiedFiles
