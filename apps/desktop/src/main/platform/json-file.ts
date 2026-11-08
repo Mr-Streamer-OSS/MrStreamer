@@ -1,3 +1,4 @@
+import type { Decode, FileRead, FileWrite } from "@mrstreamer/contracts/persisted-file";
 import type { Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { randomUUID } from "node:crypto";
@@ -18,8 +19,8 @@ const ZLIB = { chunkSize: 1024 * 1024 };
 
 /**
  * Reads and validates a JSON file against an ArkType schema, unpacking it first when its name
- * ends in .gz. Returns null when the file is missing, unreadable or no longer matches, so callers
- * treat stale formats like a first run.
+ * ends in .gz. Returns null for missing, malformed or mismatched data; filesystem read failures
+ * reject. Retained for callers that treat invalid formats like a first run.
  */
 export async function readJsonFile<T>(
   path: string,
@@ -40,28 +41,71 @@ export async function readJsonFile<T>(
   return parsed;
 }
 
-/** Reads JSON without traversing fields owned by a later build. */
+/** Reads JSON with store-owned decoding and failure advice. Literal null reaches the decoder. */
+export async function readJsonResult<A, E>(
+  path: string,
+  decode: Decode<A, E>,
+  unreadable: (cause: unknown) => E,
+): Promise<FileRead<A, E>> {
+  const read = await readParsedJson(path);
+
+  if (read.kind === "unreadable")
+    return { kind: "unreadable", error: unreadable(read.error.cause) };
+
+  if (read.kind === "missing") return read;
+
+  return decode(read.value);
+}
+
+/** Reads JSON without traversing fields owned by a later build. Retains legacy failure behavior. */
 export async function readJson(path: string): Promise<Json | null> {
+  const read = await readParsedJson(path);
+
+  if (read.kind === "read") return read.value;
+
+  if (read.kind === "unreadable") {
+    if (read.error.phase === "read") throw read.error.cause;
+    console.warn(`[storage] ignoring unreadable ${path}`);
+  }
+
+  return null;
+}
+
+async function readParsedJson(path: string) {
   let bytes: Buffer;
 
   try {
     bytes = await readFile(path);
   } catch (cause) {
-    if (isMissing(cause)) return null;
-    throw cause;
-  }
+    if (isMissing(cause)) return { kind: "missing" } as const;
 
-  let data: Json;
+    return { kind: "unreadable", error: { phase: "read", cause } } as const;
+  }
 
   try {
-    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes, ZLIB) : bytes).toString("utf8"));
-  } catch {
-    console.warn(`[storage] ignoring unreadable ${path}`);
+    const value: Json = JSON.parse(
+      (path.endsWith(".gz") ? await gunzip(bytes, ZLIB) : bytes).toString("utf8"),
+    );
 
-    return null;
+    return { kind: "read", value } as const;
+  } catch (cause) {
+    return { kind: "unreadable", error: { phase: "parse", cause } } as const;
   }
+}
 
-  return data;
+/** Returns refusal advice without acknowledging a failed serialization or replacement. */
+export async function writeJsonResult<E>(
+  path: string,
+  value: Json | { toJSON(): Json },
+  refused: (cause: unknown) => E,
+): Promise<FileWrite<E>> {
+  try {
+    await writeJsonFile(path, value);
+
+    return { kind: "written" };
+  } catch (cause) {
+    return { kind: "refused", error: refused(cause) };
+  }
 }
 
 /**
