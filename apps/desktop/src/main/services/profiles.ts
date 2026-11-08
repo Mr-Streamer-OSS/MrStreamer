@@ -378,6 +378,7 @@ export function makeProfiles({
 
           return Effect.gen(function* () {
             const acquired = yield* Deferred.make<Exit.Exit<void>>();
+
             const collectionWatch = Effect.scoped(
               Effect.gen(function* () {
                 const changes = yield* collections.profileChanges;

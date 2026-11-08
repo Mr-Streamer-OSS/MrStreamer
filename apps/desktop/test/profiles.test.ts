@@ -421,11 +421,13 @@ it.for(["failure", "cancellation"] as const)(
               ...collections,
               profileChanges: Effect.gen(function* () {
                 const stream = yield* collections.profileChanges;
+
                 if (!first) return stream;
                 first = false;
                 // Refuse only this public acquisition, after its real resource is acquired.
                 yield* Effect.addFinalizer(() => Deferred.succeed(closed, undefined));
                 yield* Deferred.succeed(entered, undefined);
+
                 if (mode === "failure") return yield* Effect.die("collection startup refused");
 
                 return yield* Effect.never;
@@ -444,14 +446,17 @@ it.for(["failure", "cancellation"] as const)(
       const owner = await runtime.runPromise(sessions.active);
       const pending = runtime.runPromiseExit(sessions.admitFor(owner), { signal: abort.signal });
       await Effect.runPromise(Deferred.await(entered), { signal });
+
       if (mode === "cancellation") abort.abort();
       const refused = await pending;
       expect(Exit.isFailure(refused)).toBe(true);
+
       if (Exit.isFailure(refused)) {
         if (mode === "failure")
           expect(Cause.pretty(refused.cause)).toContain("collection startup refused");
         else expect(Cause.hasInterrupts(refused.cause)).toBe(true);
       }
+
       await Effect.runPromise(Deferred.await(closed), { signal });
 
       const admitted = await runtime.runPromise(sessions.admitFor(owner), { signal });
@@ -466,6 +471,7 @@ it.for(["failure", "cancellation"] as const)(
             const pull = yield* Stream.toPull(
               Stream.filter(stream, (change) => change.kind === "collections"),
             );
+
             yield* admitted.run(
               commands["collections.change"]({ kind: "create", id: "retry", name: "Retry" }, "test"),
             );
@@ -475,6 +481,7 @@ it.for(["failure", "cancellation"] as const)(
         ),
         { signal },
       );
+
       expect(changes).toEqual([{ kind: "collections", owner }]);
       expect(
         await runtime.runPromise(admitted.run(commands["collections.list"](undefined, "test"))),
@@ -534,6 +541,7 @@ it("retains the collection acquisition past caller scope closure and releases it
           const pull = yield* Stream.toPull(
             Stream.filter(stream, (change) => change.kind === "collections"),
           );
+
           yield* admitted.run(
             commands["collections.change"]({ kind: "create", id: "retained", name: "Retained" }, "test"),
           );
@@ -543,12 +551,14 @@ it("retains the collection acquisition past caller scope closure and releases it
       ),
       { signal },
     );
+
     expect(changes).toEqual([{ kind: "collections", owner: admitted.owner }]);
     expect(released).toBe(false);
     await runtime.dispose();
     expect(released).toBe(true);
     const refused = await Effect.runPromiseExit(admitted.run(Effect.void));
     expect(Exit.isFailure(refused)).toBe(true);
+
     if (Exit.isFailure(refused))
       expect(Cause.pretty(refused.cause)).toContain("This profile admission has ended");
   } finally {
