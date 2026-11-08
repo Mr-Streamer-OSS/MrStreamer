@@ -543,18 +543,22 @@ function make(deps: RemindersDeps) {
 
     if (sessions._tag === "Some")
       yield* Effect.forkScoped(
-        Stream.runForEach(sessions.value.changes, (change) =>
-          change.kind === "active"
-            ? turn(
-                Effect.gen(function* () {
-                  const file = store.kind === "read" ? store.file.reminders : [];
+        Effect.scoped(
+          Effect.flatMap(sessions.value.changes, (changes) =>
+            Stream.runForEach(changes, (change) =>
+              change.kind === "active"
+                ? turn(
+                    Effect.gen(function* () {
+                      const file = store.kind === "read" ? store.file.reminders : [];
 
-                  for (const reminder of file)
-                    if (!(yield* mayTell(reminder))) closeNotice(reminder.id);
-                  yield* publish;
-                }),
-              )
-            : Effect.void,
+                      for (const reminder of file)
+                        if (!(yield* mayTell(reminder))) closeNotice(reminder.id);
+                      yield* publish;
+                    }),
+                  )
+                : Effect.void,
+            ),
+          ),
         ),
       );
     // What the system says of its notices.
