@@ -1562,8 +1562,10 @@ it("publishes only the captured collection owner and refuses missing admitted co
   const started = readMonotonic();
   const history: { sequence: number; label: string; elapsedNs: string }[] = [];
   let pendingPhase = "body-entry";
+
   const phase = (label: string) => {
     pendingPhase = label;
+
     if (history.length < 40) {
       history.push({
         sequence: history.length,
@@ -1572,6 +1574,7 @@ it("publishes only the captured collection owner and refuses missing admitted co
       });
     }
   };
+
   const capture = (
     witness: "runner-abort" | "finished-failure",
     kind: "test-timeout-5000" | "hook-timeout" | "cancellation-or-other" | "failed-result",
@@ -1583,25 +1586,32 @@ it("publishes only the captured collection owner and refuses missing admitted co
       elapsedNs: String(readMonotonic() - started),
       entries: Object.freeze(history.map((entry) => Object.freeze({ ...entry }))),
     });
+
   let firstSnapshot: ReturnType<typeof capture> | undefined;
+
   const report = (...args: Parameters<typeof capture>) => {
     if (firstSnapshot) return;
     firstSnapshot = capture(...args);
     console.error("[818 failure chronology]", JSON.stringify(firstSnapshot));
   };
+
   const onAbort = () => {
     const reason: unknown = signal.reason;
+
     const kind =
       reason instanceof Error && reason.message.startsWith("Test timed out in 5000ms")
         ? "test-timeout-5000"
         : reason instanceof Error && reason.message.startsWith("Hook timed out in ")
           ? "hook-timeout"
           : "cancellation-or-other";
+
     report("runner-abort", kind);
   };
+
   signal.addEventListener("abort", onAbort, { once: true });
   onTestFinished(() => {
     signal.removeEventListener("abort", onAbort);
+
     if (task.result?.state === "fail") report("finished-failure", "failed-result");
   });
   phase("fixture");
@@ -1614,6 +1624,7 @@ it("publishes only the captured collection owner and refuses missing admitted co
   const Stream = await import("effect/Stream");
 
   phase("caller-scope-entry");
+
   const changes = await f.app.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -1621,6 +1632,7 @@ it("publishes only the captured collection owner and refuses missing admitted co
         const stream = yield* f.sessions.changes;
 
         phase("mutation");
+
         const result = yield* Effect.promise(() =>
           f.call(f.adult, "collections.change", {
             kind: "create",
@@ -1633,6 +1645,7 @@ it("publishes only the captured collection owner and refuses missing admitted co
         expect(result).toMatchObject({ ok: true });
 
         phase("toPull");
+
         const pull = yield* Stream.toPull(
           Stream.filter(stream, (change) => change.kind === "collections"),
         );
@@ -1640,6 +1653,7 @@ it("publishes only the captured collection owner and refuses missing admitted co
         phase("pull");
         const pulled = yield* pull;
         phase("caller-scope-close");
+
         return pulled;
       }),
     ),
