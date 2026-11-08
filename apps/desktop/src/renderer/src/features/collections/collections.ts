@@ -9,6 +9,7 @@ import {
   type CollectionChange,
   type CollectionIdentity,
 } from "@mrstreamer/contracts/collections";
+import { usePresentationVisible } from "../../lib/presentation.ts";
 import { call, callForProfile, currentProfile, listen, profileOwner } from "../../lib/ipc.ts";
 
 export const collectionQueries = {
@@ -87,7 +88,28 @@ function syncCollections(client: QueryClient): () => void {
 }
 
 /** Keeps a view's collection reads current while it is mounted. */
-export function useCollectionUpdates(): void {
+export function useCollectionUpdates(active = false): void {
   const client = useQueryClient();
+  const visible = usePresentationVisible();
   useEffect(() => syncCollections(client), [client]);
+  useEffect(() => {
+    if (!active || !visible) return;
+    const owner = profileOwner();
+    const lists = client.getQueryData(collectionQueries.list().queryKey);
+    const ids = new Set(lists?.filter((list) => list.rules).map((list) => list.id));
+
+    if (ids.size === 0) return;
+
+    const saved = {
+      queryKey: ["collections"],
+      predicate: (query: { queryKey: readonly unknown[] }) =>
+        query.queryKey[1] === "list" ||
+        (query.queryKey[1] === "page" && ids.has(String(query.queryKey[2]))),
+    };
+
+    // Returning from details can add runtime facts without a catalogue or viewing event.
+    void client.cancelQueries(saved).then(() => {
+      if (currentProfile(owner)) void client.invalidateQueries(saved);
+    });
+  }, [client, active, visible]);
 }

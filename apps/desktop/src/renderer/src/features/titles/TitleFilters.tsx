@@ -693,7 +693,11 @@ export function RuleMenus({
     ? RULES.filter((rule) => filters[rule] !== undefined || rule === adding)
     : RULES;
 
-  const unset = RULES.filter((rule) => !shown.includes(rule));
+  const unset = RULES.filter(
+    (rule) =>
+      !shown.includes(rule) &&
+      (options || !["genres", "quality", "language", "verified"].includes(rule)),
+  );
 
   return (
     <>

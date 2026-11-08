@@ -1,3 +1,5 @@
+import { episodeStates } from "@mrstreamer/core/viewing/episodes";
+import { CollectionsStore } from "../platform/collections-store.ts";
 import { STARTED_SECONDS } from "@mrstreamer/core/viewing/titles";
 import { AdmittedKids } from "./profile-policy.ts";
 import { ArkErrors } from "arktype";
@@ -649,14 +651,26 @@ function make(deps: OnDemandDeps) {
           args,
         ]);
 
+        const store = yield* Effect.serviceOption(CollectionsStore);
+
+        const capacity =
+          store._tag === "Some"
+            ? (yield* store.value.read).filter((list) => list.rules).length + 2
+            : 2;
+
+        while (rulePages.size > capacity) rulePages.delete(rulePages.keys().next().value!);
         const kept = rulePages.get(key);
 
-        if (kept) return kept;
+        if (kept) {
+          keep(rulePages, key, kept, capacity);
+
+          return kept;
+        }
+
         const page = yield* call("collection", args);
 
         if (currency === ruleCurrency) {
-          if (rulePages.size >= 8) rulePages.delete(rulePages.keys().next().value!);
-          rulePages.set(key, page);
+          keep(rulePages, key, page, capacity);
         }
 
         return page;
@@ -1501,6 +1515,7 @@ function make(deps: OnDemandDeps) {
         );
 
         if (kind === "series") {
+          watched.clear();
           const files = yield* knownFiles(kind);
 
           for (const version of versions) {
@@ -1512,20 +1527,22 @@ function make(deps: OnDemandDeps) {
             if (exact.length === 0) continue;
             const viewing = yield* record.episodes(version);
 
+            const loaded = new Set(exact.map((file) => file.id));
+
+            const stateOf = episodeStates(
+              viewing.progress.filter((entry) => loaded.has(entry.title.id)),
+              viewing.marks,
+            );
+
             for (const file of exact) {
-              const mark = viewing.marks.find(
-                (mark) => mark.season === file.season && mark.episode === file.episode,
-              );
-
-              const played = viewing.progress.find(
-                (played) => ownedKey(played.title) === ownedKey(file),
-              );
-
-              if (!mark || (played && played.since > mark.at)) continue;
+              if (file.season === undefined || file.episode === undefined) continue;
+              const state = stateOf({ season: file.season, number: file.episode });
               const key = ownedKey(file);
+              watched.delete(key);
 
-              if (mark.watched) watched.set(key, { key, state: "watched" });
-              else watched.delete(key);
+              if (state.kind === "watched") watched.set(key, { key, state: "watched" });
+              else if (state.kind === "partial" && state.progress.position >= STARTED_SECONDS)
+                watched.set(key, { key, state: "in-progress" });
             }
           }
         }

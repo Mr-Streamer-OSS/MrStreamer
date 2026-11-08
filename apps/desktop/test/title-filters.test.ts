@@ -747,3 +747,71 @@ it("includes manual episode marks only on currently loaded exact series files", 
   ).toContain(seriesId);
   expect(asked(provider)).toEqual(before);
 });
+
+it("lets a newer alternate episode play override its mark without counting unloaded marks", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  provider.serveTitles((all) => ({
+    ...all,
+    series: all.series.map((series) => ({
+      ...series,
+      seasons: series.seasons.map((episodes, index) =>
+        index === 0
+          ? [
+              { ...episodes[0]!, number: 1 },
+              { ...episodes[0]!, id: 987654, number: 1 },
+            ]
+          : episodes,
+      ),
+    })),
+  }));
+  const app = await started();
+
+  try {
+    const source = await app.subscriptions.add(demoLogin(provider));
+    await app.titles.refresh(source.id);
+    const seriesId = String(provider.titles.series[0]!.id);
+    const sessions = await app.runtime.runPromise(ProfileSessions);
+    const admission = await app.runtime.runPromise(sessions.admit);
+    const onDemand = await app.runtime.runPromise(OnDemand);
+
+    const title = {
+      kind: "episode" as const,
+      subscriptionId: source.id,
+      id: String(provider.titles.series[0]!.seasons[0]![0]!.id),
+      seriesId,
+      season: 1,
+      episode: 1,
+    };
+
+    const run = <A>(effect: import("effect/Effect").Effect<A, unknown>) =>
+      app.runtime.runPromise(admission.run(effect));
+
+    await run(admission.services.viewing.markEpisode("mark", title, true));
+    await app.titles.refresh(source.id);
+    const query = { kind: "series" as const, id: "all" as const, offset: 0, limit: 48 };
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "watched" } }))).total,
+    ).toBe(0);
+    await app.titles.details("series", { subscriptionId: source.id, id: seriesId });
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "watched" } }))).total,
+    ).toBe(1);
+    await run(
+      admission.services.viewing.recordProgress(
+        "alternate",
+        { ...title, id: "987654" },
+        600,
+        2700,
+        Date.now() + 1000,
+      ),
+    );
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "watched" } }))).total,
+    ).toBe(0);
+    expect(
+      (await run(onDemand.collection({ ...query, filters: { watched: "in-progress" } }))).total,
+    ).toBe(1);
+  } finally {
+    await app.runtime.dispose();
+  }
+});

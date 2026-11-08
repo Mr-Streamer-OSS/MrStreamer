@@ -49,7 +49,7 @@ export function CollectionsPage({ kind, active }: { kind: TitleKind; active: boo
 }
 
 function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }) {
-  useCollectionUpdates();
+  useCollectionUpdates(active);
   const list = useQuery(collectionQueries.list());
   const commit = useCommitCollection();
   const opened = useOpen((state) => state.id);

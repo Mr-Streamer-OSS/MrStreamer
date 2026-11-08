@@ -1710,7 +1710,7 @@ describe("a smart collection in the Collections tab", () => {
 
   it("makes a smart collection as a draft that is stored with its first saved rule", async () => {
     smartMain();
-    ipc.refuse("ondemand.filterOptions", { kind: "unexpected", detail: "choices unavailable" });
+    const loading = ipc.hold("ondemand.filterOptions");
     await mountTab();
     await row("Short films");
 
@@ -1741,12 +1741,56 @@ describe("a smart collection in the Collections tab", () => {
     expect(draft()?.textContent).toContain("Add a rule to save");
     expect(ipc.argsOf("collections.change")).toEqual([]);
 
+    await act(async () =>
+      document.querySelector<HTMLElement>("[role=group][aria-label='Add rule'] button")!.click(),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector("[role=menu][aria-label='Add rule']")).not.toBeNull(),
+    );
+
+    const choices = [...document.querySelectorAll("[role=menuitem]")].map(
+      (item) => item.textContent,
+    );
+
+    expect(choices).toEqual(["Year", "Runtime", "Rating", "Watched", "Source"]);
+    await act(async () =>
+      document
+        .querySelector<HTMLElement>("[role=menuitem]")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+    );
+    await act(async () => loading.reject({ kind: "unexpected", detail: "choices unavailable" }));
     await vi.waitFor(() => expect(button("Try again")).toBeTruthy());
+    await act(async () =>
+      document.querySelector<HTMLElement>("[role=group][aria-label='Add rule'] button")!.click(),
+    );
+    await vi.waitFor(() =>
+      expect(
+        [...document.querySelectorAll("[role=menuitem]")].map((item) => item.textContent),
+      ).toEqual(["Year", "Runtime", "Rating", "Watched", "Source"]),
+    );
+    await act(async () =>
+      document
+        .querySelector<HTMLElement>("[role=menuitem]")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+    );
     await setRule("Rating", "7+");
     ipc.always("ondemand.filterOptions", { qualities: [], languages: [], verified: [], files: 0 });
     await act(async () => button("Try again").click());
     await vi.waitFor(() => expect(() => button("Try again")).toThrow());
     expect(document.querySelector("h1")?.textContent).toBe("Short comedies");
+    await act(async () =>
+      document.querySelector<HTMLElement>("[role=group][aria-label='Add rule'] button")!.click(),
+    );
+    await vi.waitFor(() =>
+      expect(
+        [...document.querySelectorAll("[role=menuitem]")].map((item) => item.textContent),
+      ).toContain("Genre"),
+    );
+    await act(async () =>
+      document
+        .querySelector<HTMLElement>("[role=menuitem]")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+    );
     await vi.waitFor(() => expect(button("Save rules").hasAttribute("disabled")).toBe(false));
     await act(async () => button("Save rules").click());
     await vi.waitFor(() => expect(draft()).toBeNull());
@@ -1762,6 +1806,35 @@ describe("a smart collection in the Collections tab", () => {
     await vi.waitFor(async () =>
       expect((await row("Short comedies")).textContent).toBe("Short comediesSmart collection1"),
     );
+  });
+
+  it("refreshes saved runtime matches on return and cancels an obsolete first page", async () => {
+    smartMain();
+    ipc.always("collections.page", { total: 0, members: [] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = queryView(client);
+    unmount = () => view.unmount();
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("No titles match"));
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: false }));
+    const old = ipc.hold("collections.page");
+    void client.resetQueries({ queryKey: ["collections", "page"] });
+    await vi.waitFor(() => expect(ipc.argsOf("collections.page").length).toBeGreaterThan(1));
+    // Details loaded from global search changed runtime facts, without a viewing/catalogue event.
+    ipc.always("collections.page", { total: 1, members: [member(kite)] });
+    ipc.always("collections.list", [
+      {
+        id: "s0",
+        name: "Short films",
+        total: 1,
+        rules: { kind: "movie", filters: { runtime: { max: 5399 } } },
+      },
+    ]);
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
+    await poster("Kite Season, Movie, 2022");
+    await act(async () => old.resolve({ total: 0, members: [] }));
+    await poster("Kite Season, Movie, 2022");
+    await vi.waitFor(async () => expect((await row("Short films")).textContent).toContain("1"));
   });
 
   it("refreshes smart matches and counts on this owner's viewing event alone", async () => {
@@ -1787,9 +1860,14 @@ describe("a smart collection in the Collections tab", () => {
       },
     ]);
     ipc.always("collections.page", { total: 0, members: [] });
+    const beforeWrong = ipc.argsOf("collections.page").length;
     await act(async () =>
       ipc.emit("profiles.viewingChanged", { owner: { id: "other", revision: 2 }, sequence: 1 }),
     );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(ipc.argsOf("collections.page")).toHaveLength(beforeWrong);
     await poster("Dune Road, Movie, 2021");
     await act(async () => ipc.emit("profiles.viewingChanged", { owner, sequence: 1 }));
     await vi.waitFor(() => expect(document.querySelector("[data-index] button")).toBeNull());
