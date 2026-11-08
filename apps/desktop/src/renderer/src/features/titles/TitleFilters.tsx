@@ -6,7 +6,14 @@ import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Plus } from "lucide-react";
-import { Fragment, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Fragment,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import {
   QUALITY_HINTS,
@@ -194,6 +201,7 @@ function Description({ children }: { children: ReactNode }) {
 interface Opening {
   readonly defaultOpen?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
+  readonly finalFocus?: () => HTMLElement | boolean | null;
 }
 
 /** A scrollable choice menu, shared by sort and filters. Native menu keys stay out of the grid. */
@@ -206,6 +214,7 @@ export function TitleChoiceMenu<V extends string>({
   disabled = false,
   clearable = false,
   showLabel = true,
+  finalFocus,
   ...opening
 }: {
   label: string;
@@ -231,7 +240,12 @@ export function TitleChoiceMenu<V extends string>({
         </Menu.Trigger>
         <Menu.Portal>
           <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
-            <Menu.Popup aria-label={label} className={popupClass} onKeyDown={popupKeys}>
+            <Menu.Popup
+              aria-label={label}
+              finalFocus={finalFocus}
+              className={popupClass}
+              onKeyDown={popupKeys}
+            >
               <Menu.RadioGroup
                 value={value ?? ""}
                 onValueChange={(next: string) =>
@@ -276,6 +290,7 @@ function ManyChoiceMenu({
   value,
   onChange,
   disabled = false,
+  finalFocus,
   ...opening
 }: {
   label: string;
@@ -310,7 +325,12 @@ function ManyChoiceMenu({
         </Menu.Trigger>
         <Menu.Portal>
           <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
-            <Menu.Popup aria-label={label} className={popupClass} onKeyDown={popupKeys}>
+            <Menu.Popup
+              aria-label={label}
+              finalFocus={finalFocus}
+              className={popupClass}
+              onKeyDown={popupKeys}
+            >
               <Menu.CheckboxItem
                 checked={picked.size === 0}
                 onCheckedChange={() => onChange(undefined)}
@@ -361,6 +381,7 @@ function YearMenu({
   onChange,
   defaultOpen,
   onOpenChange,
+  finalFocus,
 }: {
   value: TitleFilters["year"];
   onChange: (value: TitleFilters["year"]) => void;
@@ -426,7 +447,12 @@ function YearMenu({
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
-            <Popover.Popup aria-label={label} className={popupClass} onKeyDown={popupKeys}>
+            <Popover.Popup
+              aria-label={label}
+              finalFocus={finalFocus}
+              className={popupClass}
+              onKeyDown={popupKeys}
+            >
               <div className="flex gap-2 px-2 pt-1">
                 {field(t("From"), from, setFrom)}
                 {field(t("To"), to, setTo)}
@@ -559,6 +585,7 @@ export function RuleMenus({
 }: TitleFilterControls & { kind: TitleKind; setOnly?: boolean }) {
   const { options, choices } = useRuleChoices(kind, filters);
   const [adding, setAdding] = useState<Rule | null>(null);
+  const addTrigger = useRef<HTMLButtonElement | null>(null);
 
   function change<K extends Rule>(key: K, value: TitleFilters[K]) {
     const next = { ...filters };
@@ -569,7 +596,14 @@ export function RuleMenus({
   }
 
   const opening = (rule: Rule): Opening =>
-    rule === adding ? { defaultOpen: true, onOpenChange: (open) => open || setAdding(null) } : {};
+    rule === adding
+      ? {
+          defaultOpen: true,
+          onOpenChange: (open) => open || setAdding(null),
+          // Closing an empty rule removes its trigger, so return to the surviving Add rule.
+          finalFocus: () => (filters[rule] === undefined ? addTrigger.current : true),
+        }
+      : {};
 
   const needsOptions = (rule: Rule) => NEEDS_OPTIONS.some((dependent) => dependent === rule);
 
@@ -710,20 +744,30 @@ export function RuleMenus({
       {shown.map((rule) => (
         <Fragment key={rule}>{menu(rule)}</Fragment>
       ))}
-      {setOnly && unset.length > 0 && <AddRule rules={unset} onAdd={setAdding} />}
+      {setOnly && unset.length > 0 && (
+        <AddRule rules={unset} onAdd={setAdding} triggerRef={addTrigger} />
+      )}
     </>
   );
 }
 
 /** + Rule: the rules not set yet. The one picked opens its own menu next. */
-function AddRule({ rules, onAdd }: { rules: readonly Rule[]; onAdd: (rule: Rule) => void }) {
+function AddRule({
+  rules,
+  onAdd,
+  triggerRef,
+}: {
+  rules: readonly Rule[];
+  onAdd: (rule: Rule) => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
   const label = t("Add rule");
   const picked = useRef(false);
 
   return (
     <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
       <Menu.Root onOpenChange={(open) => open && (picked.current = false)}>
-        <Menu.Trigger aria-label={label} className={triggerClass}>
+        <Menu.Trigger ref={triggerRef} aria-label={label} className={triggerClass}>
           <Plus aria-hidden className="size-3.5 flex-none" />
           {t("Rule")}
         </Menu.Trigger>

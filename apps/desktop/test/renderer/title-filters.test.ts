@@ -732,3 +732,49 @@ it("returns to Add rule on Escape and hands a picked rule its own menu's focus",
   expect(popup()).toBeNull();
   expect(onFilters).not.toHaveBeenCalled();
 });
+
+it.each([
+  ["Rating", "menu"],
+  ["Year", "dialog"],
+])("returns to Add rule when an empty new %s rule is cancelled", async (rule, role) => {
+  vi.useRealTimers();
+  ipc.always("subscription.list", [SAVED]);
+  ipc.always("ondemand.filterOptions", options);
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  cleanup = view.unmount;
+  await view.render(
+    createElement(RuleMenus, { kind: "movie", filters: {}, onFilters: () => {}, setOnly: true }),
+  );
+
+  const trigger = view.container.querySelector<HTMLButtonElement>("button[aria-label='Add rule']")!;
+  await act(async () => {
+    trigger.focus();
+    trigger.click();
+  });
+
+  const popup = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLElement>("[role=menu][aria-label='Add rule']");
+    expect(found).not.toBeNull();
+
+    return found!;
+  });
+
+  const choice = [...popup.querySelectorAll<HTMLElement>("[role=menuitem]")].find(
+    (item) => item.textContent === rule,
+  )!;
+
+  await act(async () => choice.click());
+
+  const editor = () => document.querySelector<HTMLElement>(`[role=${role}][aria-label='${rule}']`);
+  await vi.waitFor(() => expect(editor()?.contains(document.activeElement)).toBe(true));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  });
+  await vi.waitFor(() => expect(editor()).toBeNull());
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(view.container.querySelector(`[role=group][aria-label='${rule}']`)).toBeNull();
+});
