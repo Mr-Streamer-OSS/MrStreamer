@@ -131,6 +131,8 @@ The watchlist is kept on your computer, with the subscription each title was sav
 
 ## Collections
 
+Smart collections store rules instead of a fixed member list. Their matches follow the currently admitted catalogue and this profile's progress. Genres and sources allow several choices; year, runtime and provider rating use inclusive bounds. Runtime is measured in seconds internally and comes only from current details already loaded on this device. Unknown facts never satisfy a range. One exact version must meet every rule, including quality, language and verified tracks. For series, runtime and progress describe the loaded episode file, without fetching other episodes. Editing rules does not request metadata or probe media. A failed save keeps the previous rules stored so the edit can be retried. Manual collections retain their own members and order.
+
 _Named collections of movies and series, beside the watchlist._
 
 Collections are lists you name and keep, such as Family night or Weekend films. They are not the watchlist: **Save** still keeps a title for later, and a title can be saved and in several collections at once.

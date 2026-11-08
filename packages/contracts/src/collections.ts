@@ -1,3 +1,4 @@
+import type { TitleFilters } from "./title-filters.ts";
 import type { Title, TitleKind } from "./ondemand.ts";
 
 /** Current admitted subscription id, media type and provider id. Display names never identify members. */
@@ -18,9 +19,15 @@ export interface CollectionTitle extends CollectionIdentity {
 /** The most characters a collection's name has, once trimmed. */
 export const COLLECTION_NAME_MAX = 120;
 
+export interface SmartCollectionRules {
+  readonly kind: TitleKind;
+  readonly filters: TitleFilters;
+}
+
 export interface PersonalCollection {
   readonly id: string;
   readonly name: string;
+  readonly rules?: SmartCollectionRules;
 }
 
 /** A collection as the viewer may see it, with how many of its members they may see. */
@@ -41,7 +48,13 @@ export interface CollectionPage {
 
 /** Commands are atomic. Orders name every visible item exactly once; hidden member slots retain their positions. */
 export type CollectionChange =
-  | { readonly kind: "create"; readonly id: string; readonly name: string }
+  | {
+      readonly kind: "create";
+      readonly id: string;
+      readonly name: string;
+      readonly rules?: SmartCollectionRules;
+    }
+  | { readonly kind: "rules"; readonly id: string; readonly rules: SmartCollectionRules }
   | { readonly kind: "rename"; readonly id: string; readonly name: string }
   | { readonly kind: "delete"; readonly id: string }
   | { readonly kind: "reorder"; readonly ids: readonly string[] }

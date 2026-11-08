@@ -8,6 +8,13 @@ export type QualityHint = (typeof QUALITY_HINTS)[number];
 
 export const TitleFilters = lazy(() =>
   type({
+    "genres?": "string[] > 0",
+    "year?": { "min?": "number.integer >= 0", "max?": "number.integer >= 0" },
+    /** Runtime bounds are seconds, inclusive. Unknown values never match a range. */
+    "runtime?": { "min?": "number.safe >= 0", "max?": "number.safe >= 0" },
+    "rating?": { "min?": "0 <= number <= 10", "max?": "0 <= number <= 10" },
+    "watched?": "'watched' | 'unwatched' | 'in-progress'",
+    "sourceIds?": "string[] > 0",
     "quality?": "'4k' | 'full-hd' | 'hd' | 'sd' | 'unknown'",
     "language?": "string > 0",
     "verified?": {
@@ -20,6 +27,8 @@ export const TitleFilters = lazy(() =>
 export type TitleFilters = Infer<typeof TitleFilters>;
 
 export interface FilterOptions {
+  readonly genres?: readonly string[];
+  readonly unknownRuntime?: number;
   readonly qualities: readonly QualityHint[];
   readonly languages: readonly string[];
   readonly verified: readonly { readonly kind: "audio" | "subtitles"; readonly language: string }[];

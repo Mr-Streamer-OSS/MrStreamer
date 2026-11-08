@@ -628,7 +628,11 @@ export const ipcInputs = {
   "collections.change": () => {
     const identity = type({ sourceId: "string > 0", kind: titleKind(), titleId: "string > 0" });
 
-    return type({ kind: "'create' | 'rename'", id: listId(), name: "string" })
+    const rules = type({ kind: titleKind(), filters: TitleFilters() });
+
+    return type({ kind: "'create'", id: listId(), name: "string", "rules?": rules })
+      .or({ kind: "'rename'", id: listId(), name: "string" })
+      .or({ kind: "'rules'", id: listId(), rules })
       .or({ kind: "'delete'", id: listId() })
       .or({ kind: "'reorder'", ids: listId().array().readonly() })
       .or({

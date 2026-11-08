@@ -41,6 +41,7 @@ import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import {
   collectionRows,
+  genresOf,
   collections,
   type Collections,
 } from "@mrstreamer/core/ondemand/collections";
@@ -514,10 +515,15 @@ function shownOf(members: readonly Loaded[], language: string): Shown {
 }
 
 /** Last-read tracks count only while their exact file remains in these owners' current lists. */
-function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[]): FilterFiles {
+function filterFiles(
+  found: Shown,
+  kind: TitleKind,
+  known: readonly KnownFile[],
+  watched?: readonly { readonly key: string; readonly state: "watched" | "in-progress" }[],
+): FilterFiles {
   const result = new Map<string, FilterFile[]>();
+  const progress = watched ? new Map(watched.map((entry) => [entry.key, entry.state])) : undefined;
 
-  if (known.length === 0) return result;
   let listings = found.fileListings.get(kind);
 
   if (!listings) {
@@ -559,9 +565,36 @@ function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[])
     const files = result.get(key) ?? [];
     files.push({
       tags: file.tags ?? version.tags,
-      ...defined({ tracks: file.tracks }),
+      ...defined({
+        tracks: file.tracks,
+        runtime: file.runtime,
+        watched: progress ? (progress.get(ownedKey(file)) ?? "unwatched") : undefined,
+      }),
     });
     result.set(key, files);
+  }
+
+  for (const title of kindOf(found.index, kind).titles) {
+    const meta = title.tmdbId
+      ? metadata.get(kind === "movie" ? "movie" : "tv", title.tmdbId)
+      : null;
+
+    const genres = meta ? genresOf(meta) : [];
+
+    for (const version of title.versions) {
+      const key = ownedKey(version);
+      result.set(
+        key,
+        (result.get(key) ?? [{ tags: version.tags }]).map((file) => ({
+          ...file,
+          genres,
+          ...defined({
+            watched:
+              kind === "movie" && progress ? (progress.get(key) ?? "unwatched") : file.watched,
+          }),
+        })),
+      );
+    }
   }
 
   return result;
@@ -869,7 +902,7 @@ const handlers: {
 
     return { movies: matches("movie"), series: matches("series") };
   },
-  searchKind: async ({ language, kind, query, limit, owners, filters, files = [] }) => {
+  searchKind: async ({ language, kind, query, limit, owners, filters, files = [], watched }) => {
     speaking(language);
     const found = await catalogueOf(owners, language);
 
@@ -879,7 +912,7 @@ const handlers: {
       query,
       aliases,
       limit,
-      filters ? { filters, files: filterFiles(found, kind, files) } : undefined,
+      filters ? { filters, files: filterFiles(found, kind, files, watched) } : undefined,
     );
 
     return {
@@ -891,7 +924,14 @@ const handlers: {
     const found = await catalogueOf(owners, language);
     // Choices need version hints and observed tracks, not metadata decoration or collection order.
     const indexed = kindOf(found.index, kind).titles;
-    const titles = adults ? indexed : indexed.filter((title) => !title.adult);
+
+    const titles = (adults ? indexed : indexed.filter((title) => !title.adult)).map((title) => {
+      const meta = title.tmdbId
+        ? metadata.get(kind === "movie" ? "movie" : "tv", title.tmdbId)
+        : null;
+
+      return meta ? { ...title, genres: genresOf(meta) } : title;
+    });
 
     return filterOptions(titles, filterFiles(found, kind, files));
   },
@@ -1000,7 +1040,18 @@ const handlers: {
           artworkUrl: service.artwork,
         }));
   },
-  collection: async ({ language, kind, id, sort, offset, limit, owners, filters, files = [] }) => {
+  collection: async ({
+    language,
+    kind,
+    id,
+    sort,
+    offset,
+    limit,
+    owners,
+    filters,
+    files = [],
+    watched,
+  }) => {
     speaking(language);
     const found = await catalogueOf(owners, language, true);
     const made = collectionsOf(found, kind);
@@ -1010,7 +1061,7 @@ const handlers: {
       ? filterTitles(
           unfiltered,
           filters,
-          filterFiles(found, kind, files),
+          filterFiles(found, kind, files, watched),
           (version) => id !== "4k" || version.tags.some((tag) => tag === "4K" || tag === "UHD"),
         )
       : unfiltered;

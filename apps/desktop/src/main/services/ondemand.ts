@@ -54,6 +54,7 @@ import {
 import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { titleName } from "@mrstreamer/core/ondemand/names";
+import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { qualityHint } from "@mrstreamer/core/ondemand/filters";
 import type { FilterOptions, TitleFilters } from "@mrstreamer/contracts/title-filters";
 import type { SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
@@ -1245,19 +1246,73 @@ function make(deps: OnDemandDeps) {
     /** No provider reads: cached episode listings must still belong to the saved source and lists. */
     const knownFiles = (kind: TitleKind, onlyRead = false) =>
       Effect.gen(function* () {
-        if (!verifiedFiles) return [];
         const files: KnownFile[] = [];
         const now = yield* Clock.currentTimeMillis;
-        const found = kind === "series" && details.size > 0 ? yield* held : [];
+        const viewer = yield* language;
+        const found = details.size > 0 ? yield* held : [];
 
         for (const source of yield* listed) {
-          const known = yield* verifiedFiles
-            .read(source.key, source.fileRevision)
-            .pipe(Effect.orElseSucceed(() => []));
+          const known = verifiedFiles
+            ? yield* verifiedFiles
+                .read(source.key, source.fileRevision)
+                .pipe(Effect.orElseSucceed(() => []))
+            : [];
 
           if (kind === "movie") {
+            const loaded = [...details.values()].filter(
+              (entry) =>
+                entry.title.kind === "movie" &&
+                entry.version.subscriptionId === source.id &&
+                entry.sourceRevision === source.revision &&
+                currentDetails(
+                  source,
+                  entry,
+                  found.find((each) => each.subscription.id === source.id)?.worked.catalogueStamp,
+                  now,
+                ),
+            );
+
+            for (const entry of loaded) {
+              const version = entry.title.versions.find(
+                (version) =>
+                  version.id === entry.version.id && version.subscriptionId === source.id,
+              );
+
+              const listingKey = listedFileKey("movie", {
+                id: entry.version.id,
+                name: version?.name ?? entry.title.name,
+                container: version?.container ?? null,
+              });
+
+              const evidence = known.find(
+                (file) =>
+                  file.kind === "movie" &&
+                  file.id === entry.version.id &&
+                  file.listingKey === listingKey,
+              );
+
+              files.push({
+                subscriptionId: source.id,
+                kind: "movie",
+                id: entry.version.id,
+                listingKey,
+                runtime: movieDetails(
+                  entry.title,
+                  entry.raw,
+                  entry.title.tmdbId
+                    ? validAbout(aboutKey("movie", entry.title.tmdbId, viewer), now)
+                    : null,
+                ).duration,
+                ...defined({
+                  tracks: evidence
+                    ? { audio: evidence.audio, subtitles: evidence.subtitles }
+                    : undefined,
+                }),
+              });
+            }
+
             for (const file of known)
-              if (file.kind === "movie")
+              if (file.kind === "movie" && !loaded.some((entry) => entry.version.id === file.id))
                 files.push({
                   subscriptionId: source.id,
                   kind: "movie",
@@ -1327,6 +1382,7 @@ function make(deps: OnDemandDeps) {
                 seriesId: held.version.id,
                 listingKey,
                 tags: hints,
+                runtime: episode.duration,
                 ...defined({ tracks }),
               });
             }
@@ -1334,6 +1390,48 @@ function make(deps: OnDemandDeps) {
         }
 
         return files;
+      });
+
+    const watchedFiles = (
+      kind: TitleKind,
+      filters: TitleFilters | undefined,
+      owners: readonly CatalogueOwner[],
+      language: string,
+    ) =>
+      Effect.gen(function* () {
+        if (!filters?.watched) return undefined;
+        const admitted = yield* Effect.serviceOption(ViewingRecord);
+
+        if (admitted._tag === "None")
+          return yield* new Failed({
+            error: {
+              kind: "unexpected",
+              detail: "Viewing record is unavailable; retry the request.",
+            },
+          });
+        const record = admitted.value;
+
+        const page = yield* call("collection", {
+          owners,
+          language,
+          kind,
+          id: "all",
+          offset: 0,
+          limit: Number.MAX_SAFE_INTEGER,
+        });
+
+        const versions = page.titles.flatMap((title) => title.versions);
+
+        const progress = yield* record.progress(
+          kind === "movie" ? { movies: versions } : { series: versions },
+        );
+
+        return progress
+          .filter((entry) => entry.finished || entry.position > 0)
+          .map((entry) => ({
+            key: ownedKey(entry.title),
+            state: entry.finished ? ("watched" as const) : ("in-progress" as const),
+          }));
       });
 
     /** One read of validated observations decorates each season without joining rows by id. */
@@ -1525,6 +1623,7 @@ function make(deps: OnDemandDeps) {
               }
 
               const files = filters ? yield* knownFiles(kind) : undefined;
+              const watched = yield* watchedFiles(kind, filters, owners, language);
 
               return yield* call("collection", {
                 owners,
@@ -1533,7 +1632,7 @@ function make(deps: OnDemandDeps) {
                 id,
                 offset,
                 limit,
-                ...defined({ sort, filters, files }),
+                ...defined({ sort, filters, files, watched }),
               });
             }),
           true,
@@ -1545,6 +1644,7 @@ function make(deps: OnDemandDeps) {
           (owners, language) =>
             Effect.gen(function* () {
               const files = filters ? yield* knownFiles(kind) : undefined;
+              const watched = yield* watchedFiles(kind, filters, owners, language);
 
               return yield* call("searchKind", {
                 owners,
@@ -1552,7 +1652,7 @@ function make(deps: OnDemandDeps) {
                 kind,
                 query,
                 limit: SEARCH_PAGE,
-                ...defined({ filters, files }),
+                ...defined({ filters, files, watched }),
               });
             }),
           true,

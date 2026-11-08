@@ -61,6 +61,7 @@ export interface KnownFile {
   readonly id: string;
   readonly seriesId?: string;
   readonly listingKey: string;
+  readonly runtime?: number | null;
   readonly tracks?: {
     readonly audio: readonly (string | null)[];
     readonly subtitles: readonly (string | null)[];
@@ -70,6 +71,7 @@ export interface KnownFile {
 
 interface FilterQuery {
   readonly filters?: TitleFilters;
+  readonly watched?: readonly { readonly key: string; readonly state: "watched" | "in-progress" }[];
   readonly files?: readonly KnownFile[];
 }
 
@@ -261,6 +263,8 @@ const Version = type({
   "container?": "string | null",
   "addedAt?": "number | null",
   "listedOrder?": "number",
+  "year?": "number | null",
+  "rating?": "number | null",
   "observed?": { files: "number", audio: "(string | null)[]", subtitles: "(string | null)[]" },
   "episodeFiles?": "string[]",
 });

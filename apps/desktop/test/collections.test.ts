@@ -1,3 +1,9 @@
+import { mainLayer } from "../src/main/runtime.ts";
+import { ProfileSessions } from "../src/main/services/profiles.ts";
+import { OnDemand } from "../src/main/services/ondemand.ts";
+import { Subscriptions } from "../src/main/services/subscription.ts";
+import { CollectionCurrent } from "../src/main/services/collections.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
@@ -457,4 +463,90 @@ it("reports ended collection admission in the interface language", async () => {
       },
     },
   });
+});
+
+it("persists smart rules, refreshes exact admitted membership and preserves manual members after failed rule writes", async () => {
+  const { open } = fixture();
+  const a = await open();
+  await seed(a.service, a.context);
+  const rules = { kind: "movie" as const, filters: { quality: "4k" as const } };
+  await run(a.service.change(a.context, { kind: "create", id: "smart", name: "Smart", rules }));
+  const admitted = { ...a.context, catalogue: [movie], smart: new Map([["smart", [movie]]]) };
+  expect(await run(a.service.page(admitted, "smart"))).toMatchObject({ total: 1 });
+  expect(
+    await run(a.service.page({ ...admitted, smart: new Map([["smart", []]]) }, "smart")),
+  ).toEqual({ total: 0, members: [] });
+  expect(await run(a.service.page(a.context, "one"))).toMatchObject({ total: 3 });
+  const privateContext = { ...admitted, approved: [] };
+  expect(await run(a.service.page(privateContext, "smart"))).toMatchObject({ total: 0 });
+  a.db.exec(
+    "create trigger refuse_rules before update on collection_rules begin select raise(abort, 'disk full'); end",
+  );
+  await expect(
+    run(
+      a.service.change(a.context, {
+        kind: "rules",
+        id: "smart",
+        rules: { ...rules, filters: { quality: "hd" } },
+      }),
+    ),
+  ).rejects.toThrow();
+  expect((await run(a.service.list(admitted))).find((list) => list.id === "smart")?.rules).toEqual(
+    rules,
+  );
+  await a.close();
+  const b = await open();
+  expect((await run(b.service.list(b.context))).find((list) => list.id === "smart")?.rules).toEqual(
+    rules,
+  );
+});
+
+it("re-evaluates saved smart rules through admitted catalogue reads after refresh", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const seed = provider.titles.movies[0]!;
+  provider.serveTitles((all) => ({
+    ...all,
+    movies: [{ ...seed, name: "Smart movie 4K (EN)" }],
+    series: [],
+  }));
+  const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
+  const subscriptions = await promised(runtime, Subscriptions);
+  const onDemand = await promised(runtime, OnDemand);
+  const source = await subscriptions.add(demoLogin(provider));
+  await onDemand.refresh(source.id);
+  const sessions = await runtime.runPromise(ProfileSessions);
+  const admission = await runtime.runPromise(sessions.admit);
+  const collections = admission.services.collections;
+
+  const run = <A>(effect: Effect.Effect<A, unknown>) =>
+    runtime.runPromise(
+      admission.run(
+        effect.pipe(Effect.provideService(CollectionCurrent, { check: admission.current })),
+      ),
+    );
+
+  await run(
+    collections.change({
+      kind: "create",
+      id: "smart",
+      name: "Smart",
+      rules: {
+        kind: "movie",
+        filters: { sourceIds: [source.id], quality: "4k" },
+      },
+    }),
+  );
+  expect(await run(collections.page("smart", 0, 48))).toMatchObject({
+    total: 1,
+    members: [{ sourceId: source.id, titleId: String(seed.id), available: true }],
+  });
+  const before = [provider.detailRequests(), provider.fileRequests()];
+  provider.serveTitles((all) => ({
+    ...all,
+    movies: [{ ...seed, name: "Smart movie HD (EN)" }],
+    series: [],
+  }));
+  await onDemand.refresh(source.id);
+  expect(await run(collections.page("smart", 0, 48))).toEqual({ total: 0, members: [] });
+  expect([provider.detailRequests(), provider.fileRequests()]).toEqual(before);
 });

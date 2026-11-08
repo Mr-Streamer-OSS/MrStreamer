@@ -190,10 +190,69 @@ describe("current-kind library filters", () => {
       ]),
     });
     expect(filterOptions(index.series.titles, files)).toEqual({
+      genres: [],
+      unknownRuntime: 1,
       qualities: ["hd"],
       languages: ["en"],
       verified: [],
       files: 0,
     });
   });
+});
+
+it("keeps source, year, rating and loaded runtime on one exact version and excludes unknown ranges", () => {
+  const current = indexCatalogue(
+    [
+      {
+        subscriptionId: "provider",
+        catalogue: {
+          ...catalogue,
+          movies: [
+            { ...row("en", "Harbour (2020) FHD (EN)", "1"), rating: 9, releaseDate: "2020-01-01" },
+            { ...row("nl", "Harbour (2024) 4K (NL)", "1"), rating: 5, releaseDate: "2024-01-01" },
+            row("unknown", "Fog", null),
+          ],
+        },
+      },
+    ],
+    "en",
+  );
+
+  const titles = current.movies.titles;
+  const files: FilterFiles = new Map([[key("nl"), [{ tags: ["4K", "NL"], runtime: 5400 }]]]);
+  expect(filterTitles(titles, { quality: "4k", rating: { min: 8 } }, files)).toEqual([]);
+  expect(filterTitles(titles, { year: { min: 2023 }, rating: { min: 8 } }, files)).toEqual([]);
+  expect(filterTitles(titles, { runtime: { min: 1 } }, new Map())).toEqual([]);
+  expect(filterTitles(titles, { sourceIds: ["other"], runtime: { min: 1 } }, files)).toEqual([]);
+  expect(
+    filterTitles(titles, { year: { min: 2023 }, runtime: { min: 5400, max: 5400 } }, files).map(
+      (title) => title.id,
+    ),
+  ).toEqual(["nl"]);
+});
+
+it("requires the chosen source, genre and viewer watch state on the version that meets quality", () => {
+  const files: FilterFiles = new Map([
+    [key("en"), [{ tags: ["FHD", "EN"], genres: ["Drama"], watched: "watched" }]],
+    [key("nl"), [{ tags: ["4K", "NL"], genres: ["Comedy"], watched: "in-progress" }]],
+  ]);
+
+  expect(filterTitles(index.movies.titles, { quality: "4k", watched: "watched" }, files)).toEqual(
+    [],
+  );
+  expect(filterTitles(index.movies.titles, { quality: "4k", genres: ["Drama"] }, files)).toEqual(
+    [],
+  );
+  expect(
+    filterTitles(
+      index.movies.titles,
+      {
+        quality: "4k",
+        genres: ["Drama", "Comedy"],
+        sourceIds: ["provider"],
+        watched: "in-progress",
+      },
+      files,
+    ).map((title) => title.id),
+  ).toEqual(["nl"]);
 });

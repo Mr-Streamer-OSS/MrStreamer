@@ -6,6 +6,7 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { defined } from "@mrstreamer/core/defined";
 import { ViewingErasure } from "@mrstreamer/core/viewing/service";
+import { hasTitles } from "@mrstreamer/contracts/subscription";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { t } from "@mrstreamer/core/i18n";
 import { Failed } from "@mrstreamer/core/failure";
@@ -36,6 +37,8 @@ export interface CollectionVisibility {
    * request upstream with a retryable failure, never supply an empty successful catalogue.
    * Filter before selecting labels or counting members.
    */
+  /** Current rule results from the admitted catalogue; never persisted as manual members. */
+  readonly smart?: ReadonlyMap<string, readonly CollectionTitle[]>;
   readonly catalogue: readonly (CollectionTitle & { readonly title?: Title })[];
 }
 
@@ -116,7 +119,20 @@ export function makeCollections(
       return { ...(title ?? identity), available: title !== undefined };
     };
 
-    return { allows, catalogue, stored, visible, adult };
+    const smart = new Map(
+      [...(visibility.smart ?? [])].map(([id, titles]) => [
+        id,
+        titles
+          .filter((title) => allows(title) && (adult || title.adult === false))
+          .map((title) => ({
+            ...title,
+            available: true,
+            ...defined({ title: catalogue.get(collectionKey(title))?.title }),
+          })),
+      ]),
+    );
+
+    return { allows, catalogue, stored, visible, adult, smart };
   };
 
   const attempt = <A>(run: () => A) =>
@@ -132,18 +148,25 @@ export function makeCollections(
 
       return lists.map((list) => ({
         ...list,
-        members: list.members.flatMap((saved) => {
-          const member = captured.visible(saved);
+        members: list.rules
+          ? (captured.smart.get(list.id) ?? [])
+          : list.members.flatMap((saved) => {
+              const member = captured.visible(saved);
 
-          return member ? [member] : [];
-        }),
+              return member ? [member] : [];
+            }),
       }));
     });
 
   return {
     list: (visibility: CollectionVisibility) =>
       Effect.map(read(visibility), (lists) =>
-        lists.map(({ id, name, members }) => ({ id, name, total: members.length })),
+        lists.map(({ id, name, members, rules }) => ({
+          id,
+          name,
+          ...defined({ rules }),
+          total: members.length,
+        })),
       ),
     page: (
       visibility: CollectionVisibility,
@@ -317,7 +340,9 @@ export class Collections extends Context.Service<
           // Resolve each exact saved version separately. The existing catalogue admission filters
           // before grouping and artwork; a sibling version must never become this member's primary.
           const snapshot = yield* onDemand.catalogueSnapshot(
-            permitted.map((identity) => identity.sourceId),
+            saved.some((list) => list.rules)
+              ? sources.filter(hasTitles).map((source) => source.id)
+              : permitted.map((identity) => identity.sourceId),
           );
 
           catalogueCurrent = snapshot.current;
@@ -376,6 +401,38 @@ export class Collections extends Context.Service<
               });
           }
 
+          const smart = new Map<string, CollectionTitle[]>();
+
+          for (const list of saved) {
+            if (!list.rules) continue;
+            const matches: CollectionTitle[] = [];
+
+            const page = yield* onDemand.collection({
+              kind: list.rules.kind,
+              id: "all",
+              offset: 0,
+              limit: Number.MAX_SAFE_INTEGER,
+              filters: list.rules.filters,
+            });
+
+            for (const title of page.titles) {
+              const member = {
+                sourceId: title.subscriptionId,
+                kind: title.kind,
+                titleId: title.id,
+                name: title.title,
+                year: title.year,
+                adult: title.adult,
+                title,
+              };
+
+              catalogue.push(member);
+              matches.push(member);
+            }
+
+            smart.set(list.id, matches);
+          }
+
           if (!stands()) return yield* unavailable();
 
           const visibility: CollectionVisibility = {
@@ -386,6 +443,7 @@ export class Collections extends Context.Service<
             // read adult facts, no saved label or count can stand in for current admission.
             approved: adult ? "all" : catalogue,
             catalogue,
+            smart,
           };
 
           yield* policy.value.check;
@@ -406,6 +464,8 @@ export class Collections extends Context.Service<
             const ids: string[] = [];
 
             for (const list of lists) {
+              if (list.rules) continue;
+
               for (let offset = 0; offset < list.total; offset += 200) {
                 const page = yield* module.page(visibility, list.id, offset, 200);
 
