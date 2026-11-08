@@ -575,7 +575,12 @@ it("retains the collection acquisition past caller scope closure and releases it
     expect(Exit.isFailure(refused)).toBe(true);
 
     if (Exit.isFailure(refused))
-      expect(Cause.pretty(refused.cause)).toContain("This profile admission has ended");
+      expect(Cause.squash(refused.cause)).toMatchObject({
+        error: {
+          kind: "unexpected",
+          detail: "This profile admission has ended; retry the operation.",
+        },
+      });
   } finally {
     factory.mockRestore();
   }
