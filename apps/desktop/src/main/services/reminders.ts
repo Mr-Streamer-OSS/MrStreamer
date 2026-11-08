@@ -51,7 +51,12 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import { readReminders, writeReminders, type RemindersFile } from "../platform/reminders-file.ts";
+import {
+  loadReminders,
+  saveReminders,
+  type ReadReminders,
+  type RemindersFile,
+} from "../platform/reminders-file.ts";
 import { Library } from "./library.ts";
 import { ProfileSessions } from "./profiles.ts";
 import { Settings } from "./preferences.ts";
@@ -169,7 +174,7 @@ function make(deps: RemindersDeps) {
     const events = yield* Queue.unbounded<NoticeEvent>();
 
     /** reminders.json as last read or written; refused while it can't be used. */
-    let store: { readonly kind: "unread" } | Awaited<ReturnType<typeof readReminders>> = {
+    let store: { readonly kind: "unread" } | ReadReminders = {
       kind: "unread",
     };
 
@@ -202,10 +207,11 @@ function make(deps: RemindersDeps) {
 
     /** Writes `file` whole, or fails changing nothing. Once begun, it finishes. */
     const save = (file: RemindersFile) =>
-      Effect.tryPromise({
-        try: () => writeReminders(path, file),
-        catch: () =>
-          new Failed({ error: { kind: "unexpected", detail: "Couldn't save the reminders." } }),
+      Effect.gen(function* () {
+        const written = yield* Effect.promise(() => saveReminders(path, file));
+
+        if (written.kind === "refused")
+          return yield* Effect.fail(new Failed({ error: written.error }));
       }).pipe(Effect.uninterruptible);
 
     /**
@@ -218,31 +224,34 @@ function make(deps: RemindersDeps) {
     const loaded = Effect.gen(function* () {
       if (store.kind === "read") return store.file;
       const recovered = store.kind === "refused";
-      const read = yield* Effect.promise(() => readReminders(path));
+      const read = yield* Effect.promise(() => loadReminders(path));
 
-      if (read.kind === "refused") {
-        if (!warned) yield* Effect.logWarning(`[reminders] reminders.json is ${read.reason}`);
+      if (read.kind === "unreadable" || read.kind === "newer") {
+        if (!warned) yield* Effect.logWarning(`[reminders] reminders.json is ${read.error.reason}`);
         warned = true;
-        store = read;
+        store = { kind: "refused", reason: read.error.reason };
 
         return null;
       }
+
+      const contents: RemindersFile =
+        read.kind === "missing" ? { reminders: [], unread: new Map() } : read.value;
 
       const saved = yield* savedIds;
       const now = yield* Clock.currentTimeMillis;
 
       const file: RemindersFile = {
-        reminders: read.file.reminders.filter(
+        reminders: contents.reminders.filter(
           (each) => saved.has(each.subscriptionId) && !expired(each, now),
         ),
-        unread: new Map([...read.file.unread].filter(([id]) => saved.has(id))),
+        unread: new Map([...contents.unread].filter(([id]) => saved.has(id))),
       };
 
       store = { kind: "read", file };
 
       if (
-        file.reminders.length !== read.file.reminders.length ||
-        file.unread.size !== read.file.unread.size
+        file.reminders.length !== contents.reminders.length ||
+        file.unread.size !== contents.unread.size
       )
         yield* save(file).pipe(
           Effect.catchTag("Failed", () =>

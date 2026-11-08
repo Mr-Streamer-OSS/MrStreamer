@@ -3,7 +3,18 @@ import { type as arkType } from "arktype";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeJsonFile } from "../src/main/platform/json-file.ts";
+import type { Json } from "@mrstreamer/contracts/json";
+import {
+  readJson,
+  readJsonResult,
+  writeJsonResult,
+  writeJsonFile,
+} from "../src/main/platform/json-file.ts";
+import {
+  readReminders,
+  writeReminders,
+  type RemindersFile,
+} from "../src/main/platform/reminders-file.ts";
 import { tempDir } from "./support.ts";
 
 const disk = vi.hoisted(() => ({
@@ -113,5 +124,111 @@ describe("atomic JSON replacement", () => {
     await expect(writeJsonFile(path, { revision: "new" })).rejects.toMatchObject({ code });
     expect(disk.attempts).toHaveLength(1);
     expect(await readFile(path, "utf8")).toBe(previous);
+  });
+});
+
+describe("explicit persisted JSON outcomes", () => {
+  const error = { kind: "unexpected", detail: "Keep this detail", advice: "retry" } as const;
+  const decode = (value: Json) => ({ kind: "read", value }) as const;
+
+  it("separates missing, literal null and malformed JSON without changing legacy reads", async () => {
+    const path = join(await tempDir(), "value.json");
+    expect(await readJsonResult(path, decode, () => error)).toEqual({ kind: "missing" });
+    await writeFile(path, "null");
+    expect(await readJsonResult(path, decode, () => error)).toEqual({ kind: "read", value: null });
+    expect(await readJson(path)).toBeNull();
+    await writeFile(path, "{ broken");
+    expect(await readJsonResult(path, decode, () => error)).toEqual({ kind: "unreadable", error });
+    expect(await readJson(path)).toBeNull();
+  });
+
+  it("retains decoder refusal and complete advice, including newer", async () => {
+    const { path } = await destination();
+
+    for (const kind of ["unreadable", "newer"] as const) {
+      expect(
+        await readJsonResult(
+          path,
+          () => ({ kind, error }),
+          () => error,
+        ),
+      ).toEqual({ kind, error });
+    }
+  });
+
+  it("classifies corrupt gzip and read I/O as unreadable while legacy I/O still rejects", async () => {
+    const dir = await tempDir();
+    const path = join(dir, "value.json.gz");
+    await writeFile(path, "not gzip");
+    expect(await readJsonResult(path, decode, () => error)).toEqual({ kind: "unreadable", error });
+    expect(await readJsonResult(dir, decode, () => error)).toEqual({ kind: "unreadable", error });
+    await expect(readJson(dir)).rejects.toBeDefined();
+    expect(await writeJsonResult(path, { packed: true }, () => error)).toEqual({ kind: "written" });
+    expect(await readJsonResult(path, decode, () => error)).toEqual({
+      kind: "read",
+      value: { packed: true },
+    });
+  });
+
+  it("reports refused serialization and replacement, preserving previous destination and typed detail", async () => {
+    const { path, previous } = await destination();
+    expect(
+      await writeJsonResult(
+        path,
+        {
+          toJSON() {
+            throw new Error("private");
+          },
+        },
+        () => error,
+      ),
+    ).toEqual({ kind: "refused", error });
+    expect(await readFile(path, "utf8")).toBe(previous);
+    disk.failures = Infinity;
+    disk.code = "EIO";
+    expect(await writeJsonResult(path, { revision: "new" }, () => error)).toEqual({
+      kind: "refused",
+      error,
+    });
+    expect(await readFile(path, "utf8")).toBe(previous);
+    disk.failures = 0;
+    expect(await writeJsonResult(path, { revision: "new" }, () => error)).toEqual({
+      kind: "written",
+    });
+    expect(await readJsonResult(path, decode, () => error)).toEqual({
+      kind: "read",
+      value: { revision: "new" },
+    });
+  });
+});
+
+describe("legacy reminder file compatibility", () => {
+  it("keeps the missing-file read shape and distinguishes unreadable and newer files", async () => {
+    const path = join(await tempDir(), "reminders.json");
+    expect(await readReminders(path)).toEqual({
+      kind: "read",
+      file: { reminders: [], unread: new Map() },
+    });
+    await writeFile(path, "{ broken");
+    expect(await readReminders(path)).toEqual({ kind: "refused", reason: "unreadable" });
+    await writeFile(path, JSON.stringify({ version: 2 }));
+    expect(await readReminders(path)).toEqual({ kind: "refused", reason: "newer" });
+  });
+
+  it("rejects a refused write, retains the previous file and round-trips opaque entries on retry", async () => {
+    const { path, previous } = await destination();
+
+    const file: RemindersFile = {
+      reminders: [],
+      unread: new Map([["source", [{ future: "retained" }]]]),
+    };
+
+    disk.failures = 1;
+    disk.code = "EIO";
+
+    await expect(writeReminders(path, file)).rejects.toMatchObject({ code: "EIO" });
+    expect(await readFile(path, "utf8")).toBe(previous);
+    await writeReminders(path, file);
+    expect(await readReminders(path)).toEqual({ kind: "read", file });
   });
 });

@@ -626,6 +626,9 @@ describe("programme reminders", () => {
 
     for (const [text, reason] of [
       ["{ not json", "unreadable"],
+      ["null", "unreadable"],
+      [JSON.stringify({ version: 1, subscriptions: false }), "unreadable"],
+      [JSON.stringify({ version: 2, subscriptions: false }), "newer"],
       [JSON.stringify({ version: 2, subscriptions: {}, groups: [] }), "newer"],
     ] as const) {
       await writeFile(path, text);
