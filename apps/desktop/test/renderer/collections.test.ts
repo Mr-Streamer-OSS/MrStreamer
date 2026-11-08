@@ -668,7 +668,14 @@ describe("a title's collections menu in its details", () => {
   it("keeps the new collection name focused when its menu unmounts", async () => {
     mainCollections([], [{ ...film, id: "4k" }]);
     await details();
-    const trigger = await vi.waitFor(() => button("Add to collection"));
+
+    const trigger = await vi.waitFor(() => {
+      const trigger = button("Add to collection");
+      expect(trigger.hasAttribute("disabled")).toBe(false);
+
+      return trigger;
+    });
+
     // The details initially focus Play. Pointer opening the menu leaves that return target.
     await act(async () => button("Play").focus());
     await act(async () => trigger.click());

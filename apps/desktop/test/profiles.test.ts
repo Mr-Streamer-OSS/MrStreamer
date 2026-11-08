@@ -1500,10 +1500,11 @@ it("personal events keep their admitted revision through switching away and back
   const profiles = await promised(runtime, ProfileSessions);
   const a = await profiles.admit();
   const raw = await runtime.runPromise(ProfileSessions);
-  const events: Stream.Success<typeof raw.changes>[] = [];
-  runtime.runFork(
-    Stream.runForEach(raw.changes, (change) => Effect.sync(() => events.push(change))),
-  );
+  const scope = await runtime.runPromise(Scope.make());
+  onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+  const changes = await runtime.runPromise(raw.changes.pipe(Scope.provide(scope)));
+  const events: Stream.Success<typeof changes>[] = [];
+  runtime.runFork(Stream.runForEach(changes, (change) => Effect.sync(() => events.push(change))));
   const b = await profiles.switch((await profiles.create("B")).id);
   // The observed selection also establishes that this public event subscriber is listening.
   await vi.waitFor(() =>

@@ -43,6 +43,7 @@ import { Guide } from "@mrstreamer/core/guide/service";
 import { updatesInApp } from "@mrstreamer/contracts/updates";
 import { discovery, metadataFileFor } from "@mrstreamer/core/updates/feed";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
@@ -1062,46 +1063,57 @@ async function start(): Promise<void> {
     (title, viewer) => (viewer.allows({ ...title, kind: title.kind }) ? title : null),
   );
   forward(guide.changes, "guide.updated", () => null);
+  const profileEventsAcquired = await runtime.runPromise(Deferred.make<void>());
   void runtime.runFork(
-    Stream.runForEach(profileSessions.changes, (change) =>
-      Effect.sync(() => {
-        if (!mainWindow) return;
+    Effect.scoped(
+      Effect.gen(function* () {
+        const changes = yield* profileSessions.changes.pipe(
+          Effect.ensuring(Deferred.succeed(profileEventsAcquired, undefined)),
+        );
 
-        if (change.kind === "active") {
-          emit(mainWindow.webContents, "profiles.activeChanged", change.active);
+        yield* Stream.runForEach(changes, (change) =>
+          Effect.sync(() => {
+            if (!mainWindow) return;
 
-          return;
-        }
+            if (change.kind === "active") {
+              emit(mainWindow.webContents, "profiles.activeChanged", change.active);
 
-        const { owner } = change;
+              return;
+            }
 
-        if (!owner || !activeMatches(owner)) return;
-        const legacy = owner.id === DEFAULT_PROFILE_ID;
+            const { owner } = change;
 
-        if (change.kind === "viewing" || change.kind === "erased") {
-          const sequence = change.kind === "viewing" ? change.sequence : 0;
-          emit(mainWindow.webContents, "profiles.viewingChanged", { owner, sequence });
+            if (!owner || !activeMatches(owner)) return;
+            const legacy = owner.id === DEFAULT_PROFILE_ID;
 
-          if (legacy) emit(mainWindow.webContents, "viewing.changed", { sequence });
-        }
+            if (change.kind === "viewing" || change.kind === "erased") {
+              const sequence = change.kind === "viewing" ? change.sequence : 0;
+              emit(mainWindow.webContents, "profiles.viewingChanged", { owner, sequence });
 
-        if (change.kind === "watchlist" || change.kind === "erased") {
-          emit(mainWindow.webContents, "profiles.watchlistChanged", { owner });
+              if (legacy) emit(mainWindow.webContents, "viewing.changed", { sequence });
+            }
 
-          if (legacy) emit(mainWindow.webContents, "watchlist.changed", null);
-        }
+            if (change.kind === "watchlist" || change.kind === "erased") {
+              emit(mainWindow.webContents, "profiles.watchlistChanged", { owner });
 
-        if (change.kind === "collections" || change.kind === "erased")
-          emit(mainWindow.webContents, "collections.changed", { owner });
+              if (legacy) emit(mainWindow.webContents, "watchlist.changed", null);
+            }
 
-        if (change.kind === "lists" || change.kind === "erased") {
-          emit(mainWindow.webContents, "profiles.listsChanged", { owner });
+            if (change.kind === "collections" || change.kind === "erased")
+              emit(mainWindow.webContents, "collections.changed", { owner });
 
-          if (legacy) emit(mainWindow.webContents, "customLists.changed", null);
-        }
+            if (change.kind === "lists" || change.kind === "erased") {
+              emit(mainWindow.webContents, "profiles.listsChanged", { owner });
+
+              if (legacy) emit(mainWindow.webContents, "customLists.changed", null);
+            }
+          }),
+        );
       }),
     ),
   );
+  // Acquisition settles even on failure; startup never waits for an event or a drain.
+  await runtime.runPromise(Deferred.await(profileEventsAcquired));
   forward(updates.changes, "updates.changed", (status) => {
     analytics.setUpdateChannel(updatesInApp(status.distribution) ? status.channel : "none");
 

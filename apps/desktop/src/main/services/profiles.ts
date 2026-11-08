@@ -544,7 +544,8 @@ export function makeProfiles({
     const activeRead: Effect.Effect<ActiveProfile, Failed> = Effect.sync(() => ({ ...active }));
 
     return {
-      changes: Stream.fromPubSub(events),
+      // Each acquisition returns one consumer stream, retained until its caller scope closes.
+      changes: Effect.map(PubSub.subscribe(events), Stream.fromSubscription),
       list: Effect.gen(function* () {
         const policy = yield* readPolicy;
 
@@ -848,9 +849,7 @@ export class ProfileSessions extends Context.Service<
         );
 
         return {
-          changes: Stream.unwrap(Effect.map(ready, (profiles) => profiles.changes)).pipe(
-            Stream.orDie,
-          ),
+          changes: Effect.flatMap(ready, (profiles) => profiles.changes).pipe(Effect.orDie),
           list: Effect.flatMap(ready, (profiles) => profiles.list),
           active: Effect.flatMap(ready, (profiles) => profiles.active),
           admit: Effect.flatMap(ready, (profiles) => profiles.admit),
