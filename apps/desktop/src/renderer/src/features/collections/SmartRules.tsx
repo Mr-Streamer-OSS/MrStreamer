@@ -339,6 +339,10 @@ function RulesChanged({
           size="sm"
           disabled={saving || empty}
           aria-busy={saving || undefined}
+          // Button normally preserves player focus. Draft Rename must blur before this click saves.
+          onMouseDown={(event) => {
+            if (isNew) event.currentTarget.focus();
+          }}
           onClick={() => void save()}
         >
           {problem?.retry ? t("Retry") : t("Save rules")}

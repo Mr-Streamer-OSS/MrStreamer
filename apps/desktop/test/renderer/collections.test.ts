@@ -1887,12 +1887,14 @@ describe("a smart collection in the Collections tab", () => {
     await act(async () => options().click());
     await act(async () => (await vi.waitFor(() => button("Rename"))).click());
     await vi.waitFor(() => expect(document.activeElement).toBe(field()));
-    await type("Friday films", "Tab");
-    // Blur accepts the name between pointer down and click on the existing Save rules button.
+    await type("Friday films", "End");
+    // Browser pointer focus transfers only if mouse-down was not prevented by the button.
     const retry = button("Save rules");
     await act(async () => {
-      retry.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      field().blur();
+      const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      retry.dispatchEvent(down);
+
+      if (!down.defaultPrevented) retry.focus();
     });
     expect(document.querySelector("h1")?.textContent).toBe("Friday films");
     const saving = ipc.hold("collections.change");
