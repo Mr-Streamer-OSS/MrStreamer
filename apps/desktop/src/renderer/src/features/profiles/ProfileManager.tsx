@@ -109,7 +109,6 @@ export function ProfileManager({ onClose }: { onClose: () => void }) {
         newPin: newPin || undefined,
         profiles: [...draft].map(([id, approved]) => ({ id, approved: [...approved] })),
       }),
-    onSuccess: onClose,
   });
 
   const profiles = (list.data ?? []).filter(
@@ -233,7 +232,8 @@ export function ProfileManager({ onClose }: { onClose: () => void }) {
                 onClick={() => {
                   setChecked(true);
 
-                  if (!pinProblem && !save.isPending) save.mutate();
+                  if (!pinProblem && !save.isPending)
+                    save.mutate(undefined, { onSuccess: onClose });
                 }}
               >
                 {save.isPending ? t("Saving…") : t("Save")}
