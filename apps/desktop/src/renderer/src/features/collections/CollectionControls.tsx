@@ -221,7 +221,9 @@ export function CollectionNav({
   commit,
   ready = true,
   draft = null,
+  draftSaving = false,
   onSmart,
+  onRenameDraft,
 }: {
   ready?: boolean;
   collections: readonly CollectionSummary[];
@@ -229,7 +231,9 @@ export function CollectionNav({
   onOpen: (id: string) => void;
   commit: CommitCollection;
   draft?: SmartDraft | null;
+  draftSaving?: boolean;
   onSmart?: (draft: SmartDraft) => void;
+  onRenameDraft?: (name: string) => void;
 }) {
   const [editing, setEditing] = useState<Editing | null>(null);
   const edit = useRef<Editing | null>(null);
@@ -281,6 +285,7 @@ export function CollectionNav({
     if (
       editing &&
       editing.kind !== "create" &&
+      editing.id !== draft?.id &&
       !collections.some((each) => each.id === editing.id)
     ) {
       edit.current = null;
@@ -354,18 +359,43 @@ export function CollectionNav({
         ))}
         {draft && !collections.some((each) => each.id === draft.id) && (
           <li>
-            <button
-              aria-current={selected === draft.id ? "page" : undefined}
-              onClick={() => onOpen(draft.id)}
-              className={cn(
-                "flex h-[34px] w-full items-center gap-2 rounded-lg pr-3 pl-3 text-left outline-none hover:bg-white/6 focus-visible:ring-2 focus-visible:ring-ring",
-                selected === draft.id && "bg-accent hover:bg-accent",
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">{draft.name}</span>
-              <SmartMark />
-              <span className="flex-none text-xs text-muted-foreground">{t("New")}</span>
-            </button>
+            {editing?.kind === "rename" && editing.id === draft.id ? (
+              <NameField
+                initial={draft.name}
+                saving={draftSaving}
+                failed={null}
+                onCancel={() => close(draft.id)}
+                onSave={(name) => {
+                  onRenameDraft?.(name);
+                  close(draft.id);
+                }}
+              />
+            ) : (
+              <div
+                className={cn(
+                  "group flex h-[34px] items-center rounded-lg pl-3 hover:bg-white/6",
+                  selected === draft.id && "bg-accent hover:bg-accent",
+                )}
+              >
+                <button
+                  ref={focusIfDue(draft.id)}
+                  aria-current={selected === draft.id ? "page" : undefined}
+                  onClick={() => onOpen(draft.id)}
+                  className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="min-w-0 flex-1 truncate">{draft.name}</span>
+                  <SmartMark />
+                  <span className="flex-none text-xs text-muted-foreground">{t("New")}</span>
+                </button>
+                {onRenameDraft && (
+                  <CollectionOptions
+                    name={draft.name}
+                    saving={draftSaving}
+                    onRename={() => begin({ kind: "rename", id: draft.id })}
+                  />
+                )}
+              </div>
+            )}
           </li>
         )}
       </ul>
@@ -467,7 +497,7 @@ function NewCollection({
   );
 }
 
-/** A collection's options: Rename, Move up, Move down and Delete collection. */
+/** A draft can be renamed locally; a stored collection can also move or be deleted. */
 function CollectionOptions({
   name,
   first,
@@ -479,11 +509,11 @@ function CollectionOptions({
 }: {
   name: string;
   saving: boolean;
-  first: boolean;
-  last: boolean;
+  first?: boolean;
+  last?: boolean;
   onRename: () => void;
-  onMove: (by: -1 | 1) => void;
-  onDelete: () => void;
+  onMove?: (by: -1 | 1) => void;
+  onDelete?: () => void;
 }) {
   const item = cn(menuItem, "flex h-9 items-center px-2 data-disabled:opacity-40");
   const label = t("Options for {list}", { list: name });
@@ -509,16 +539,29 @@ function CollectionOptions({
             <Menu.Item closeOnClick onClick={onRename} className={item}>
               {t("Rename")}
             </Menu.Item>
-            <Menu.Item closeOnClick disabled={first} onClick={() => onMove(-1)} className={item}>
-              {t("Move up")}
-            </Menu.Item>
-            <Menu.Item closeOnClick disabled={last} onClick={() => onMove(1)} className={item}>
-              {t("Move down")}
-            </Menu.Item>
-            <Menu.Separator className="mx-1 my-1 h-px bg-white/12" />
-            <Menu.Item closeOnClick onClick={onDelete} className={cn(item, "text-destructive")}>
-              {t("Delete collection")}
-            </Menu.Item>
+            {onMove && (
+              <>
+                <Menu.Item
+                  closeOnClick
+                  disabled={first}
+                  onClick={() => onMove(-1)}
+                  className={item}
+                >
+                  {t("Move up")}
+                </Menu.Item>
+                <Menu.Item closeOnClick disabled={last} onClick={() => onMove(1)} className={item}>
+                  {t("Move down")}
+                </Menu.Item>
+              </>
+            )}
+            {onDelete && (
+              <>
+                <Menu.Separator className="mx-1 my-1 h-px bg-white/12" />
+                <Menu.Item closeOnClick onClick={onDelete} className={cn(item, "text-destructive")}>
+                  {t("Delete collection")}
+                </Menu.Item>
+              </>
+            )}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

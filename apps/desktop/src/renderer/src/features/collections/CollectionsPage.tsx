@@ -56,6 +56,7 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
   const collections = list.data;
   // A smart collection named here and given no saved rule yet.
   const [draft, setDraft] = useState<(SmartDraft & { kind: TitleKind }) | null>(null);
+  const [savingDraft, setSavingDraft] = useState<string | null>(null);
 
   // Once stored, the draft is a collection like the others. Setting state here re-renders before
   // anything is shown, so the rest of this render never sees a stored draft.
@@ -82,6 +83,12 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
           onOpen={(id) => useOpen.setState({ id })}
           commit={commit}
           draft={draft}
+          draftSaving={savingDraft === draft?.id}
+          onRenameDraft={(name) =>
+            setDraft((current) =>
+              current && current.id !== savingDraft ? { ...current, name } : current,
+            )
+          }
           onSmart={(named) => {
             setDraft({ ...named, kind });
             useOpen.setState({ id: named.id });
@@ -105,6 +112,9 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
             rules: { kind: draft.kind, filters },
           })}
           onDiscard={() => setDraft(null)}
+          onSaving={(saving) =>
+            setSavingDraft((current) => (saving ? draft.id : current === draft.id ? null : current))
+          }
           active={active}
         />
       ) : (

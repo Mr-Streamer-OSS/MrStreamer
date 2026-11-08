@@ -1,4 +1,4 @@
-// Smart collections, as Paper A3.1 to A3.10 draw them: a collection whose members are the titles
+// Smart collections, as Paper A3.1 to A3.11 draw them: a collection whose members are the titles
 // of one kind that match its rules now, saved from All's filters or made in the Collections tab.
 // The rules are the discovery filters (see features/titles/TitleFilters.tsx), and a title matches
 // when one of its versions meets every rule. Editing never saves on its own: the head and the
@@ -175,6 +175,7 @@ export function SmartPane({
   savedTotal,
   change,
   onDiscard,
+  onSaving,
   active,
   notes,
   children,
@@ -186,6 +187,8 @@ export function SmartPane({
   change: (filters: TitleFilters) => CollectionChange;
   /** After Discard, for a new one, which goes. */
   onDiscard?: () => void;
+  /** Keeps the local draft's name fixed while its create is being stored. */
+  onSaving?: (saving: boolean) => void;
   active: boolean;
   /** Under the rules, such as a failed refresh of the saved matches. */
   notes?: ReactNode;
@@ -230,11 +233,13 @@ export function SmartPane({
         <RulesChanged
           key={saved === null ? "new" : "saved"}
           isNew={saved === null}
+          name={name}
           filters={filters}
           matches={matches}
           before={savedTotal}
           change={change}
           onSaved={() => setStored(filters)}
+          onSaving={onSaving}
           onDiscard={() => {
             setEdit(null);
             onDiscard?.();
@@ -256,38 +261,45 @@ export function SmartPane({
  */
 function RulesChanged({
   isNew,
+  name,
   filters,
   matches,
   before,
   change,
   onSaved,
   onDiscard,
+  onSaving,
 }: {
   isNew: boolean;
+  name: string;
   filters: TitleFilters;
   matches: number | null;
   before: number | null;
   change: (filters: TitleFilters) => CollectionChange;
   onSaved: () => void;
   onDiscard: () => void;
+  onSaving: ((saving: boolean) => void) | undefined;
 }) {
   const commit = useCommitCollection();
   const [saving, setSaving] = useState(false);
-  const [problem, setProblem] = useState<CollectionProblem | null>(null);
+  const [failed, setFailed] = useState<{ name: string; problem: CollectionProblem } | null>(null);
+  const problem = !isNew || failed?.name === name ? (failed?.problem ?? null) : null;
   const empty = Object.keys(filters).length === 0;
 
   const save = async () => {
     if (saving || empty) return;
     setSaving(true);
-    setProblem(null);
+    onSaving?.(true);
+    setFailed(null);
 
     try {
       await commit(change(filters));
       onSaved();
     } catch (cause) {
-      setProblem(problemOf(cause));
+      setFailed({ name, problem: problemOf(cause) });
     } finally {
       setSaving(false);
+      onSaving?.(false);
     }
   };
 

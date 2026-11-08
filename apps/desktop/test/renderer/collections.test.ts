@@ -1808,6 +1808,119 @@ describe("a smart collection in the Collections tab", () => {
     );
   });
 
+  it("renames a refused smart draft without losing its rules or changing the stored collection", async () => {
+    smartMain();
+    await mountTab();
+    await row("Short films");
+    await act(async () => button("New collection").click());
+
+    const smart = await vi.waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((each) =>
+        each.textContent?.startsWith("Smart collection"),
+      );
+
+      if (!found) throw new Error("No Smart collection");
+
+      return found;
+    });
+
+    await act(async () => smart.click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(field()));
+    await type("Short films", "Enter");
+    await setRule("Rating", "7+");
+
+    const refused = ipc.hold("collections.change");
+    await act(async () => button("Save rules").click());
+    await act(async () => refused.reject({ kind: "list-name-taken" }));
+
+    const draftBar = () =>
+      document.querySelector<HTMLElement>("[role=group][aria-label='New smart collection']");
+
+    await vi.waitFor(() =>
+      expect(draftBar()?.textContent).toContain("Another list has this name."),
+    );
+
+    const first = ipc.argsOf("collections.change")[0]!;
+    expect(first).toEqual({
+      kind: "create",
+      id: expect.any(String),
+      name: "Short films",
+      rules: { kind: "movie", filters: { rating: { min: 7 } } },
+    });
+
+    if (first.kind !== "create") throw new Error("Expected a draft create");
+
+    const selected = () =>
+      document.querySelector<HTMLButtonElement>("nav[aria-label=Collections] [aria-current=page]");
+
+    const options = () => {
+      const found = selected()?.closest("li")?.querySelector<HTMLButtonElement>("[aria-label]");
+
+      if (!found) throw new Error("No draft options");
+
+      return found;
+    };
+
+    await act(async () => options().click());
+    await vi.waitFor(() => expect(button("Rename")).toBeTruthy());
+    expect(
+      [...document.querySelectorAll("[role=menuitem]")].map((each) => each.textContent),
+    ).toEqual(["Rename"]);
+    await act(async () => button("Rename").click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(field()));
+    await type("Discarded name", "Escape");
+    expect(document.activeElement).toBe(selected());
+    expect(document.querySelector("h1")?.textContent).toBe("Short films");
+    expect(draftBar()?.textContent).toContain("Another list has this name.");
+
+    await act(async () => options().click());
+    await act(async () => (await vi.waitFor(() => button("Rename"))).click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(field()));
+    await type("Rated 7+", "Enter");
+    expect(document.activeElement).toBe(selected());
+    expect(document.querySelector("h1")?.textContent).toBe("Rated 7+");
+    expect(draftBar()?.querySelector("[role=alert]")).toBeNull();
+    expect(draftBar()?.textContent).toContain("1 title");
+    expect(document.querySelector("[aria-label='Rating: 7+']")).not.toBeNull();
+    expect(ipc.argsOf("collections.change")).toHaveLength(1);
+
+    await act(async () => options().click());
+    await act(async () => (await vi.waitFor(() => button("Rename"))).click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(field()));
+    await type("Friday films", "Tab");
+    // Blur accepts the name between pointer down and click on the existing Save rules button.
+    const retry = button("Save rules");
+    await act(async () => {
+      retry.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      field().blur();
+    });
+    expect(document.querySelector("h1")?.textContent).toBe("Friday films");
+    const saving = ipc.hold("collections.change");
+    await act(async () => retry.click());
+    expect(options().disabled).toBe(true);
+    expect(button("Discard").hasAttribute("disabled")).toBe(true);
+    expect(ipc.argsOf("collections.change")).toEqual([first, { ...first, name: "Friday films" }]);
+    ipc.always("collections.list", [
+      {
+        id: "s0",
+        name: "Short films",
+        total: 2,
+        rules: { kind: "movie", filters: { runtime: { max: 5399 } } },
+      },
+      {
+        id: first.id,
+        name: "Friday films",
+        total: 1,
+        rules: { kind: "movie", filters: { rating: { min: 7 } } },
+      },
+    ]);
+    await act(async () => saving.resolve(null));
+    await vi.waitFor(() => expect(draftBar()).toBeNull());
+    expect((await row("Short films")).textContent).toBe("Short filmsSmart collection2");
+    expect((await row("Friday films")).textContent).toBe("Friday filmsSmart collection1");
+    expect(ipc.methods()).not.toContain("ondemand.details");
+  });
+
   it("refreshes saved runtime matches on return and cancels an obsolete first page", async () => {
     smartMain();
     ipc.always("collections.page", { total: 0, members: [] });
