@@ -1,11 +1,13 @@
 // The window bar's profile avatar and the menu it opens (Paper A): every local profile, the active
-// one checked, a row to switch to each other, Delete for an inactive one with a question first,
-// and New profile with its name field. A change that fails says why with Retry; a deletion that
-// stopped partway stays listed with Retry, and can't be switched to. Switching, its saves and the
-// window's reload belong to `profiles.ts`; this only asks for them.
+// one checked and kids ones marked, a row to switch to each other, Delete for an inactive one with
+// a question first, New profile with its name field, and Manage profiles for an adult viewer. A
+// change the PIN protects asks for it first, or after main refuses it, and forgets it once done or
+// closed. A change that fails says why with Retry; a deletion that stopped partway stays listed
+// with Retry, and can't be switched to. Switching, its saves and the window's reload belong to
+// `profiles.ts`; this only asks for them.
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, Lock, Plus, Trash2 } from "lucide-react";
 import {
   useState,
   useSyncExternalStore,
@@ -19,10 +21,13 @@ import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { menuItem, menuSurface } from "../../components/ui/menu.ts";
-import { appError, describeError } from "../../lib/errors.ts";
 import { cn } from "../../lib/utils.ts";
+import { Avatar, Failure, nameOf, PinPrompt } from "./ProfileControls.tsx";
+import { ProfileManager } from "./ProfileManager.tsx";
 import {
   createProfile,
+  describeProfileError,
+  pinRefused,
   profileListQuery,
   profileStatus,
   removeProfile,
@@ -38,65 +43,83 @@ type Change =
   | { readonly kind: "create"; readonly name: string }
   | { readonly kind: "remove"; readonly id: string };
 
-/** Default is the app's own profile, named in the window's language rather than stored words. */
-const nameOf = (profile: LocalProfile) =>
-  profile.id === DEFAULT_PROFILE_ID ? t("Default") : profile.name;
-
-/** Avatar fills from Paper A, one per profile id, so a profile keeps its colour across lists. */
-const FILLS = ["#2E5E4E", "#5E3A2E", "#3A3A6E"] as const;
-
-function Avatar({ profile }: { profile: LocalProfile | undefined }) {
-  const name = profile ? nameOf(profile) : "";
-  const hash = [...(profile?.id ?? "")].reduce((sum, char) => sum + (char.codePointAt(0) ?? 0), 0);
-
-  return (
-    <span
-      aria-hidden
-      className="grid size-7 flex-none place-items-center rounded-full text-xs leading-[14px] font-bold text-foreground"
-      style={{ backgroundColor: profile ? FILLS[hash % FILLS.length] : "var(--accent)" }}
-    >
-      {[...name.trim()][0]?.toLocaleUpperCase()}
-    </span>
-  );
-}
-
 export function ProfileMenu() {
   const client = useQueryClient();
   const owner = useSyncExternalStore(subscribeProfiles, profileStatus).owner;
   const list = useQuery(profileListQuery());
   const profiles = list.data ?? [];
   const active = profiles.find((profile) => profile.id === owner?.id);
+  const [open, setOpen] = useState(false);
+  // Manage profiles opens once the menu has closed, so the menu's focus return can't take the
+  // keyboard from the sheet's PIN field.
+  const [managing, setManaging] = useState<"next" | boolean>(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
+  // The change waiting for the PIN, and the PIN typed for it. Neither outlives the menu.
+  const [asking, setAsking] = useState<Change | null>(null);
+  const [pin, setPin] = useState("");
+  const [wrongPin, setWrongPin] = useState(false);
 
+  const profileButton = useRef<HTMLButtonElement>(null);
   const newButton = useRef<HTMLButtonElement>(null);
+  const nameField = useRef<HTMLInputElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
+  const pinField = useRef<HTMLInputElement>(null);
   const rows = useRef(new Map<string, HTMLButtonElement>());
-  const previous = useRef({ confirming, naming });
+  const previous = useRef({ confirming, naming, asking, managing });
   useLayoutEffect(() => {
     const before = previous.current;
 
-    if (confirming) cancelButton.current?.focus();
+    // The manager's menu row has unmounted; return to the surviving profile control.
+    if (before.managing === true && managing === false) profileButton.current?.focus();
+    else if (asking) {
+      if (!before.asking) pinField.current?.focus();
+    } else if (confirming) cancelButton.current?.focus();
+    else if (before.asking)
+      (before.asking.kind === "create"
+        ? (nameField.current ?? newButton.current)
+        : (rows.current.get(before.asking.id) ?? newButton.current)
+      )?.focus();
     else if (before.confirming) (rows.current.get(before.confirming) ?? newButton.current)?.focus();
     else if (before.naming && !naming) newButton.current?.focus();
-    previous.current = { confirming, naming };
-  }, [confirming, naming]);
+    previous.current = { confirming, naming, asking, managing };
+  }, [confirming, naming, asking, managing]);
 
   const stopNaming = () => {
     setNaming(false);
     setName("");
   };
 
+  const forgetPin = () => {
+    setAsking(null);
+    setPin("");
+    setWrongPin(false);
+  };
+
   const change = useMutation({
-    mutationFn: (next: Change) =>
-      next.kind === "switch"
-        ? switchProfile(client, next.id)
+    // The PIN stays out of the mutation's variables, which the query client keeps after it ends.
+    mutationFn: (next: Change) => {
+      const typed = pin || undefined;
+
+      return next.kind === "switch"
+        ? switchProfile(client, next.id, typed)
         : next.kind === "create"
-          ? createProfile(client, next.name)
-          : removeProfile(client, next.id),
+          ? createProfile(client, next.name, typed)
+          : removeProfile(client, next.id, typed);
+    },
     onSuccess: (_, next) => {
+      forgetPin();
+
       if (next.kind === "create") stopNaming();
+    },
+    onError: (cause, next) => {
+      if (!pinRefused(cause)) return setAsking(null);
+      // Ask again: a PIN that was typed was wrong; none typed means main wanted one.
+      setWrongPin(pin !== "");
+      setPin("");
+      setAsking(next);
+      pinField.current?.focus();
     },
     // A refused deletion can leave its profile marked as deleting; the list shows it with Retry.
     onSettled: (_, __, next) => {
@@ -104,9 +127,27 @@ export function ProfileMenu() {
     },
   });
 
+  const kidsActive = active?.kids === true;
+
+  // Leaving a kids profile for an adult one needs the PIN; so does adding or deleting once kids
+  // profiles exist. Main may still ask where this can't tell (a PIN with no kids profiles left).
+  const needsPin = (next: Change) =>
+    next.kind === "switch"
+      ? kidsActive && !profiles.find((profile) => profile.id === next.id)?.kids
+      : profiles.some((profile) => profile.kids);
+
   // One change at a time; main would refuse a second while the first holds the profiles.
   const send = (next: Change) => {
-    if (!change.isPending) change.mutate(next);
+    if (change.isPending) return;
+
+    if (!pin && needsPin(next)) {
+      setConfirming(null);
+      setAsking(next);
+
+      return;
+    }
+
+    change.mutate(next);
   };
 
   const busy = (kind: Change["kind"], id?: string) =>
@@ -114,7 +155,7 @@ export function ProfileMenu() {
     change.variables.kind === kind &&
     (!id || ("id" in change.variables && change.variables.id === id));
 
-  const failed = change.isError ? change.variables : null;
+  const failed = change.isError && !asking ? change.variables : null;
   const trimmed = name.trim();
 
   const submit = (event: FormEvent) => {
@@ -134,15 +175,23 @@ export function ProfileMenu() {
 
   return (
     <Popover.Root
-      onOpenChange={(open) => {
-        if (open) return;
+      open={open}
+      onOpenChangeComplete={(opened) => {
+        if (!opened && managing === "next") setManaging(true);
+      }}
+      onOpenChange={(next) => {
+        setOpen(next);
+
+        if (next) return;
         setConfirming(null);
         stopNaming();
+        forgetPin();
 
         if (change.isError) change.reset();
       }}
     >
       <Popover.Trigger
+        ref={profileButton}
         render={
           <button
             aria-label={label}
@@ -165,7 +214,7 @@ export function ProfileMenu() {
           >
             {list.isError ? (
               <Failure
-                text={describeError(appError(list.error))}
+                text={describeProfileError(list.error)}
                 onRetry={() => void list.refetch()}
               />
             ) : (
@@ -247,13 +296,20 @@ export function ProfileMenu() {
                         )}
                       >
                         <Avatar profile={profile} />
-                        <span
-                          className={cn(
-                            "min-w-0 flex-1 truncate",
-                            current ? "font-semibold" : "font-medium",
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "block truncate",
+                              current ? "font-semibold" : "font-medium",
+                            )}
+                          >
+                            {nameOf(profile)}
+                          </span>
+                          {profile.kids && (
+                            <span className="block text-xs leading-[14px] text-muted-foreground">
+                              {t("Kids · allowed titles only")}
+                            </span>
                           )}
-                        >
-                          {nameOf(profile)}
                         </span>
                         {current ? (
                           <Check aria-hidden className="size-4 flex-none" strokeWidth={2.5} />
@@ -284,6 +340,7 @@ export function ProfileMenu() {
             {naming ? (
               <form onSubmit={submit} className="flex items-center gap-2 px-1 py-1">
                 <Input
+                  ref={nameField}
                   compact
                   autoFocus
                   aria-label={t("Profile name")}
@@ -317,8 +374,55 @@ export function ProfileMenu() {
                 {t("New profile")}
               </button>
             )}
+            {!kidsActive && list.isSuccess && (
+              <button
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  setOpen(false);
+                  setConfirming(null);
+                  stopNaming();
+                  forgetPin();
+                  setManaging("next");
+                }}
+                className={cn(
+                  menuItem,
+                  "flex h-9 w-full items-center gap-2.5 px-2 text-left hover:bg-white/10 focus-visible:bg-white/10",
+                )}
+              >
+                <Lock aria-hidden className="size-[15px] text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{t("Manage profiles")}</span>
+                <span className="text-xs leading-[14px] text-muted-foreground">{t("PIN")}</span>
+              </button>
+            )}
+            {asking && (
+              <PinPrompt
+                field={pinField}
+                prompt={promptFor(asking, profiles)}
+                action={
+                  asking.kind === "switch"
+                    ? busy("switch")
+                      ? t("Switching…")
+                      : t("Switch")
+                    : asking.kind === "create"
+                      ? busy("create")
+                        ? t("Adding…")
+                        : t("Add")
+                      : busy("remove")
+                        ? t("Deleting…")
+                        : t("Delete")
+                }
+                busy={change.isPending}
+                wrong={wrongPin}
+                pin={pin}
+                onPin={setPin}
+                onSubmit={() => {
+                  if (pin && !change.isPending) change.mutate(asking);
+                }}
+                onCancel={forgetPin}
+              />
+            )}
             {failed && (
-              <Failure text={describeError(appError(change.error))} onRetry={() => send(failed)} />
+              <Failure text={describeProfileError(change.error)} onRetry={() => send(failed)} />
             )}
             <p className="px-2 pt-2 pb-1 text-xs text-muted-foreground">
               {t(
@@ -328,18 +432,18 @@ export function ProfileMenu() {
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
+      {managing === true && <ProfileManager onClose={() => setManaging(false)} />}
     </Popover.Root>
   );
 }
 
-/** What a failed read or change came to, with Retry. */
-function Failure({ text, onRetry }: { text: string; onRetry: () => void }) {
-  return (
-    <div role="alert" className="flex items-center gap-3 px-2 py-1.5">
-      <span className="min-w-0 flex-1">{text}</span>
-      <Button size="sm" variant="secondary" onClick={onRetry}>
-        {t("Retry")}
-      </Button>
-    </div>
-  );
+/** What the PIN is asked for, naming the profile the change is about. */
+function promptFor(next: Change, profiles: readonly LocalProfile[]): string {
+  if (next.kind === "create") return t("Enter the PIN to add {name}.", { name: next.name });
+  const profile = profiles.find((row) => row.id === next.id);
+  const name = profile ? nameOf(profile) : "";
+
+  return next.kind === "switch"
+    ? t("Enter the PIN to switch to {name}.", { name })
+    : t("Enter the PIN to delete {name}.", { name });
 }

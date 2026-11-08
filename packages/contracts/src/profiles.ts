@@ -1,8 +1,6 @@
-// Viewing profiles as the window sees them. A viewing profile is one person's viewing space on a
-// shared installation (GLOSSARY.md). This release has one, Default, which owns the personal state
-// every earlier release kept: favourites, recent channels, progress, the Watchlist, channel lists
-// and viewing preferences. Another profile is offered only once all of that is kept apart per
-// profile.
+// Viewing profiles as the window sees them. Default keeps earlier releases' personal state in
+// place; named profiles keep their own viewing records, lists and preferences. Kids profiles
+// additionally require explicit approved-content identities.
 import { type } from "arktype";
 import { lazy } from "./lazy.ts";
 
@@ -55,4 +53,31 @@ export interface LocalProfile {
   readonly id: string;
   readonly name: string;
   readonly deleting: boolean;
+  readonly kids?: boolean;
+}
+
+/** An approval never transfers between providers or between online and household copies. */
+export const KidsApprovalSchema = lazy(() =>
+  type(
+    {
+      kind: "'channel' | 'movie' | 'series'",
+      subscriptionId: "string > 0",
+      id: "string > 0",
+    },
+    "|",
+    { kind: "'download' | 'recording'", id: "string > 0" },
+  ),
+);
+
+export type KidsApproval = ReturnType<typeof KidsApprovalSchema>["infer"];
+
+export const KidsProfilePolicySchema = lazy(() =>
+  type({ id: "string > 0", approved: KidsApprovalSchema().array() }),
+);
+
+export type KidsProfilePolicy = ReturnType<typeof KidsProfilePolicySchema>["infer"];
+
+export interface KidsPolicy {
+  readonly protected: boolean;
+  readonly profiles: readonly KidsProfilePolicy[];
 }

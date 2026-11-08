@@ -19,13 +19,17 @@ export function profileHandlers({
   );
 
   return {
+    "profiles.policy": ({ current, pin }) =>
+      enabled && sessions ? sessions.policy(current, pin) : unavailable,
+    "profiles.setPolicy": (input) =>
+      enabled && sessions ? sessions.setPolicy(input) : unavailable,
     "profiles.active": () => profiles.active,
     "profiles.list": () => (enabled && sessions ? sessions.list : unavailable),
-    "profiles.create": ({ name, current }) =>
-      enabled && sessions ? sessions.create(name, current) : unavailable,
-    "profiles.switch": ({ id, current }) =>
-      enabled && sessions ? sessions.switch(id, current) : unavailable,
-    "profiles.remove": ({ id, current }) =>
-      enabled && sessions ? Effect.as(sessions.remove(id, current), null) : unavailable,
+    "profiles.create": ({ name, current, pin }) =>
+      enabled && sessions ? sessions.create(name, current, pin) : unavailable,
+    "profiles.switch": ({ id, current, pin }) =>
+      enabled && sessions ? sessions.switch(id, current, pin) : unavailable,
+    "profiles.remove": ({ id, current, pin }) =>
+      enabled && sessions ? Effect.as(sessions.remove(id, current, pin), null) : unavailable,
   };
 }

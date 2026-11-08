@@ -4,6 +4,35 @@
 import type { Plural } from "../i18n.ts";
 
 export const en = {
+  "Kids policy could not be read or saved. Try again.":
+    "Kids policy could not be read or saved. Try again.",
+  "Kids policy: enter the correct PIN.": "Kids policy: enter the correct PIN.",
+  "Kids policy: this content or action is not approved.":
+    "Kids policy: this content or action is not approved.",
+  "Kids · allowed titles only": "Kids · allowed titles only",
+  "Manage profiles": "Manage profiles",
+  PIN: "PIN",
+  Switch: "Switch",
+  "Enter the PIN to switch to {name}.": "Enter the PIN to switch to {name}.",
+  "Enter the PIN to add {name}.": "Enter the PIN to add {name}.",
+  "Enter the PIN to delete {name}.": "Enter the PIN to delete {name}.",
+  "Enter the PIN to manage profiles.": "Enter the PIN to manage profiles.",
+  Unlock: "Unlock",
+  "Kids profiles": "Kids profiles",
+  "Kids profile: {name}": "Kids profile: {name}",
+  "{count} approved": { one: "{count} approved", other: "{count} approved" },
+  "Add a profile first, then make it a kids profile.":
+    "Add a profile first, then make it a kids profile.",
+  "What {name} can open": "What {name} can open",
+  "Search channels, movies and series": "Search channels, movies and series",
+  "Approved online": "Approved online",
+  None: "None",
+  "Set a PIN": "Set a PIN",
+  "Change PIN": "Change PIN",
+  "New PIN": "New PIN",
+  "Confirm PIN": "Confirm PIN",
+  "A PIN has 4 to 12 digits.": "A PIN has 4 to 12 digits.",
+  "The PINs don't match.": "The PINs don't match.",
   "Viewing preferences could not be read. Repair the file or switch profiles.":
     "Viewing preferences could not be read. Repair the file or switch profiles.",
   "This viewing profile is unavailable or being deleted.":

@@ -1,5 +1,13 @@
+import { allowsApproval, visibleDownloads, visibleOutput } from "./services/profile-policy.ts";
+import { defined } from "@mrstreamer/core/defined";
+import { t } from "@mrstreamer/core/i18n";
+import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
+import type { Title, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { Viewing } from "@mrstreamer/contracts/viewing";
 import {
   ActiveProfileSchema,
+  sameProfile,
+  type KidsApproval,
   ownedByProfile,
   type ActiveProfile,
 } from "@mrstreamer/contracts/profiles";
@@ -18,7 +26,7 @@ import {
   type IpcOutput,
 } from "@mrstreamer/contracts/ipc";
 import { Diagnostics, outcomeOf } from "@mrstreamer/core/diagnostics";
-import type { Failed } from "@mrstreamer/core/failure";
+import { Failed } from "@mrstreamer/core/failure";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -209,23 +217,31 @@ export function registerIpc(
       let work = Effect.gen(function* () {
         if (!personal || !ownedByProfile(method)) return yield* handler(input, frame);
         const admitted = yield* personal.admit(expected);
+
         // The mapping keeps per-method types at construction; this loop already dispatches the
         // union of validated inputs, as the ordinary handler above does.
-        const selected = personal.handlers(admitted)[method] as typeof handler | undefined;
+        const selected = kidsHandlers(admitted, { ...handlers, ...personal.handlers(admitted) })[
+          method
+        ] as typeof handler;
+
+        const start = Effect.andThen(
+          admitted.current,
+          Effect.suspend(() => selected(input, frame)),
+        );
 
         // These household writes serialize with removal, which drains personal permits.
         // Capture the admitted context under a short permit, then release it before that write lock.
         // Forked catalogue work retains its original Settings and current-owner check.
-        if (householdMutations.has(method)) {
-          const context = yield* admitted.run(Effect.context<never>());
+        const result = yield* Effect.exit(
+          householdMutations.has(method)
+            ? Effect.provideContext(start, yield* admitted.run(Effect.context<never>()))
+            : admitted.run(start),
+        );
 
-          return yield* Effect.provideContext(
-            Effect.suspend(() => (selected ?? handler)(input, frame)),
-            context,
-          );
-        }
+        // A reply, success or failure, answers only the visit and policy revision it was admitted under.
+        yield* admitted.current;
 
-        return yield* admitted.run(Effect.suspend(() => (selected ?? handler)(input, frame)));
+        return yield* result;
       });
 
       if (owned) {
@@ -285,4 +301,345 @@ export function emit<E extends IpcEvent>(
   payload: IpcEvents[E],
 ): void {
   if (!target.isDestroyed()) target.send(event, payload);
+}
+
+/**
+ * The commands an admitted viewer may use. Adults get `handlers` as they are. Kids requests use the
+ * same implementations after exact-source authorization; unlisted commands are management
+ * operations and stay closed until explicitly supported here. Household service environments are
+ * never changed.
+ */
+function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandlers): IpcHandlers {
+  if (approved === null) return handlers;
+
+  const denied = () =>
+    Effect.fail(
+      new Failed({
+        error: {
+          kind: "invalid-input",
+          detail: t("Kids policy: this content or action is not approved."),
+        },
+      }),
+    );
+
+  const allows = (approval: KidsApproval) => allowsApproval(approved, approval);
+
+  const online = (kind: "channel" | "movie" | "series", ref: OwnedId) => allows({ kind, ...ref });
+
+  const copy = (kind: "download" | "recording", id: string) => allows({ kind, id });
+
+  const titleRef = (ref: TitleRef) =>
+    ref.kind === "movie"
+      ? online("movie", ref)
+      : online("series", { subscriptionId: ref.subscriptionId, id: ref.seriesId });
+
+  const title = (item: Title): Title | null =>
+    online(item.kind, item) && !item.adult
+      ? { ...item, versions: item.versions.filter((version) => online(item.kind, version)) }
+      : null;
+
+  const titles = (items: readonly Title[]) => items.flatMap((item) => title(item) ?? []);
+
+  const viewing = (state: Viewing) => ({
+    ...state,
+    favourites: state.favourites.filter((ref) => online("channel", ref)),
+    recent: state.recent.filter((ref) => online("channel", ref)),
+    continueWatching: state.continueWatching.filter((item) => titleRef(item.title)),
+    ...defined({ recentTitles: state.recentTitles?.filter((item) => titleRef(item.title)) }),
+    marked: state.marked.filter((item) => online("series", item.series)),
+  });
+
+  const changeReminder = (
+    method: "reminders.cancel" | "reminders.dismiss",
+    input: { id: string },
+    frame: Parameters<IpcHandlers["reminders.cancel"]>[1],
+  ) =>
+    Effect.flatMap(handlers["reminders.list"](undefined, frame), (list) => {
+      const reminder = list.reminders.find((item) => item.id === input.id);
+
+      return reminder && online("channel", reminder.channel)
+        ? handlers[method](input, frame)
+        : denied();
+    });
+
+  // Every method keeps its correlated input/output type; only the deny-all default is shared.
+  const closed = { ...handlers };
+
+  for (const method of Object.keys(handlers) as (keyof IpcHandlers)[]) closed[method] = denied;
+
+  return {
+    ...closed,
+    "subscription.list": handlers["subscription.list"],
+    "preferences.get": handlers["preferences.get"],
+    "preferences.update": handlers["preferences.update"],
+    "subtitles.settings": handlers["subtitles.settings"],
+    "subtitles.search": handlers["subtitles.search"],
+    "subtitles.choose": handlers["subtitles.choose"],
+    "subtitles.saved": handlers["subtitles.saved"],
+    "subtitles.timing": handlers["subtitles.timing"],
+    "subtitles.show": handlers["subtitles.show"],
+    "subtitles.hide": handlers["subtitles.hide"],
+    "subtitles.forget": handlers["subtitles.forget"],
+    "subtitles.cancel": handlers["subtitles.cancel"],
+    "language.get": handlers["language.get"],
+    "language.set": handlers["language.set"],
+    "liveBrowse.get": handlers["liveBrowse.get"],
+    "liveBrowse.remember": handlers["liveBrowse.remember"],
+    "subscription.preferences": (input, frame) =>
+      Effect.map(handlers["subscription.preferences"](input, frame), (prefs) => ({
+        ...prefs,
+        lastChannelId:
+          prefs.lastChannelId &&
+          online("channel", { subscriptionId: input.subscriptionId, id: prefs.lastChannelId })
+            ? prefs.lastChannelId
+            : null,
+        lastCategoryId: null,
+        titleVersions: {},
+      })),
+    "subscription.updatePreferences": (input, frame) =>
+      !input.patch.lastChannelId ||
+      online("channel", { subscriptionId: input.subscriptionId, id: input.patch.lastChannelId })
+        ? handlers["subscription.updatePreferences"](
+            { ...input, patch: { ...input.patch, titleVersions: {} } },
+            frame,
+          )
+        : denied(),
+    "customLists.get": (input, frame) =>
+      Effect.map(handlers["customLists.get"](input, frame), (rows) =>
+        rows.map((row) => ({
+          ...row,
+          members: row.members.filter(
+            (member) => member.kind === "listed" && online("channel", member.channel),
+          ),
+          away: 0,
+        })),
+      ),
+    "updates.status": handlers["updates.status"],
+    "guide.savedQueries": () => Effect.succeed([]),
+    "playback.failure": handlers["playback.failure"],
+    "playback.diagnostic": handlers["playback.diagnostic"],
+    "library.status": handlers["library.status"],
+    "library.categories": handlers["library.categories"],
+    "library.searchGroups": handlers["library.searchGroups"],
+    "library.channels": handlers["library.channels"],
+    "library.channel": (input, frame) =>
+      online("channel", input.channel) ? handlers["library.channel"](input, frame) : denied(),
+    "library.browse": handlers["library.browse"],
+    "guide.status": handlers["guide.status"],
+    "guide.schedule": (input, frame) =>
+      online("channel", input.channel) ? handlers["guide.schedule"](input, frame) : denied(),
+    "guide.programme": (input, frame) =>
+      online("channel", input.channel) ? handlers["guide.programme"](input, frame) : denied(),
+    "guide.listings": (input, frame) =>
+      input.channels.every((ref) => online("channel", ref))
+        ? handlers["guide.listings"](input, frame)
+        : denied(),
+    "guide.range": (input, frame) =>
+      input.channels.every((ref) => online("channel", ref))
+        ? handlers["guide.range"](input, frame)
+        : denied(),
+    "guide.search": (input, frame) =>
+      Effect.map(handlers["guide.search"](input, frame), (rows) =>
+        rows.filter((row) => online("channel", row.channel)),
+      ),
+    "guide.searchPage": handlers["guide.searchPage"],
+    "guide.searchList": (input, frame) =>
+      Effect.map(handlers["guide.searchList"](input, frame), (result) =>
+        Object.fromEntries(
+          Object.entries(result).filter(([key]) =>
+            approved.some((item) => item.kind === "channel" && ownedKey(item) === key),
+          ),
+        ),
+      ),
+    "ondemand.filterOptions": handlers["ondemand.filterOptions"],
+    "ondemand.status": handlers["ondemand.status"],
+    "ondemand.search": (input, frame) =>
+      Effect.map(handlers["ondemand.search"](input, frame), (result) => ({
+        ...result,
+        movies: titles(result.movies),
+        series: titles(result.series),
+      })),
+    "ondemand.searchKind": handlers["ondemand.searchKind"],
+    "ondemand.titles": (input, frame) =>
+      Effect.map(handlers["ondemand.titles"](input, frame), titles),
+    "ondemand.collection": handlers["ondemand.collection"],
+    "ondemand.rows": (input, frame) =>
+      !input.like || online(input.kind, input.like)
+        ? handlers["ondemand.rows"](input, frame)
+        : denied(),
+    "ondemand.tiles": handlers["ondemand.tiles"],
+    "ondemand.related": (input, frame) =>
+      online(input.kind, input.version)
+        ? Effect.map(handlers["ondemand.related"](input, frame), (result) => ({
+            ...result,
+            titles: result.titles.flatMap((item) => {
+              const allowed = title(item.title);
+
+              return allowed ? [{ ...item, title: allowed }] : [];
+            }),
+          }))
+        : denied(),
+    "ondemand.recommendations": (input, frame) =>
+      input.seeds.every((seed) => online(seed.kind, seed.version))
+        ? Effect.map(handlers["ondemand.recommendations"](input, frame), (rows) =>
+            rows.flatMap((row) => {
+              const allowed = title(row.title);
+
+              return allowed ? [{ ...row, title: allowed }] : [];
+            }),
+          )
+        : denied(),
+    "ondemand.details": (input, frame) =>
+      online(input.kind, input.version)
+        ? Effect.flatMap(handlers["ondemand.details"](input, frame), (details) => {
+            const allowed = title(details.title);
+
+            return allowed ? Effect.succeed({ ...details, title: allowed }) : denied();
+          })
+        : denied(),
+    "ondemand.season": (input, frame) =>
+      online("series", input.series) ? handlers["ondemand.season"](input, frame) : denied(),
+    "watchlist.list": (input, frame) =>
+      Effect.map(handlers["watchlist.list"](input, frame), (page) => ({
+        total: page.total,
+        entries: page.entries.flatMap((entry) => {
+          const allowed = entry.title && title(entry.title);
+
+          return allowed
+            ? [
+                {
+                  ...entry,
+                  name: allowed.name,
+                  year: allowed.year,
+                  artworkUrl: allowed.posterUrl,
+                  title: allowed,
+                  sources: entry.sources.filter((source) =>
+                    allowed.versions.some((version) => version.subscriptionId === source),
+                  ),
+                },
+              ]
+            : [];
+        }),
+      })),
+    "watchlist.remove": handlers["watchlist.remove"],
+    "watchlist.saved": (input, frame) =>
+      online(input.kind, input.version) ? handlers["watchlist.saved"](input, frame) : denied(),
+    "watchlist.save": (input, frame) =>
+      online(input.kind, input.version) ? handlers["watchlist.save"](input, frame) : denied(),
+    "viewing.get": (input, frame) => Effect.map(handlers["viewing.get"](input, frame), viewing),
+    "viewing.setFavourite": (input, frame) =>
+      online("channel", input.channel)
+        ? Effect.map(handlers["viewing.setFavourite"](input, frame), viewing)
+        : denied(),
+    "viewing.recordWatch": (input, frame) =>
+      online("channel", input.channel)
+        ? Effect.map(handlers["viewing.recordWatch"](input, frame), viewing)
+        : denied(),
+    "viewing.recordProgress": (input, frame) =>
+      titleRef(input.title)
+        ? Effect.map(handlers["viewing.recordProgress"](input, frame), viewing)
+        : denied(),
+    "viewing.episodes": (input, frame) =>
+      online("series", input.series)
+        ? Effect.map(handlers["viewing.episodes"](input, frame), (series) => ({
+            ...series,
+            progress: series.progress.filter((item) => titleRef(item.title)),
+          }))
+        : denied(),
+    "viewing.progress": (input, frame) =>
+      (input.movies ?? []).every((ref) => online("movie", ref)) &&
+      (input.series ?? []).every((ref) => online("series", ref))
+        ? Effect.map(handlers["viewing.progress"](input, frame), (rows) =>
+            rows.filter((row) => titleRef(row.title)),
+          )
+        : denied(),
+    "viewing.removeFromContinue": (input, frame) =>
+      (input.titles.movies ?? []).every((ref) => online("movie", ref)) &&
+      (input.titles.series ?? []).every((ref) => online("series", ref))
+        ? Effect.map(handlers["viewing.removeFromContinue"](input, frame), viewing)
+        : denied(),
+    "viewing.finishSeries": (input, frame) =>
+      input.series.every((ref) => online("series", ref))
+        ? Effect.map(handlers["viewing.finishSeries"](input, frame), viewing)
+        : denied(),
+    "viewing.undoMark": (input, frame) =>
+      online("series", input.series) ? handlers["viewing.undoMark"](input, frame) : denied(),
+    "viewing.reorderFavourites": (input, frame) =>
+      [...input.original, ...input.order].every((ref) => online("channel", ref))
+        ? Effect.map(handlers["viewing.reorderFavourites"](input, frame), viewing)
+        : denied(),
+    "viewing.markEpisode": (input, frame) =>
+      titleRef(input.episode) ? handlers["viewing.markEpisode"](input, frame) : denied(),
+    "downloads.list": (input, frame) =>
+      Effect.map(handlers["downloads.list"](input, frame), (list) =>
+        visibleDownloads(list, allows),
+      ),
+    "recordings.rules": () => Effect.succeed([]),
+    "recordings.schedules": () => Effect.succeed([]),
+    "recordings.list": (input, frame) =>
+      Effect.map(handlers["recordings.list"](input, frame), (rows) =>
+        rows.filter((row) => copy("recording", row.id)),
+      ),
+    "playback.open": (input, frame) =>
+      online("channel", input.channel) &&
+      (!input.variant ||
+        online("channel", { subscriptionId: input.channel.subscriptionId, id: input.variant }))
+        ? handlers["playback.open"](input, frame)
+        : denied(),
+    "playback.openTitle": (input, frame) =>
+      titleRef(input.title) ? handlers["playback.openTitle"](input, frame) : denied(),
+    "playback.openCopy": (input, frame) =>
+      Effect.flatMap(handlers["recordings.list"](undefined, frame), (rows) =>
+        copy(rows.some((row) => row.id === input.copy) ? "recording" : "download", input.copy)
+          ? handlers["playback.openCopy"](input, frame)
+          : denied(),
+      ),
+    "downloads.recordProgress": (input, frame) =>
+      copy("download", input.id) && (!input.owner || sameProfile(input.owner, owner))
+        ? handlers["downloads.recordProgress"](input, frame)
+        : denied(),
+    "recordings.recordProgress": (input, frame) =>
+      copy("recording", input.id) && (!input.owner || sameProfile(input.owner, owner))
+        ? handlers["recordings.recordProgress"](input, frame)
+        : denied(),
+    "downloads.pauseAll": handlers["downloads.pauseAll"],
+    "playback.close": handlers["playback.close"],
+    "playback.closeAll": handlers["playback.closeAll"],
+    "playback.tracks": handlers["playback.tracks"],
+    "playback.timeline": handlers["playback.timeline"],
+    "playback.seekLive": handlers["playback.seekLive"],
+    "playback.playing": handlers["playback.playing"],
+    "output.status": (input, frame) =>
+      Effect.map(handlers["output.status"](input, frame), (status) =>
+        visibleOutput(status, allows),
+      ),
+    "output.scan": handlers["output.scan"],
+    "output.connect": handlers["output.connect"],
+    "output.pick": handlers["output.pick"],
+    "output.closePicker": handlers["output.closePicker"],
+    "output.disconnect": handlers["output.disconnect"],
+    "output.playChannel": (input, frame) =>
+      online("channel", input.channel) &&
+      (!input.variant ||
+        online("channel", { subscriptionId: input.channel.subscriptionId, id: input.variant }))
+        ? handlers["output.playChannel"](input, frame)
+        : denied(),
+    "output.openTitle": (input, frame) =>
+      titleRef(input.title) ? handlers["output.openTitle"](input, frame) : denied(),
+    "output.playTitle": handlers["output.playTitle"],
+    "output.playingTitle": handlers["output.playingTitle"],
+    "output.command": handlers["output.command"],
+    "output.volume": handlers["output.volume"],
+    "reminders.list": (input, frame) =>
+      Effect.map(handlers["reminders.list"](input, frame), (list) => ({
+        ...list,
+        reminders: list.reminders.filter((item) => online("channel", item.channel)),
+      })),
+    "reminders.cancel": (input, frame) => changeReminder("reminders.cancel", input, frame),
+    "reminders.dismiss": (input, frame) => changeReminder("reminders.dismiss", input, frame),
+    "reminders.set": (input, frame) =>
+      online("channel", input.channel) ? handlers["reminders.set"](input, frame) : denied(),
+    "window.miniPlayerAvailable": handlers["window.miniPlayerAvailable"],
+    "window.setMiniPlayer": handlers["window.setMiniPlayer"],
+  };
 }

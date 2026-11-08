@@ -81,6 +81,8 @@ import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
 import {
   ActiveProfileSchema,
+  KidsProfilePolicySchema,
+  type KidsPolicy,
   type ActiveProfile,
   type ProfileRequest,
   type LocalProfile,
@@ -311,9 +313,20 @@ export const ipcInputs = {
   "reminders.dismiss": () => type({ id: "string > 0" }),
   "profiles.active": none,
   "profiles.list": none,
-  "profiles.create": () => type({ name: "string > 0", current: ActiveProfileSchema() }),
-  "profiles.switch": () => type({ id: "string > 0", current: ActiveProfileSchema() }),
-  "profiles.remove": () => type({ id: "string > 0", current: ActiveProfileSchema() }),
+  "profiles.create": () =>
+    type({ name: "string > 0", current: ActiveProfileSchema(), "pin?": "string" }),
+  "profiles.switch": () =>
+    type({ id: "string > 0", current: ActiveProfileSchema(), "pin?": "string" }),
+  "profiles.remove": () =>
+    type({ id: "string > 0", current: ActiveProfileSchema(), "pin?": "string" }),
+  "profiles.policy": () => type({ current: ActiveProfileSchema(), "pin?": "string" }),
+  "profiles.setPolicy": () =>
+    type({
+      current: ActiveProfileSchema(),
+      "pin?": "string",
+      "newPin?": "string",
+      profiles: KidsProfilePolicySchema().array(),
+    }),
   "recordings.list": none,
   /**
    * What holds a subscription's connections now, as Record shows before it starts, and with
@@ -781,7 +794,7 @@ export interface IpcOutputs {
   "reminders.cancel": null;
   "reminders.dismiss": null;
   /**
-   * The viewing profile whose viewing the app shows: Default, the only one this release offers.
+   * The viewing profile whose viewing the app shows, with its current visit revision.
    * Fails while the profiles can't be read or written, rather than guess one.
    */
   "profiles.active": ActiveProfile;
@@ -789,6 +802,8 @@ export interface IpcOutputs {
   "profiles.create": LocalProfile;
   "profiles.switch": ActiveProfile;
   "profiles.remove": null;
+  "profiles.policy": KidsPolicy;
+  "profiles.setPolicy": KidsPolicy;
   /** Every recording, newest first. Fails while they can't be read. */
   "recordings.list": readonly Recording[];
   "recordings.connections": RecordingConnections;

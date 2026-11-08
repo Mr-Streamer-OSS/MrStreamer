@@ -3,6 +3,39 @@
 import type { Translation } from "../i18n.ts";
 
 export const es: Translation = {
+  "Kids policy could not be read or saved. Try again.":
+    "No se pudo leer o guardar la política infantil. Inténtalo de nuevo.",
+  "Kids policy: enter the correct PIN.": "Política infantil: introduce el PIN correcto.",
+  "Kids policy: this content or action is not approved.":
+    "Política infantil: este contenido o acción no está aprobado.",
+  "Kids · allowed titles only": "Infantil · solo títulos permitidos",
+  "Manage profiles": "Gestionar perfiles",
+  PIN: "PIN",
+  Switch: "Cambiar",
+  "Enter the PIN to switch to {name}.": "Introduce el PIN para cambiar a {name}.",
+  "Enter the PIN to add {name}.": "Introduce el PIN para añadir {name}.",
+  "Enter the PIN to delete {name}.": "Introduce el PIN para eliminar {name}.",
+  "Enter the PIN to manage profiles.": "Introduce el PIN para gestionar los perfiles.",
+  Unlock: "Desbloquear",
+  "Kids profiles": "Perfiles infantiles",
+  "Kids profile: {name}": "Perfil infantil: {name}",
+  "{count} approved": {
+    one: "{count} permitido",
+    many: "{count} permitidos",
+    other: "{count} permitidos",
+  },
+  "Add a profile first, then make it a kids profile.":
+    "Primero añade un perfil y luego conviértelo en perfil infantil.",
+  "What {name} can open": "Lo que {name} puede abrir",
+  "Search channels, movies and series": "Buscar canales, películas y series",
+  "Approved online": "Permitidos en línea",
+  None: "Ninguno",
+  "Set a PIN": "Establecer un PIN",
+  "Change PIN": "Cambiar el PIN",
+  "New PIN": "PIN nuevo",
+  "Confirm PIN": "Confirmar PIN",
+  "A PIN has 4 to 12 digits.": "Un PIN tiene de 4 a 12 dígitos.",
+  "The PINs don't match.": "Los PIN no coinciden.",
   "Viewing preferences could not be read. Repair the file or switch profiles.":
     "No se pudieron leer las preferencias de visualización. Repara el archivo o cambia de perfil.",
   "This viewing profile is unavailable or being deleted.":

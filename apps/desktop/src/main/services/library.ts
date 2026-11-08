@@ -1,3 +1,5 @@
+import type { KidsApproval } from "@mrstreamer/contracts/profiles";
+import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import type { UsageObservers } from "../analytics/observers.ts";
 // The live catalogue: each saved subscription's, fetched from its provider and cached on disk,
 // and all of them together as the UI asks for them over IPC. Every channel and category says
@@ -140,6 +142,7 @@ interface OwnCategory extends Omit<Category, "members"> {
 
 /** One subscription's catalogue. */
 interface IndexedCatalogue {
+  readonly file: CatalogueFile;
   /** The subscription whose channels and categories these are. */
   readonly subscriptionId: string;
   readonly fetchedAt: number;
@@ -381,7 +384,17 @@ function make(options: LibraryOptions) {
       Effect.gen(function* () {
         const found = yield* cached(subscription);
 
-        return statusOf(subscription.id, found && ((yield* adults) ? found : withoutAdults(found)));
+        const policy = yield* Effect.serviceOption(AdmittedKids);
+
+        const shown =
+          found &&
+          (policy._tag === "Some" && policy.value.approved !== null
+            ? admittedCatalogue(found, policy.value.approved)
+            : (yield* adults)
+              ? found
+              : withoutAdults(found));
+
+        return statusOf(subscription.id, shown);
       });
 
     const fetchAndStore = (source: Source, playlist?: PlaylistRefresh) =>
@@ -582,6 +595,15 @@ function make(options: LibraryOptions) {
      */
     const visible = Effect.gen(function* () {
       const loaded = yield* current;
+
+      const policy = yield* Effect.serviceOption(AdmittedKids);
+      const approved = policy._tag === "Some" ? policy.value.approved : null;
+
+      if (approved !== null) {
+        const lists = combine(loaded.map((member) => admittedCatalogue(member, approved)));
+
+        return { lists, search: lists };
+      }
 
       return {
         lists: listsOf((yield* adults) ? "all" : "ordinary", loaded),
@@ -807,6 +829,7 @@ function index(file: CatalogueFile, subscriptionId: string, outdated: boolean): 
   }
 
   return {
+    file,
     subscriptionId,
     fetchedAt: file.fetchedAt,
     ...defined({ importRevision: file.importRevision || undefined }),
@@ -1187,4 +1210,29 @@ function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
       subscriptions: counted(facets.subscriptions),
     },
   };
+}
+
+/** Rebuild from admitted provider streams before deriving names, groups, guide IDs or facets. */
+function admittedCatalogue(
+  member: IndexedCatalogue,
+  approved: readonly KidsApproval[],
+): IndexedCatalogue {
+  const isAdult = adultIn(member.file.categories);
+
+  return index(
+    {
+      ...member.file,
+      channels: member.file.channels.filter(
+        (channel) =>
+          !isAdult(channel) &&
+          allowsApproval(approved, {
+            kind: "channel",
+            subscriptionId: member.subscriptionId,
+            id: channel.id,
+          }),
+      ),
+    },
+    member.subscriptionId,
+    member.outdated,
+  );
 }

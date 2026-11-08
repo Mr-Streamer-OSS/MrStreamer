@@ -457,6 +457,40 @@ async function catalogueOf(
     });
   }
 
+  if (owners.some((owner) => owner.approved !== undefined)) {
+    const selected = members.map((member) => {
+      const approval = owners.find(
+        (owner) => owner.subscriptionId === member.subscriptionId,
+      )?.approved;
+
+      const movies = new Set(approval?.movies ?? []);
+      const series = new Set(approval?.series ?? []);
+      const movieAdult = adultIn(member.catalogue.movieCategories);
+      const seriesAdult = adultIn(member.catalogue.seriesCategories);
+
+      return {
+        ...member,
+        catalogue: {
+          ...member.catalogue,
+          movies: member.catalogue.movies.filter(
+            (item) => movies.has(item.id) && !movieAdult(item),
+          ),
+          series: member.catalogue.series.filter(
+            (item) => series.has(item.id) && !seriesAdult(item),
+          ),
+        },
+      };
+    });
+
+    // A request-local index cannot replace the household index or any persisted catalogue.
+    return {
+      members: selected,
+      index: indexCatalogue(selected, language),
+      fileListings: new Map(),
+      collections: new Map(),
+    };
+  }
+
   return shownOf(members, language);
 }
 
@@ -762,7 +796,23 @@ const handlers: {
   status: async ({ adults: now, owners }) => {
     showing(now);
 
-    return (await Promise.all(owners.map(current))).map(statusOf);
+    if (!owners.some((owner) => owner.approved !== undefined))
+      return (await Promise.all(owners.map(current))).map(statusOf);
+
+    const found = await catalogueOf(owners, viewerLanguage);
+
+    return owners.map((owner) => {
+      const member = found.members.find((each) => each.subscriptionId === owner.subscriptionId);
+      const status = statusOf(member ?? null);
+
+      return owner.approved === undefined
+        ? status
+        : {
+            ...status,
+            movies: member?.catalogue.movies.length ?? 0,
+            series: member?.catalogue.series.length ?? 0,
+          };
+    });
   },
   refresh,
   finishRefresh,
@@ -855,13 +905,8 @@ const handlers: {
     );
   },
   recommendations: async ({ owners, language, seeds }) => {
-    const members = owners.flatMap((owner) => {
-      const held = loaded.get(owner.subscriptionId);
-
-      return held && held.importRevision === owner.importRevision ? [held] : [];
-    });
-
-    const found = shownOf(members, language);
+    const found = await catalogueOf(owners, language);
+    const { members } = found;
 
     const catalogues = {
       movie: collectionsOf(found, "movie").list("all"),
@@ -913,13 +958,8 @@ const handlers: {
     return results;
   },
   related: async ({ language, kind, version, owners, metadata: about }) => {
-    const members = owners.flatMap((owner) => {
-      const held = loaded.get(owner.subscriptionId);
-
-      return held && held.importRevision === owner.importRevision ? [held] : [];
-    });
-
-    const found = shownOf(members, language);
+    const found = await catalogueOf(owners, language);
+    const { members } = found;
     const titles = collectionsOf(found, kind).list("all");
 
     const seed = titles.find((title) =>
@@ -994,6 +1034,9 @@ const handlers: {
       if (!first) return [];
       const listed = listedAs(found.index, entry);
       const title = listed ? named(listed, language) : null;
+
+      // A restricted read cannot trust fallback facts saved under a former, wider version group.
+      if (owners.some((owner) => owner.approved !== undefined) && !title) return [];
 
       // For adults as the lists say now, or as they last said of a title they hold no more.
       if (!shown && (title?.adult ?? first.adult)) return [];

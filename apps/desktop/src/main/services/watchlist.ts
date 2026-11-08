@@ -1,3 +1,4 @@
+import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import { ViewingErasure } from "@mrstreamer/core/viewing/service";
 // The watchlist: movies and whole series the viewer saved to watch later. It is apart from the
 // viewing record: playing, finishing or leaving Continue watching changes no entry, and saving or
@@ -189,7 +190,10 @@ function make() {
      * hasn't been taken over yet.
      */
     const aligned = (found: readonly SavedSubscription[]) =>
-      Effect.flatMap(onDemand.status, ({ lists }) => alignTo(found, lists));
+      Effect.flatMap(onDemand.status, ({ lists }) => alignTo(found, lists)).pipe(
+        // Stored facts follow the full source; viewer selection affects returned pages only.
+        Effect.provideService(AdmittedKids, { approved: null }),
+      );
 
     /** The title a version belongs to as the lists have it, with every subscription's versions. */
     const listed = (kind: TitleKind, version: OwnedId) =>
@@ -219,7 +223,20 @@ function make() {
 
           if (found.length === 0) return { total: 0, entries: [] };
           yield* aligned(found);
-          const members = yield* membersOf(found);
+          const policy = yield* Effect.serviceOption(AdmittedKids);
+          const approved = policy._tag === "Some" ? policy.value.approved : null;
+
+          const members = (yield* membersOf(found)).flatMap((member) => {
+            const versionIds = member.versionIds.filter((id) =>
+              allowsApproval(approved, {
+                kind: member.kind,
+                subscriptionId: member.subscriptionId,
+                id,
+              }),
+            );
+
+            return versionIds.length ? [{ ...member, versionIds }] : [];
+          });
 
           if (members.length === 0) return { total: 0, entries: [] };
 

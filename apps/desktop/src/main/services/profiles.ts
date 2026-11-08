@@ -1,9 +1,17 @@
+import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import { t } from "@mrstreamer/core/i18n";
 import { Library } from "./library.ts";
 import { OnDemand } from "./ondemand.ts";
 import { Watchlist } from "./watchlist.ts";
 import { CustomLists } from "./custom-lists.ts";
-import { randomUUID } from "node:crypto";
+import { type } from "arktype";
+import {
+  KidsProfilePolicySchema,
+  type KidsPolicy,
+  type KidsApproval,
+} from "@mrstreamer/contracts/profiles";
+import { transaction } from "../platform/database.ts";
+import { randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { rm } from "node:fs/promises";
 import {
   DEFAULT_PROFILE_ID,
@@ -103,6 +111,8 @@ type PersonalServices =
 
 export interface ProfileAdmission {
   readonly owner: ActiveProfile;
+  readonly current: Effect.Effect<void, Failed>;
+  readonly approved: readonly KidsApproval[] | null;
   readonly services: {
     readonly viewing: ViewingRecord["Service"];
     readonly watchlist: Watchlist["Service"];
@@ -136,6 +146,105 @@ export function makeProfiles({
 }) {
   return Effect.gen(function* () {
     const storage = yield* profileStorage;
+    const database = yield* Database;
+
+    const policyFailure = () =>
+      new Failed({
+        error: {
+          kind: "unexpected",
+          detail: t("Kids policy could not be read or saved. Try again."),
+        },
+      });
+
+    const policySchema = type({
+      pin: "string",
+      salt: "string",
+      revision: "number.integer >= 1",
+      profiles: KidsProfilePolicySchema().array(),
+    });
+
+    const db = () => {
+      if (!("db" in database)) throw policyFailure();
+
+      return database.db;
+    };
+
+    yield* Effect.try({
+      try: () =>
+        transaction(db(), () => {
+          const existed = db()
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kids_policy'")
+            .get();
+
+          db().exec(
+            "CREATE TABLE IF NOT EXISTS kids_policy (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL)",
+          );
+
+          if (!existed)
+            db()
+              .prepare("INSERT INTO kids_policy VALUES (1, ?)")
+              .run(JSON.stringify({ pin: "", salt: "", revision: 1, profiles: [] }));
+        }),
+      catch: policyFailure,
+    });
+
+    const readPolicy = Effect.try({
+      try: () => {
+        const row = db().prepare("SELECT value FROM kids_policy WHERE id = 1").get();
+
+        if (!row || !type("string").allows(row.value)) throw policyFailure();
+        const parsed = policySchema(JSON.parse(row.value));
+
+        if (
+          parsed instanceof type.errors ||
+          (parsed.pin === ""
+            ? parsed.profiles.length !== 0 || parsed.salt !== ""
+            : !/^[0-9a-f]{64}$/.test(parsed.pin) || !parsed.salt) ||
+          parsed.profiles.some((row) => row.id === DEFAULT_PROFILE_ID)
+        )
+          throw policyFailure();
+
+        return parsed;
+      },
+      catch: policyFailure,
+    });
+
+    const savePolicy = (next: {
+      readonly pin: string;
+      readonly salt: string;
+      readonly revision: number;
+      readonly profiles: KidsPolicy["profiles"];
+    }) =>
+      Effect.try({
+        try: () => {
+          const saved = db()
+            .prepare("UPDATE kids_policy SET value = ? WHERE id = 1")
+            .run(JSON.stringify(next));
+
+          if (saved.changes !== 1) throw policyFailure();
+        },
+        catch: policyFailure,
+      });
+
+    const pinRequired = () =>
+      new Failed({
+        error: { kind: "invalid-input", detail: t("Kids policy: enter the correct PIN.") },
+      });
+
+    const checkPin = (policy: Effect.Success<typeof readPolicy>, pin?: string) =>
+      Effect.try({
+        try: () => {
+          if (!policy.pin) return;
+
+          if (!pin || !/^[0-9]{4,12}$/.test(pin)) throw pinRequired();
+          const hash = scryptSync(pin, policy.salt, 32);
+          const saved = Buffer.from(policy.pin, "hex");
+
+          if (saved.length !== hash.length || !timingSafeEqual(saved, hash)) throw pinRequired();
+        },
+        catch: pinRequired,
+      });
+
     const events = yield* PubSub.unbounded<ProfileUpdate>();
     const scope = yield* Effect.scope;
     const subscriptions = yield* Subscriptions;
@@ -297,7 +406,9 @@ export function makeProfiles({
               );
 
           yield* expectedOwner(expected);
+          const policy = yield* readPolicy;
           const owner = { ...active };
+          const kids = policy.profiles.find((row) => row.id === owner.id);
           const handle = yield* opened(owner.id);
           const erased = new Map(handle.erased);
 
@@ -325,7 +436,13 @@ export function makeProfiles({
                     Context.add(
                       Context.add(
                         Context.add(
-                          Context.add(handle.context, ViewingErasure, erasure),
+                          Context.add(
+                            Context.add(handle.context, AdmittedKids, {
+                              approved: kids?.approved ?? null,
+                            }),
+                            ViewingErasure,
+                            erasure,
+                          ),
                           ViewingProfile,
                           owner,
                         ),
@@ -349,6 +466,18 @@ export function makeProfiles({
 
           return {
             owner,
+            current: Effect.gen(function* () {
+              if (!isActive(owner))
+                return yield* refused(t("Viewing profile changed; retry this request."));
+              const now = yield* readPolicy;
+
+              if (
+                JSON.stringify(now.profiles.find((row) => row.id === owner.id)) !==
+                JSON.stringify(kids)
+              )
+                return yield* policyFailure();
+            }),
+            approved: kids?.approved ?? null,
             run,
             services: {
               viewing: Context.get(handle.context, ViewingRecord),
@@ -401,12 +530,106 @@ export function makeProfiles({
 
     return {
       changes: Stream.fromPubSub(events),
-      list: storage.list,
+      list: Effect.gen(function* () {
+        const policy = yield* readPolicy;
+
+        return (yield* storage.list).map((row) => ({
+          ...row,
+          kids: policy.profiles.some((kids) => kids.id === row.id),
+        }));
+      }),
+      visibility: Effect.gen(function* () {
+        const policy = yield* readPolicy;
+        const owner = { ...active };
+        const kids = policy.profiles.find((row) => row.id === owner.id);
+
+        return {
+          owner,
+          kids: kids !== undefined,
+          allows: (approval: KidsApproval) => allowsApproval(kids?.approved ?? null, approval),
+          current: Effect.gen(function* () {
+            if (
+              !isActive(owner) ||
+              JSON.stringify((yield* readPolicy).profiles.find((row) => row.id === owner.id)) !==
+                JSON.stringify(kids)
+            )
+              return yield* policyFailure();
+          }),
+        };
+      }),
+      policy: (expected: ActiveProfile, pin?: string) =>
+        one.withPermits(1)(
+          Effect.gen(function* () {
+            yield* expectedOwner(expected);
+            const policy = yield* readPolicy;
+            yield* checkPin(policy, pin);
+
+            return { protected: policy.pin !== "", profiles: policy.profiles } satisfies KidsPolicy;
+          }),
+        ),
+      setPolicy: (input: {
+        readonly current: ActiveProfile;
+        readonly pin?: string;
+        readonly newPin?: string;
+        readonly profiles: KidsPolicy["profiles"];
+      }) =>
+        one.withPermits(1)(
+          Effect.gen(function* () {
+            yield* expectedOwner(input.current);
+            const policy = yield* readPolicy;
+            yield* checkPin(policy, input.pin);
+
+            if (
+              (!policy.pin && !input.newPin) ||
+              (input.newPin !== undefined && !/^[0-9]{4,12}$/.test(input.newPin))
+            )
+              return yield* pinRequired();
+            const rows = yield* storage.list;
+
+            if (
+              new Set(input.profiles.map((row) => row.id)).size !== input.profiles.length ||
+              input.profiles.some(
+                (row) =>
+                  row.id === DEFAULT_PROFILE_ID || !rows.some((profile) => profile.id === row.id),
+              )
+            )
+              return yield* refused(t("This viewing profile is unavailable or being deleted."));
+
+            // Policy changes affect inactive profiles only: active playback must first leave through the lifecycle cleanup.
+            if (
+              input.profiles.some((row) => row.id === active.id) ||
+              policy.profiles.some((row) => row.id === active.id)
+            )
+              return yield* refused(t("Viewing profile changed; retry this request."));
+            const deleting = new Set(rows.filter((row) => row.deleting).map((row) => row.id));
+
+            const profiles = [
+              ...input.profiles.filter((row) => !deleting.has(row.id)),
+              ...policy.profiles.filter((row) => deleting.has(row.id)),
+            ];
+
+            const salt = input.newPin ? randomUUID() : policy.salt;
+
+            const next = {
+              pin: input.newPin ? scryptSync(input.newPin, salt, 32).toString("hex") : policy.pin,
+              salt,
+              revision: policy.revision + 1,
+              profiles,
+            };
+
+            yield* savePolicy(next);
+
+            return { protected: true, profiles } satisfies KidsPolicy;
+          }),
+        ),
       active: activeRead,
-      create: (name: string, expected?: ActiveProfile) =>
+      create: (name: string, expected?: ActiveProfile, pin?: string) =>
         one.withPermits(1)(
           Effect.andThen(
-            expectedOwner(expected),
+            Effect.andThen(
+              expectedOwner(expected),
+              Effect.flatMap(readPolicy, (policy) => checkPin(policy, pin)),
+            ),
             Effect.suspend(() => {
               const trimmed = name.trim();
 
@@ -428,11 +651,19 @@ export function makeProfiles({
       // metadata must never retarget a queued request after a switch, including away and back.
       admitFor: (expected?: ActiveProfile) =>
         admitFor(expected ?? { id: DEFAULT_PROFILE_ID, revision: 1 }),
-      switch: (id: string, expected?: ActiveProfile) =>
+      switch: (id: string, expected?: ActiveProfile, pin?: string) =>
         one.withPermits(1)(
           Effect.gen(function* () {
             // Retrying the same durably selected owner also retries its unfinished configuration.
             yield* expectedOwner(expected);
+
+            const policy = yield* readPolicy;
+
+            if (
+              policy.profiles.some((row) => row.id === active.id) &&
+              !policy.profiles.some((row) => row.id === id)
+            )
+              yield* checkPin(policy, pin);
 
             if (id === active.id && configuredFor === id) return { ...active };
 
@@ -471,10 +702,12 @@ export function makeProfiles({
             return { ...active };
           }),
         ),
-      remove: (id: string, expected?: ActiveProfile) =>
+      remove: (id: string, expected?: ActiveProfile, pin?: string) =>
         one.withPermits(1)(
           Effect.gen(function* () {
             yield* expectedOwner(expected);
+            const policy = yield* readPolicy;
+            yield* checkPin(policy, pin);
             // Persist the tombstone before waiting for pending operations or touching files. A failed
             // close keeps both the directory and registry row for retry, including after restart.
             yield* storage.deleting(id);
@@ -491,6 +724,14 @@ export function makeProfiles({
               try: () => rm(profileDirectory(dataDir, id), { recursive: true, force: true }),
               catch: failedWith,
             });
+
+            // Keep the tombstone retryable if its policy cleanup cannot be saved.
+            if (policy.profiles.some((row) => row.id === id))
+              yield* savePolicy({
+                ...policy,
+                revision: policy.revision + 1,
+                profiles: policy.profiles.filter((row) => row.id !== id),
+              });
             yield* storage.removed(id);
             handles.delete(id);
           }),
@@ -597,12 +838,17 @@ export class ProfileSessions extends Context.Service<
           admit: Effect.flatMap(ready, (profiles) => profiles.admit),
           admitFor: (owner?: ActiveProfile) =>
             Effect.flatMap(ready, (profiles) => profiles.admitFor(owner)),
-          create: (name: string, expected?: ActiveProfile) =>
-            Effect.flatMap(ready, (profiles) => profiles.create(name, expected)),
-          switch: (id: string, expected?: ActiveProfile) =>
-            Effect.flatMap(ready, (profiles) => profiles.switch(id, expected)),
-          remove: (id: string, expected?: ActiveProfile) =>
-            Effect.flatMap(ready, (profiles) => profiles.remove(id, expected)),
+          visibility: Effect.flatMap(ready, (profiles) => profiles.visibility),
+          policy: (expected: ActiveProfile, pin?: string) =>
+            Effect.flatMap(ready, (profiles) => profiles.policy(expected, pin)),
+          setPolicy: (input: Parameters<ProfileSessions["Service"]["setPolicy"]>[0]) =>
+            Effect.flatMap(ready, (profiles) => profiles.setPolicy(input)),
+          create: (name: string, expected?: ActiveProfile, pin?: string) =>
+            Effect.flatMap(ready, (profiles) => profiles.create(name, expected, pin)),
+          switch: (id: string, expected?: ActiveProfile, pin?: string) =>
+            Effect.flatMap(ready, (profiles) => profiles.switch(id, expected, pin)),
+          remove: (id: string, expected?: ActiveProfile, pin?: string) =>
+            Effect.flatMap(ready, (profiles) => profiles.remove(id, expected, pin)),
           prepareForget: (
             subscription: SavedSubscription,
             defaultForget?: ReturnType<Settings["Service"]["prepareForget"]>,
@@ -616,3 +862,6 @@ export class ProfileSessions extends Context.Service<
       }),
     );
 }
+
+/** The current viewer as publications filter for them: who, whether kids, and what they may see. */
+export type Viewer = Effect.Success<ProfileSessions["Service"]["visibility"]>;

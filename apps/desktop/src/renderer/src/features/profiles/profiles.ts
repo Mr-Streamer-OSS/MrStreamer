@@ -1,8 +1,15 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
+import {
+  sameProfile,
+  type ActiveProfile,
+  type KidsPolicy,
+  type KidsProfilePolicy,
+} from "@mrstreamer/contracts/profiles";
 import { AppFailure } from "@mrstreamer/contracts/errors";
+import { defined } from "@mrstreamer/core/defined";
 import { t } from "@mrstreamer/core/i18n";
 import { applyLanguage } from "../../app/language.ts";
+import { appError, describeError } from "../../lib/errors.ts";
 import { resetForProfile } from "../../app/ui-store.ts";
 import {
   call,
@@ -205,8 +212,11 @@ export function syncProfiles(client: QueryClient): () => void {
 
 let switching = false;
 
-/** Saves the current viewer before selection. A refused save never asks main to switch. */
-export async function switchProfile(client: QueryClient, id: string): Promise<void> {
+/**
+ * Saves the current viewer before selection. A refused save never asks main to switch. `pin` is
+ * needed only to leave a kids profile for an adult one; it travels in this call and nowhere else.
+ */
+export async function switchProfile(client: QueryClient, id: string, pin?: string): Promise<void> {
   const owner = profileOwner();
 
   if (!owner || switching) throw profileChanged();
@@ -226,7 +236,12 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
 
     if (!currentProfile(owner)) throw profileChanged();
     selectionRequested = true;
-    const selected = await callForProfile(owner, "profiles.switch", { id, current: owner });
+
+    const selected = await callForProfile(owner, "profiles.switch", {
+      id,
+      current: owner,
+      ...defined({ pin }),
+    });
 
     if (!sameProfile(selected, owner)) recoverySelection = selected;
     await acceptOwner(client, selected);
@@ -267,23 +282,29 @@ export const profileListQuery = () => ({
   queryFn: () => call("profiles.list"),
 });
 
-export async function createProfile(client: QueryClient, name: string): Promise<void> {
+/** Once a PIN protects the installation, adding a profile needs it. */
+export async function createProfile(
+  client: QueryClient,
+  name: string,
+  pin?: string,
+): Promise<void> {
   const owner = profileOwner();
 
   if (!owner) throw profileChanged();
-  await callForProfile(owner, "profiles.create", { name, current: owner });
+  await callForProfile(owner, "profiles.create", { name, current: owner, ...defined({ pin }) });
 
   if (!currentProfile(owner)) throw profileChanged();
   await client.invalidateQueries({ queryKey: profileListQuery().queryKey });
 }
 
-export async function removeProfile(client: QueryClient, id: string): Promise<void> {
+/** Once a PIN protects the installation, deleting a profile needs it. */
+export async function removeProfile(client: QueryClient, id: string, pin?: string): Promise<void> {
   const owner = profileOwner();
 
   if (!owner) throw profileChanged();
 
   try {
-    await callForProfile(owner, "profiles.remove", { id, current: owner });
+    await callForProfile(owner, "profiles.remove", { id, current: owner, ...defined({ pin }) });
   } finally {
     // A refused deletion can leave the profile marked deleting, which the list shows for retry.
     if (currentProfile(owner))
@@ -291,4 +312,76 @@ export async function removeProfile(client: QueryClient, id: string): Promise<vo
   }
 
   if (!currentProfile(owner)) throw profileChanged();
+}
+
+/** Main's kids policy refusals, already whole sentences in the window's language. */
+const POLICY_REFUSALS = [
+  "Kids policy could not be read or saved. Try again.",
+  "Kids policy: enter the correct PIN.",
+  "Kids policy: this content or action is not approved.",
+] as const;
+
+/** One sentence for a failed profile read or change, showing main's kids policy refusals as said. */
+export function describeProfileError(cause: unknown): string {
+  const error = appError(cause);
+
+  return "detail" in error && POLICY_REFUSALS.some((refusal) => t(refusal) === error.detail)
+    ? error.detail
+    : describeError(error);
+}
+
+/**
+ * Whether main refused a profile change for a missing or wrong PIN. Main says so only in its
+ * message, translated with the same catalogue, so the window compares that sentence.
+ */
+export const pinRefused = (cause: unknown) =>
+  cause instanceof AppFailure &&
+  cause.error.kind === "invalid-input" &&
+  cause.error.detail === t("Kids policy: enter the correct PIN.");
+
+/**
+ * The kids policy as the current adult viewer manages it. Without `pin` it answers only while no
+ * PIN protects the installation, which is how the manager learns whether to ask for one.
+ */
+export async function readKidsPolicy(pin?: string): Promise<KidsPolicy> {
+  const owner = profileOwner();
+
+  if (!owner) throw profileChanged();
+
+  const policy = await callForProfile(owner, "profiles.policy", {
+    current: owner,
+    ...defined({ pin }),
+  });
+
+  if (!currentProfile(owner)) throw profileChanged();
+
+  return policy;
+}
+
+/**
+ * Replaces every kids profile and its approvals at once. `pin` is the current PIN once one is set;
+ * `newPin` sets the first one or changes it. A refused save keeps the policy main had.
+ */
+export async function saveKidsPolicy(
+  client: QueryClient,
+  change: {
+    readonly pin: string | undefined;
+    readonly newPin: string | undefined;
+    readonly profiles: readonly KidsProfilePolicy[];
+  },
+): Promise<KidsPolicy> {
+  const owner = profileOwner();
+
+  if (!owner) throw profileChanged();
+
+  const policy = await callForProfile(owner, "profiles.setPolicy", {
+    current: owner,
+    profiles: [...change.profiles],
+    ...defined({ pin: change.pin, newPin: change.newPin }),
+  });
+
+  if (!currentProfile(owner)) throw profileChanged();
+  await client.invalidateQueries({ queryKey: profileListQuery().queryKey });
+
+  return policy;
 }

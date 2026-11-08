@@ -1,3 +1,4 @@
+import { AdmittedKids } from "./profile-policy.ts";
 import { ArkErrors } from "arktype";
 import { workerResults } from "../ondemand/protocol.ts";
 import { listedFileKey } from "@mrstreamer/core/ondemand/files";
@@ -524,6 +525,30 @@ function make(deps: OnDemandDeps) {
     const call = <M extends WorkerMethod>(method: M, args: WorkerCalls[M]["args"]) =>
       Effect.gen(function* () {
         const admitted = yield* Effect.serviceOption(AdmittedSettings);
+        const policy = yield* Effect.serviceOption(AdmittedKids);
+        // Only owner-scoped reads carry this selection; storage and household work use the full catalogue.
+        const approved = policy._tag === "Some" ? policy.value.approved : null;
+        let selected = args;
+
+        if (approved !== null && "owners" in args) {
+          // WorkerCalls correlates owners with these methods. The generic branch retains their other inputs.
+          const owners = args.owners as readonly CatalogueOwner[];
+          selected = {
+            ...args,
+            owners: owners.map((owner) => {
+              const ids = (kind: "movie" | "series") =>
+                approved.flatMap((item) =>
+                  item.kind === kind &&
+                  "subscriptionId" in item &&
+                  item.subscriptionId === owner.subscriptionId
+                    ? [item.id]
+                    : [],
+                );
+
+              return { ...owner, approved: { movies: ids("movie"), series: ids("series") } };
+            }),
+          };
+        }
 
         return yield* Effect.tryPromise({
           try: () => {
@@ -537,7 +562,7 @@ function make(deps: OnDemandDeps) {
                 },
               });
 
-            return worker.call(method, args);
+            return worker.call(method, selected);
           },
           catch: failedWith,
         });
@@ -590,6 +615,8 @@ function make(deps: OnDemandDeps) {
       });
 
     const status = Effect.gen(function* () {
+      const policy = yield* Effect.serviceOption(AdmittedKids);
+
       const found = yield* held.pipe(
         // A worker that doesn't answer says nothing of the lists: they count as not loaded.
         Effect.catchTag("Failed", () =>
@@ -601,7 +628,11 @@ function make(deps: OnDemandDeps) {
 
       return {
         lists: found.map(({ subscription, worked }) => statusOf(subscription.id, worked)),
-        metadata: tmdbKey ? metadataProgress : null,
+        metadata: !tmdbKey
+          ? null
+          : policy._tag === "Some" && policy.value.approved !== null
+            ? { known: 0, wanted: 0, refused: false, fetching: false }
+            : metadataProgress,
       } satisfies OnDemandStatus;
     });
 

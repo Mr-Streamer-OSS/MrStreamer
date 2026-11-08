@@ -1,12 +1,15 @@
 // Composition root: creates the window and wires the services to IPC.
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import {
   DEFAULT_PROFILE_ID,
   sameProfile,
   type ActiveProfile,
 } from "@mrstreamer/contracts/profiles";
-import { ProfileSessions, type ProfileAdmission } from "./services/profiles.ts";
+import { ProfileSessions, type ProfileAdmission, type Viewer } from "./services/profiles.ts";
+import { visibleDownloads, visibleOutput } from "./services/profile-policy.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -821,8 +824,18 @@ async function start(): Promise<void> {
       return new Response(null, { status: 404 });
     }
 
+    const admitted = await runtime.runPromiseExit(profileSessions.visibility);
+
+    if (
+      Exit.isFailure(admitted) ||
+      !admitted.value.allows({ kind: "download", id: decodeURIComponent(id) })
+    )
+      return new Response(null, { status: 404 });
     const kept = await runtime.runPromise(downloads.artwork(decodeURIComponent(id), kind));
     const bytes = kept && (await readFile(kept.path).catch(() => null));
+
+    if (Exit.isFailure(await runtime.runPromiseExit(admitted.value.current)))
+      return new Response(null, { status: 404 });
 
     return bytes
       ? new Response(bytes, { headers: { "Content-Type": kept.type, "Cache-Control": "no-store" } })
@@ -834,14 +847,23 @@ async function start(): Promise<void> {
   );
   dimensionsReady = true;
 
-  const initialOwner = await runtime.runPromise(profiles.active);
-  const initialDefaultOwner = initialOwner.id === DEFAULT_PROFILE_ID ? initialOwner : null;
+  // An unavailable registry keeps personal access closed while household startup continues.
+  const initial = await runtime.runPromiseExit(profiles.active);
+
+  const initialDefaultOwner =
+    Exit.isSuccess(initial) && initial.value.id === DEFAULT_PROFILE_ID ? initial.value : null;
+
+  const activeMatches = (owner: ActiveProfile) => {
+    const current = runtime.runSyncExit(profiles.active);
+
+    return Exit.isSuccess(current) && sameProfile(owner, current.value);
+  };
 
   const publishPreferences = (
     owner: ActiveProfile | null,
     snapshot: IpcEvents["preferences.changed"],
   ) => {
-    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    if (!mainWindow || !owner || !activeMatches(owner)) return;
     emit(mainWindow.webContents, "profiles.preferencesChanged", { owner, snapshot });
 
     if (owner.id === DEFAULT_PROFILE_ID)
@@ -849,7 +871,7 @@ async function start(): Promise<void> {
   };
 
   const stalePreferences = (owner: ActiveProfile | null) => {
-    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    if (!mainWindow || !owner || !activeMatches(owner)) return;
     emit(mainWindow.webContents, "profiles.preferencesStale", { owner });
 
     if (owner.id === DEFAULT_PROFILE_ID) emit(mainWindow.webContents, "preferences.stale", null);
@@ -908,7 +930,7 @@ async function start(): Promise<void> {
       }).pipe(
         Effect.tap((publication) =>
           Effect.sync(() => {
-            if (sameProfile(admission.owner, runtime.runSync(profiles.active))) {
+            if (activeMatches(admission.owner)) {
               publications.clear();
               publications.set(profileKey(admission.owner), publication);
             }
@@ -927,7 +949,7 @@ async function start(): Promise<void> {
   const restoredLocale = profileLocale.pending;
 
   let language = languageFor(
-    restoredLocale && sameProfile(restoredLocale.owner, runtime.runSync(profileSessions.active))
+    restoredLocale && activeMatches(restoredLocale.owner)
       ? restoredLocale.choice
       : await runtime.runPromise(settings.interfaceLanguage),
   );
@@ -959,24 +981,82 @@ async function start(): Promise<void> {
     };
   });
 
-  /** Sends each change to the window, while there is one. */
+  /**
+   * Sends each change to the window, while there is one. `visible` narrows it to what the current
+   * viewer may see, or null for nothing; while their policy can't be read, nothing is sent.
+   */
   const forward = <A, E extends IpcEvent>(
     changes: Stream.Stream<A>,
     event: E,
     payload: (change: A) => IpcEvents[E],
+    visible?: (change: A, viewer: Viewer) => A | null,
   ) =>
     runtime.runFork(
       Stream.runForEach(changes, (change) =>
-        Effect.sync(() => {
-          if (mainWindow) emit(mainWindow.webContents, event, payload(change));
+        Effect.gen(function* () {
+          const shown = visible
+            ? yield* profileSessions.visibility.pipe(
+                Effect.map((viewer) => visible(change, viewer)),
+                Effect.catchTag("Failed", () => Effect.succeed(null)),
+              )
+            : change;
+
+          if (shown !== null && mainWindow) emit(mainWindow.webContents, event, payload(shown));
         }),
       ),
     );
 
-  forward(library.changes, "library.updated", (status) => status);
-  forward(onDemand.changes, "ondemand.updated", (status) => status);
-  forward(onDemand.progressChanges, "ondemand.progress", (metadata) => metadata);
-  forward(onDemand.detailsChanged, "ondemand.detailsChanged", (title) => title);
+  // Household publications trigger a fresh admitted public status, never publish household counts.
+  const publicStatus = <A, B>(changes: Stream.Stream<A>, read: (change: A) => Effect.Effect<B>) =>
+    changes.pipe(
+      Stream.mapEffect((change) =>
+        Effect.gen(function* () {
+          const admission = yield* profileSessions.admit;
+          const status = yield* admission.run(read(change));
+          yield* admission.current;
+
+          return status;
+        }).pipe(Effect.catchTag("Failed", () => Effect.succeed(null))),
+      ),
+      Stream.filter((status) => status !== null),
+    );
+
+  forward(
+    publicStatus(library.changes, (change) =>
+      Effect.map(
+        library.status,
+        (statuses) =>
+          statuses.find((status) => status.subscriptionId === change.subscriptionId) ?? {
+            ...change,
+            channelCount: 0,
+          },
+      ),
+    ),
+    "library.updated",
+    (status) => status,
+  );
+  forward(
+    publicStatus(onDemand.changes, (change) =>
+      Effect.map(onDemand.status, (status) => ({
+        ...status,
+        ...defined({ markedForAdults: change.markedForAdults }),
+      })),
+    ),
+    "ondemand.updated",
+    (status) => status,
+  );
+  forward(
+    onDemand.progressChanges,
+    "ondemand.progress",
+    (metadata) => metadata,
+    (metadata, viewer) => (viewer.kids ? null : metadata),
+  );
+  forward(
+    onDemand.detailsChanged,
+    "ondemand.detailsChanged",
+    (title) => title,
+    (title, viewer) => (viewer.allows({ ...title, kind: title.kind }) ? title : null),
+  );
   forward(guide.changes, "guide.updated", () => null);
   void runtime.runFork(
     Stream.runForEach(profileSessions.changes, (change) =>
@@ -991,7 +1071,7 @@ async function start(): Promise<void> {
 
         const { owner } = change;
 
-        if (!owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+        if (!owner || !activeMatches(owner)) return;
         const legacy = owner.id === DEFAULT_PROFILE_ID;
 
         if (change.kind === "viewing" || change.kind === "erased") {
@@ -1020,10 +1100,25 @@ async function start(): Promise<void> {
 
     return status;
   });
-  forward(downloads.changes, "downloads.changed", (list) => list);
+  forward(
+    downloads.changes,
+    "downloads.changed",
+    (list) => list,
+    (list, viewer) => (viewer.kids ? visibleDownloads(list, viewer.allows) : list),
+  );
   forward(reminders.changes, "reminders.changed", () => null);
-  forward(recordings.changes, "recordings.changed", (list) => list);
-  forward(recordings.scheduleChanges, "recordings.schedulesChanged", (list) => list);
+  forward(
+    recordings.changes,
+    "recordings.changed",
+    (list) => list,
+    (list, viewer) => list.filter((item) => viewer.allows({ kind: "recording", id: item.id })),
+  );
+  forward(
+    recordings.scheduleChanges,
+    "recordings.schedulesChanged",
+    (list) => list,
+    (list, viewer) => (viewer.kids ? [] : list),
+  );
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
@@ -1154,13 +1249,25 @@ async function start(): Promise<void> {
 
   runtime.runFork(
     Stream.runForEach(output.changes, (status) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         // A window out of sight is there for the receiver only. Once the receiver lets go it
         // closes, as the viewer asked, before its page hears of it: the page would carry on
         // here, or start a preview, with nobody watching.
         if (away && status.output.kind === "local") mainWindow?.destroy();
 
-        if (mainWindow) emit(mainWindow.webContents, "output.changed", status);
+        // Only the viewer the status belongs to hears of it, and nobody while policy can't be read.
+        const viewer = yield* Effect.option(profileSessions.visibility);
+
+        if (
+          mainWindow &&
+          Option.isSome(viewer) &&
+          (!status.owner || sameProfile(status.owner, viewer.value.owner))
+        )
+          emit(
+            mainWindow.webContents,
+            "output.changed",
+            viewer.value.kids ? visibleOutput(status, viewer.value.allows) : status,
+          );
         receiverPlaying = status.output.kind === "receiver" && status.output.media !== null;
         keepAwake();
       }),

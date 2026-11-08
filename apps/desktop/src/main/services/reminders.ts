@@ -53,6 +53,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { readReminders, writeReminders, type RemindersFile } from "../platform/reminders-file.ts";
 import { Library } from "./library.ts";
+import { ProfileSessions } from "./profiles.ts";
 import { Settings } from "./preferences.ts";
 import { Subscriptions } from "./subscription.ts";
 
@@ -142,6 +143,24 @@ function make(deps: RemindersDeps) {
     const library = yield* Library;
     const guide = yield* Guide;
     const settings = yield* Settings;
+    const sessions = yield* Effect.serviceOption(ProfileSessions);
+
+    // Standalone reminder runtimes predate profiles. The assembled desktop always supplies sessions.
+    // A viewer whose policy can't be read is told of nothing.
+    const mayTell = (reminder: KeptReminder) =>
+      sessions._tag === "Some"
+        ? sessions.value.visibility.pipe(
+            Effect.map((viewer) =>
+              viewer.allows({
+                kind: "channel",
+                subscriptionId: reminder.subscriptionId,
+                id: reminder.channel,
+              }),
+            ),
+            Effect.catchTag("Failed", () => Effect.succeed(false)),
+          )
+        : Effect.succeed(true);
+
     const { notifier } = deps;
     const path = join(deps.dataDir, "reminders.json");
     const turn = (yield* Semaphore.make(1)).withPermits(1);
@@ -269,38 +288,39 @@ function make(deps: RemindersDeps) {
     };
 
     /** Tells of `reminder`, told at `now`: in the window, and from the system unless for adults. */
-    const tell = (reminder: KeptReminder, now: number) => {
-      banners.set(reminder.id, true);
-      dirty = true;
+    const tell = (reminder: KeptReminder, now: number) =>
+      Effect.gen(function* () {
+        banners.set(reminder.id, true);
+        dirty = true;
 
-      if (reminder.adult || !notifier?.supported) return;
-      const late = lateMinutes(reminder.start, now);
-      const channel = reminder.channelName;
-      const { id } = reminder;
-      notices.add(id);
+        if (reminder.adult || !notifier?.supported || !(yield* mayTell(reminder))) return;
+        const late = lateMinutes(reminder.start, now);
+        const channel = reminder.channelName;
+        const { id } = reminder;
+        notices.add(id);
 
-      try {
-        notifier.show(
-          {
-            id,
-            title: reminder.title,
-            body:
-              late === 0
-                ? t("{channel} · now", { channel })
-                : t("{channel} · started {time} ago", { channel, time: duration(late * 60) }),
-          },
-          {
-            shown: () => Queue.offerUnsafe(events, { kind: "shown", id }),
-            clicked: () => Queue.offerUnsafe(events, { kind: "clicked", id }),
-            failed: () => Queue.offerUnsafe(events, { kind: "failed", id }),
-          },
-        );
-      } catch {
-        // As the system saying it couldn't: the window's notice shows regardless.
-        notices.delete(id);
-        failedNotice = true;
-      }
-    };
+        try {
+          notifier.show(
+            {
+              id,
+              title: reminder.title,
+              body:
+                late === 0
+                  ? t("{channel} · now", { channel })
+                  : t("{channel} · started {time} ago", { channel, time: duration(late * 60) }),
+            },
+            {
+              shown: () => Queue.offerUnsafe(events, { kind: "shown", id }),
+              clicked: () => Queue.offerUnsafe(events, { kind: "clicked", id }),
+              failed: () => Queue.offerUnsafe(events, { kind: "failed", id }),
+            },
+          );
+        } catch {
+          // As the system saying it couldn't: the window's notice shows regardless.
+          notices.delete(id);
+          failedNotice = true;
+        }
+      });
 
     const shownAs = (reminder: KeptReminder, now: number): Reminder => ({
       id: reminder.id,
@@ -428,7 +448,7 @@ function make(deps: RemindersDeps) {
         if (written._tag === "Success") {
           commit(changed);
 
-          for (const reminder of due) tell(reminder, now);
+          for (const reminder of due) yield* tell(reminder, now);
         } else {
           // What went goes, and what the lists say of each channel holds, written or not: one
           // filed for adults hides now. How each stands waits for a write.
@@ -445,7 +465,8 @@ function make(deps: RemindersDeps) {
       for (const id of notices) {
         const reminder = byId.get(id);
 
-        if (!reminder || now >= reminder.stop || reminder.adult) closeNotice(id);
+        if (!reminder || now >= reminder.stop || reminder.adult || !(yield* mayTell(reminder)))
+          closeNotice(id);
       }
 
       for (const id of banners.keys()) {
@@ -478,7 +499,8 @@ function make(deps: RemindersDeps) {
         if (
           now < reminder.stop &&
           (yield* savedIds).has(reminder.subscriptionId) &&
-          visible(reminder, yield* adultsShown)
+          visible(reminder, yield* adultsShown) &&
+          (yield* mayTell(reminder))
         ) {
           banners.set(id, true);
           dirty = true;
@@ -518,6 +540,23 @@ function make(deps: RemindersDeps) {
       Stream.runForEach(guide.changes.pipe(Stream.debounce(GUIDE_SETTLE)), () => wake),
     );
     yield* Effect.forkScoped(Stream.runForEach(library.changes, () => wake));
+
+    if (sessions._tag === "Some")
+      yield* Effect.forkScoped(
+        Stream.runForEach(sessions.value.changes, (change) =>
+          change.kind === "active"
+            ? turn(
+                Effect.gen(function* () {
+                  const file = store.kind === "read" ? store.file.reminders : [];
+
+                  for (const reminder of file)
+                    if (!(yield* mayTell(reminder))) closeNotice(reminder.id);
+                  yield* publish;
+                }),
+              )
+            : Effect.void,
+        ),
+      );
     // What the system says of its notices.
     yield* Effect.forkScoped(
       Effect.forever(

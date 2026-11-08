@@ -372,7 +372,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
 
   const reminders = Reminders.layer({ dataDir, notifier: config.notifier ?? null }).pipe(
-    Layer.provide(Layer.mergeAll(guide, services)),
+    Layer.provide(Layer.mergeAll(guide, services, sessions)),
   );
 
   const recordings = Recordings.layer({ dataDir, userAgent: config.userAgent }).pipe(
