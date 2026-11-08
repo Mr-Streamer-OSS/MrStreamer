@@ -412,6 +412,7 @@ it.for(["failure", "cancellation"] as const)(
     signal.addEventListener("abort", onAbort, { once: true });
     const originalLayer = ProfileSessions.layer;
     let first = true;
+
     const factory = vi.spyOn(ProfileSessions, "layer").mockImplementationOnce((options) =>
       originalLayer(options).pipe(
         Layer.provide(
@@ -460,20 +461,26 @@ it.for(["failure", "cancellation"] as const)(
       await Effect.runPromise(Deferred.await(closed), { signal });
 
       const admitted = await runtime.runPromise(sessions.admitFor(owner), { signal });
+
       const commands = collectionsHandlers({
         collections: admitted.services.collections,
         current: admitted.current,
       });
+
       const changes = await runtime.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const stream = yield* sessions.changes;
+
             const pull = yield* Stream.toPull(
               Stream.filter(stream, (change) => change.kind === "collections"),
             );
 
             yield* admitted.run(
-              commands["collections.change"]({ kind: "create", id: "retry", name: "Retry" }, "test"),
+              commands["collections.change"](
+                { kind: "create", id: "retry", name: "Retry" },
+                "test",
+              ),
             );
 
             return yield* pull;
@@ -500,6 +507,7 @@ it("retains the collection acquisition past caller scope closure and releases it
   const dataDir = await tempDir();
   let released = false;
   const originalLayer = ProfileSessions.layer;
+
   const factory = vi.spyOn(ProfileSessions, "layer").mockImplementationOnce((options) =>
     originalLayer(options).pipe(
       Layer.provide(
@@ -529,21 +537,28 @@ it("retains the collection acquisition past caller scope closure and releases it
     const runtime = runtimeFor(layer);
     const sessions = await runtime.runPromise(ProfileSessions);
     const admitted = await runtime.runPromise(Effect.scoped(sessions.admit), { signal });
+
     const commands = collectionsHandlers({
       collections: admitted.services.collections,
       current: admitted.current,
     });
+
     expect(released).toBe(false);
+
     const changes = await runtime.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const stream = yield* sessions.changes;
+
           const pull = yield* Stream.toPull(
             Stream.filter(stream, (change) => change.kind === "collections"),
           );
 
           yield* admitted.run(
-            commands["collections.change"]({ kind: "create", id: "retained", name: "Retained" }, "test"),
+            commands["collections.change"](
+              { kind: "create", id: "retained", name: "Retained" },
+              "test",
+            ),
           );
 
           return yield* pull;

@@ -1579,6 +1579,7 @@ it("retains a successful collection mutation while its acquired forwarder has no
   };
 
   const releaseGate = () => Effect.runPromise(Deferred.succeed(release, undefined));
+
   const onAbort = () => {
     report();
     void releaseGate();
@@ -1587,6 +1588,7 @@ it("retains a successful collection mutation while its acquired forwarder has no
   signal.addEventListener("abort", onAbort, { once: true });
   onTestFinished(() => {
     signal.removeEventListener("abort", onAbort);
+
     if (task.result?.state === "fail") report();
   });
 
@@ -1624,6 +1626,7 @@ it("retains a successful collection mutation while its acquired forwarder has no
       Effect.scoped(
         Effect.gen(function* () {
           const stream = yield* f.sessions.changes;
+
           const pull = yield* Stream.toPull(
             Stream.filter(stream, (change) => change.kind === "collections"),
           );
