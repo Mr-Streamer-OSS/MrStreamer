@@ -16,6 +16,7 @@ import {
   rm,
   stat,
   symlink,
+  truncate,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -5705,4 +5706,166 @@ it("publishes recording progress invalidations for the original owner on immedia
   }
 
   expect(changes).toHaveLength(2);
+});
+
+describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
+  it("follows committed appends, pause and final settlement without another provider read", async () => {
+    const output = Promise.withResolvers<Writable>();
+    const bytes = fixture(TRACKS_FIXTURE);
+    const split = Math.floor(bytes.length / 188 / 2) * 188;
+
+    const { recordings, provider, channel, playback, dataDir } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes.subarray(0, split));
+        output.resolve(out);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    expect(started.kind).toBe("started");
+
+    if (started.kind !== "started") return;
+    const id = started.recording.id;
+    await expect(recordings.copy(id)).rejects.toBeTruthy();
+    const source = await recordings.file(id);
+    const first = await source.read();
+    expect(first).toMatchObject({
+      bytes: split,
+      final: false,
+      status: { kind: "recording" },
+      seekable: [],
+      gaps: [],
+    });
+    expect(first.layout?.layout.audio).toHaveLength(2);
+    expect(first.duration).toBeGreaterThan(0);
+    const file = await fileOf(dataDir, started.recording);
+
+    const activeSession = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    expect(activeSession.audio).toHaveLength(2);
+    const appended = source.wait(first.revision, AbortSignal.timeout(5000));
+    (await output.promise).write(bytes.subarray(split));
+    const next = await appended;
+    expect(next.bytes).toBe(bytes.length);
+    expect(next.duration).toBeGreaterThan(first.duration!);
+    expect((await playback.copyState(activeSession.sessionId))?.recording?.duration).toBe(
+      next.duration,
+    );
+    await playback.closeCopy(id, "recording");
+    expect((await source.read()).final).toBe(false);
+    expect(provider.streamRequests()).toBe(1);
+    const paused = source.wait(next.revision, AbortSignal.timeout(5000));
+    await recordings.suspend();
+    expect(await paused).toMatchObject({ final: false, status: { kind: "paused" } });
+    const atPause = await source.read();
+    const abort = new AbortController();
+    const cancelled = source.wait(atPause.revision, abort.signal);
+    abort.abort();
+    await expect(cancelled).rejects.toBeTruthy();
+    await recordings.stop(id);
+    const final = await source.read();
+    expect(final).toMatchObject({ final: true, status: { kind: "stopped" }, bytes: bytes.length });
+    expect(final.gaps).toEqual([]);
+
+    const session = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    const state = await playback.copyState(session.sessionId);
+    expect(state?.audio).toHaveLength(2);
+    expect(state?.recording).toMatchObject({ final: true, duration: final.duration, seekable: [] });
+    expect(state?.recording).not.toHaveProperty("layout");
+    await playback.closeCopy(id, "recording");
+    expect((await source.read()).final).toBe(true);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("keeps a broken capture nonfinal until its partial end and refuses discontinuous media duration", async () => {
+    const outputs: Writable[] = [];
+
+    const { recordings, channel, provider } = await connected({
+      streams: (_source, out) => {
+        outputs.push(out);
+        out.write(fixture(TRACKS_FIXTURE));
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const source = await recordings.file(started.recording.id);
+    let extent = await source.read();
+    expect(extent.duration).toBeGreaterThan(0);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const waiting = source.wait(extent.revision, AbortSignal.timeout(5000));
+      outputs[attempt]!.end();
+      extent = await waiting;
+
+      while (extent.status.kind === "recording")
+        extent = await source.wait(extent.revision, AbortSignal.timeout(5000));
+      expect(extent.status.kind).toBe(attempt === 2 ? "partial" : "paused");
+      expect(extent.final).toBe(attempt === 2);
+
+      if (attempt < 2) {
+        const resuming = source.wait(extent.revision, AbortSignal.timeout(5000));
+        await recordings.check();
+        extent = await resuming;
+
+        while (extent.status.kind === "paused")
+          extent = await source.wait(extent.revision, AbortSignal.timeout(5000));
+        expect(extent.status.kind).toBe("recording");
+        expect(extent.duration).toBeNull();
+        expect(extent.seekable).toEqual([]);
+      }
+    }
+
+    expect(extent.status).toEqual({ kind: "partial", cut: "stream" });
+    expect(extent.gaps).toEqual([]);
+    expect(provider.streamRequests()).toBe(3);
+  });
+
+  it.each(["missing", "replaced", "truncated"] as const)(
+    "refuses a %s recorder-owned file incarnation",
+    async (damage) => {
+      const { recordings, channel, dataDir } = await connected();
+      const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+      if (started.kind !== "started") throw new Error("Recording did not start");
+      await recordings.stop(started.recording.id);
+      const source = await recordings.file(started.recording.id);
+      const before = await source.read();
+      const file = await fileOf(dataDir, started.recording);
+
+      if (damage === "missing") await rm(file.path);
+
+      if (damage === "replaced") {
+        await rename(file.path, file.path + ".old");
+        await writeFile(file.path, fixture(TRACKS_FIXTURE));
+      }
+
+      if (damage === "truncated") await truncate(file.path, before.bytes - 1);
+      await expect(source.read()).rejects.toBeTruthy();
+    },
+  );
 });

@@ -74,7 +74,7 @@ import {
 import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
-import { Failed } from "@mrstreamer/core/failure";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { t, type PlainKey } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
@@ -84,6 +84,11 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import {
+  recordingFile,
+  type RecordingFile,
+  type RecordingExtent,
+} from "../playback/file-source.ts";
 import { SavedSubtitles, subtitlesOfCopy } from "../platform/saved-subtitles.ts";
 import { CaptureFailure, startCapture, type CaptureEnd } from "../recordings/capture.ts";
 import {
@@ -237,6 +242,8 @@ export class Recordings extends Context.Service<
      * has that id. Fails, listing it as missing, when its file went.
      */
     copy(id: string, owner?: ActiveProfile): Effect.Effect<LocalCopy | null, Failed>;
+    /** Main-only local reader; closing it never detaches the recorder. */
+    file(id: string): Effect.Effect<RecordingFile, Failed>;
     /** Main-only owner-bound projection; callers must authorize every exact recording row. */
     resume(owner?: ActiveProfile): Effect.Effect<RecordingResumeList, Failed>;
     /** Keeps how far a retained recording played, including one still capturing. */
@@ -787,7 +794,24 @@ function make(deps: RecordingsDeps) {
         .toSorted((a, b) => b.start - a.start),
     );
 
-    const publish = Effect.flatMap(shown, (list) => PubSub.publish(changes, list));
+    const fileListeners = new Set<() => void>();
+    let filesClosed = false;
+
+    const notifyFiles = () => {
+      for (const listener of fileListeners) listener();
+    };
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        filesClosed = true;
+        notifyFiles();
+      }),
+    );
+
+    const publish = Effect.andThen(
+      Effect.sync(notifyFiles),
+      Effect.flatMap(shown, (list) => PubSub.publish(changes, list)),
+    );
 
     /** Looks for gone files again, telling the window when that changed what it lists. */
     const lookAgain = Effect.gen(function* () {
@@ -801,6 +825,7 @@ function make(deps: RecordingsDeps) {
     let pending: NodeJS.Timeout | null = null;
 
     const grew = () => {
+      notifyFiles();
       pending ??= setTimeout(() => {
         pending = null;
         Effect.runFork(publish);
@@ -3033,6 +3058,97 @@ function make(deps: RecordingsDeps) {
           yield* Effect.ignore(savedSubtitles.forget(subtitlesOfCopy(id, { kind: "movie", id })));
           // Room it took may let a paused one go on.
           yield* retryPaused;
+        }),
+      file: (id: string) =>
+        Effect.gen(function* () {
+          yield* usable;
+          const record = records.get(id);
+
+          if (!record || record.status.kind === "missed")
+            return yield* new Failed({
+              error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
+            });
+          const path = fileOf(record);
+          let previous: RecordingExtent | undefined;
+
+          const read = async (signal?: AbortSignal): Promise<RecordingExtent> => {
+            signal?.throwIfAborted();
+
+            if (filesClosed) throw new Error("Recording owner closed.");
+            const beforeRecord = records.get(id);
+            const beforeCapture = active.get(id);
+            const committed = beforeCapture?.bytes() ?? beforeRecord?.bytes;
+            const found = await stat(path);
+            signal?.throwIfAborted();
+            const current = records.get(id);
+
+            // A settled writer must not publish its final status with an earlier byte snapshot.
+            if (current !== beforeRecord || active.get(id) !== beforeCapture) return read(signal);
+
+            if (!current || current.status.kind === "missed" || missing.has(id))
+              throw new Error("Recording is unavailable.");
+            const capture = active.get(id);
+            const bytes = committed ?? current.bytes;
+
+            if (!found.isFile() || found.size < bytes)
+              throw new Error("Recording file is missing, replaced or truncated.");
+
+            const status =
+              isLive(current) && !capture
+                ? { kind: "paused" as const, why: openGap(current)?.why ?? ("away" as const) }
+                : current.status;
+
+            const facts = {
+              bytes,
+              mediaRevision: current.gaps?.length ?? 0,
+              device: found.dev,
+              inode: found.ino,
+              status,
+              final: !isLive(current) && !capture,
+              duration: null,
+              seekable: [],
+              gaps: [],
+            };
+
+            const revision =
+              previous && isDeepStrictEqual({ ...previous, revision: 0 }, { ...facts, revision: 0 })
+                ? previous.revision
+                : (previous?.revision ?? -1) + 1;
+
+            previous = { ...facts, revision };
+
+            return previous;
+          };
+
+          const source: RecordingFile = {
+            read,
+            wait: async (revision, signal) => {
+              for (;;) {
+                signal.throwIfAborted();
+                // Subscribe before reading: an append during stat cannot fall between check and wait.
+                const change = Promise.withResolvers<void>();
+                const wake = () => change.resolve();
+                const abort = () => change.resolve();
+                fileListeners.add(wake);
+                signal.addEventListener("abort", abort, { once: true });
+
+                try {
+                  const next = await read(signal);
+
+                  if (next.revision > revision) return next;
+                  await change.promise;
+                } finally {
+                  fileListeners.delete(wake);
+                  signal.removeEventListener("abort", abort);
+                }
+              }
+            },
+          };
+
+          const file = recordingFile(path, source, true);
+          yield* Effect.tryPromise({ try: (signal) => file.read(signal), catch: failedWith });
+
+          return file;
         }),
       copy: (id: string, captured?: ActiveProfile) =>
         Effect.gen(function* () {

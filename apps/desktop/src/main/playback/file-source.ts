@@ -9,6 +9,8 @@ import { Readable } from "node:stream";
 
 import type { RecordingCopyState } from "@mrstreamer/contracts/downloads";
 
+import { createInspector, type Inspection } from "./inspect.ts";
+
 const TYPES: Readonly<Record<string, string>> = {
   mkv: "video/x-matroska",
   mp4: "video/mp4",
@@ -70,6 +72,10 @@ export interface RecordingExtent extends RecordingCopyState {
   readonly bytes: number;
   readonly device: number;
   readonly inode: number;
+  /** Local program/track facts, never copied into public recording state. */
+  readonly layout?: Inspection;
+  /** Recorder interruption history; wall-clock gaps do not describe media intervals. */
+  readonly mediaRevision?: number;
 }
 
 /** wait atomically observes a newer revision or subscribes, and must honor cancellation. */
@@ -79,7 +85,8 @@ export interface RecordingFile {
 }
 
 /** Pins incarnation and rejects regressing extent/revision or disappearance for every consumer. */
-export function recordingFile(path: string, source: RecordingFile): RecordingFile {
+export function recordingFile(path: string, source: RecordingFile, index = false): RecordingFile {
+  if (index) return indexRecording(path, recordingFile(path, source));
   let previous: RecordingExtent | undefined;
 
   const verify = async (extent: RecordingExtent) => {
@@ -247,5 +254,159 @@ function recordingRequest(
     });
 
     return new Response(body, { status: range && Number.isFinite(end) ? 206 : 200, headers });
+  };
+}
+
+/** One bounded scan of existing bytes, then only appended bytes. No provider or ffprobe reads. */
+function indexRecording(path: string, source: RecordingFile): RecordingFile {
+  let position = 0;
+  let carry = Buffer.alloc(0);
+  let inspector = createInspector();
+  let layout: Inspection | undefined;
+  let first: number | undefined;
+  let last: number | undefined;
+  let maximum = 0;
+  let uncertain = false;
+  let continuity: number | undefined;
+  let tail = Promise.resolve();
+
+  const scan = async (extent: RecordingExtent, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+
+    if ((extent.mediaRevision ?? 0) > 0) uncertain = true;
+    const file = await open(path, "r");
+
+    try {
+      const found = await file.stat();
+
+      if (found.dev !== extent.device || found.ino !== extent.inode || found.size < extent.bytes)
+        throw new Error("Recording file is missing, replaced or truncated.");
+
+      while (position < extent.bytes) {
+        signal?.throwIfAborted();
+        const chunk = Buffer.alloc(Math.min(64 * 1024, extent.bytes - position));
+        const { bytesRead } = await file.read(chunk, 0, chunk.length, position);
+        signal?.throwIfAborted();
+
+        if (!bytesRead) throw new Error("Recording file was truncated.");
+        const data = Buffer.concat([carry, chunk.subarray(0, bytesRead)]);
+        let offset = 0;
+
+        while (offset + 188 <= data.length) {
+          if (data[offset] !== 0x47) {
+            uncertain = true;
+            offset++;
+            continue;
+          }
+
+          const packet = data.subarray(offset, offset + 188);
+          offset += 188;
+          const pid = ((packet[1]! & 31) << 8) | packet[2]!;
+          const start = (packet[1]! & 64) !== 0;
+
+          // A fresh table can change tracks after capture resumes. Reuse the existing parser.
+          if (pid === 0 && start) inspector = createInspector();
+          const inspected = inspector.push(packet);
+
+          if (inspected) {
+            if (layout && layout.signature !== inspected.signature) uncertain = true;
+            layout = inspected;
+          }
+
+          const selected = layout?.layout.video?.pid ?? layout?.layout.audio[0]?.pid;
+
+          if (pid !== selected) continue;
+          const adaptation = (packet[3]! >> 4) & 3;
+
+          if (packet[1]! & 0x80 || adaptation === 0) uncertain = true;
+
+          if (adaptation >= 2 && packet[4]! > 0 && packet[5]! & 0x80) uncertain = true;
+
+          if (adaptation === 2 || adaptation === 0) continue;
+          const counter = packet[3]! & 15;
+
+          if (continuity !== undefined && counter !== ((continuity + 1) & 15)) uncertain = true;
+          continuity = counter;
+          const payload = adaptation === 3 ? 5 + packet[4]! : 4;
+
+          if (!start || payload + 14 > 188) continue;
+          const pes = packet.subarray(payload);
+
+          if (pes[0] !== 0 || pes[1] !== 0 || pes[2] !== 1 || !(pes[7]! & 0x80) || pes[8]! < 5)
+            continue;
+
+          if (!(pes[9]! & 1) || !(pes[11]! & 1) || !(pes[13]! & 1)) {
+            uncertain = true;
+            continue;
+          }
+
+          const pts =
+            (pes[9]! & 14) * 2 ** 29 +
+            pes[10]! * 2 ** 22 +
+            (pes[11]! & 254) * 2 ** 14 +
+            pes[12]! * 128 +
+            (pes[13]! >> 1);
+
+          if (first === undefined) first = pts;
+
+          // Unwrap the 33-bit clock; small backwards steps are normal video reordering.
+          const delta =
+            last === undefined
+              ? 0
+              : ((((pts - last + 2 ** 32) % 2 ** 33) + 2 ** 33) % 2 ** 33) - 2 ** 32;
+
+          if (delta < -180_000 || delta > 900_000) uncertain = true;
+          const unwrapped: number = last === undefined ? pts : last + delta;
+          last = unwrapped;
+          maximum = Math.max(maximum, unwrapped - first);
+        }
+
+        carry = Buffer.from(data.subarray(offset));
+        position += bytesRead;
+      }
+
+      signal?.throwIfAborted();
+
+      return {
+        ...extent,
+        // Only the observed presentation span is known, not the final frame's end or a seek map.
+        duration: !uncertain && maximum > 0 ? maximum / 90_000 : null,
+        ...(layout && { layout }),
+      };
+    } finally {
+      await file.close();
+    }
+  };
+
+  const indexed = (read: () => Promise<RecordingExtent>, signal?: AbortSignal) => {
+    const next = tail.then(async () => {
+      signal?.throwIfAborted();
+
+      return scan(await read(), signal);
+    });
+
+    tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    if (!signal) return next;
+
+    return new Promise<RecordingExtent>((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+
+      if (signal.aborted) abort();
+      void next.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+  };
+
+  return {
+    read: (signal) => indexed(() => source.read(signal), signal),
+    wait: async (revision, signal) => {
+      await source.wait(revision, signal);
+
+      return indexed(() => source.read(signal), signal);
+    },
   };
 }
