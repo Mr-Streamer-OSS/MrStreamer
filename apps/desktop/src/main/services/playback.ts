@@ -679,7 +679,11 @@ export class Playback extends Context.Service<
     ): Effect.Effect<CopySession, Failed>;
     /** Closes what plays a copy, as before it is deleted. */
     closeCopy(copyId: string, kind?: "download" | "recording"): Effect.Effect<void>;
-    copyState(sessionId: string): Effect.Effect<CopyState | null, Failed>;
+    /** Read stored copy facts, checking admission after the read and liveness before returning. */
+    copyState(
+      sessionId: string,
+      current?: Effect.Effect<void, Failed>,
+    ): Effect.Effect<CopyState | null, Failed>;
     readonly copyChanged: Stream.Stream<string>;
     /** The current local title only, with no provider address or request headers. */
     subtitleContext(sessionId: string): Effect.Effect<SubtitlePlayback | null, Failed>;
@@ -4400,7 +4404,7 @@ function make(deps: PlaybackDeps) {
           }),
         ),
 
-      copyState: (sessionId: string) =>
+      copyState: (sessionId: string, current: Effect.Effect<void, Failed> = Effect.void) =>
         Effect.suspend(() => {
           const session = sessions.get(sessionId);
 
@@ -4408,6 +4412,7 @@ function make(deps: PlaybackDeps) {
             session.origin.kind === "copy" &&
             !session.closed.signal.aborted
             ? stateOfCopy(session).pipe(
+                Effect.tap(() => current),
                 Effect.map((state) =>
                   sessions.get(sessionId) === session && !session.closed.signal.aborted
                     ? state

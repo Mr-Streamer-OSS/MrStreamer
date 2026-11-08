@@ -1,6 +1,6 @@
 import { collectionsHandlers } from "../src/main/handlers/collections.ts";
 import { type } from "arktype";
-import { playbackHandlers } from "../src/main/handlers/playback.ts";
+import { playbackHandlers, publishCopyChange } from "../src/main/handlers/playback.ts";
 import { outputHandlers } from "../src/main/handlers/output.ts";
 import { Updates } from "../src/main/services/updates.ts";
 import { updateHandlers } from "../src/main/handlers/updates.ts";
@@ -22,7 +22,11 @@ import { titleHandlers } from "../src/main/handlers/titles.ts";
 import { viewingHandlers } from "../src/main/handlers/viewing.ts";
 import { guideHandlers } from "../src/main/handlers/guide.ts";
 import { downloadHandlers } from "../src/main/handlers/downloads.ts";
-import { recordingHandlers } from "../src/main/handlers/recordings.ts";
+import {
+  recordingHandlers,
+  recordingResume,
+  publishRecordingProgress,
+} from "../src/main/handlers/recordings.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Roster } from "../src/main/services/roster.ts";
@@ -148,6 +152,7 @@ const { start: startAnalytics } = analyticsFixture({
 async function fixture(
   options: {
     live?: boolean;
+    copyPlayback?: boolean;
     notifier?: Notifier;
     now?: number;
     guideXml?: (provider: FakeProvider) => string;
@@ -161,6 +166,7 @@ async function fixture(
 
   const config = {
     ...testConfig(dataDir),
+    ...defined({ ffprobe: options.copyPlayback ? "ffprobe" : undefined }),
     ...defined({
       notifier: options.notifier,
       tmdbKey: options.tmdb?.key,
@@ -277,6 +283,7 @@ async function fixture(
         collections: admitted.services.collections,
         current: admitted.current,
       }),
+      "recordings.resume": () => recordingResume(recordings, admitted.owner),
       ...playbackHandlers({
         playback,
         coordination,
@@ -288,6 +295,7 @@ async function fixture(
         settings: admitted.services.settings,
         analytics,
         profiles: { active: Effect.succeed(admitted.owner) },
+        current: admitted.current,
       }),
       ...outputHandlers({
         output,
@@ -2300,4 +2308,294 @@ it("keeps metadata absent without a key for both adult and kids viewers", async 
     ok: true,
     value: { metadata: null },
   });
+});
+
+async function namespaceRecording() {
+  const f = await fixture({ live: true, copyPlayback: true });
+
+  const channel = f.provider.catalogue.channels.find(
+    (item) => item.fixture === "h264-subtitles.mpegts",
+  )!;
+
+  const started = await f.call(f.adult, "recordings.start", {
+    channel: { subscriptionId: f.source.id, id: String(channel.streamId) },
+    stop: Date.now() + 60_000,
+  });
+
+  expect(started).toMatchObject({ ok: true, value: { kind: "started" } });
+  let id = "";
+  await vi.waitFor(async () => {
+    const [recording] = await f.app.runPromise(f.recordings.list);
+    expect(recording?.bytes).toBeGreaterThan(0);
+    id = recording!.id;
+  });
+  expect(await f.call(f.adult, "recordings.stop", { id })).toMatchObject({ ok: true });
+
+  return { ...f, id };
+}
+
+it("namespace resume binds the admitted owner and filters exact local recording approval after provider removal", async () => {
+  const f = await namespaceRecording();
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [{ id: f.kid.id, approved: [{ kind: "download", id: f.id }] }],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  await f.app.runPromise(f.recordings.recordProgress(f.id, 12, 100, kid));
+  await f.app.runPromise(f.recordings.recordProgress(f.id, 33, 100, f.adult));
+  expect(await f.call(kid, "recordings.resume", undefined)).toEqual({
+    ok: true,
+    value: { owner: kid, items: [] },
+  });
+  const adult = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: adult,
+      pin: "1234",
+      profiles: [{ id: kid.id, approved: [{ kind: "recording", id: f.id }] }],
+    }),
+  );
+  await f.app.runPromise((await f.app.runPromise(Roster)).remove(f.source.id, false));
+  const again = await f.app.runPromise(f.sessions.switch(kid.id, adult));
+  expect(await f.call(again, "recordings.resume", undefined)).toMatchObject({
+    ok: true,
+    value: {
+      owner: again,
+      items: [{ recording: { id: f.id }, progress: { position: 12 } }],
+    },
+  });
+
+  const resume = vi
+    .spyOn(f.recordings, "resume")
+    .mockImplementation(() => Effect.succeed({ owner: adult, items: [] }));
+
+  expect(await f.call(again, "recordings.resume", undefined)).toMatchObject({ ok: false });
+  resume.mockRestore();
+  const db = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+
+  try {
+    db.exec("alter table profile_copy_progress rename to unavailable_progress");
+    expect(await f.call(again, "recordings.resume", undefined)).toMatchObject({ ok: false });
+  } finally {
+    db.exec("alter table unavailable_progress rename to profile_copy_progress");
+    db.close();
+  }
+
+  expect(await f.call(again, "recordings.resume", undefined)).toMatchObject({
+    ok: true,
+    value: {
+      items: [{ progress: { position: 12 } }],
+    },
+  });
+});
+
+it("namespace copy state and events require successful owner registration and live exact copy kind", async () => {
+  const f = await namespaceRecording();
+  const playback = await f.app.runPromise(Playback);
+  const copy = await f.app.runPromise(f.recordings.copy(f.id, f.adult));
+
+  if (!copy) throw new Error("Missing copy");
+  const household = await f.app.runPromise(playback.openCopy(copy, ["h264", "aac"]));
+  expect(await f.call(f.adult, "playback.copyState", { sessionId: household.sessionId })).toEqual({
+    ok: true,
+    value: null,
+  });
+  const sent: string[] = [];
+  await f.app.runPromise(
+    publishCopyChange(
+      playback,
+      await f.app.runPromise(f.sessions.admit),
+      household.sessionId,
+      (id) => sent.push(id),
+    ),
+  );
+  expect(sent).toEqual([]);
+
+  const opened = await f.call(f.adult, "playback.openCopy", {
+    copy: f.id,
+    decoders: ["h264", "aac"],
+  });
+
+  const { sessionId } = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+  expect(await f.call(f.adult, "playback.copyState", { sessionId })).toMatchObject({
+    ok: true,
+    value: { sessionId, kind: "recording", copy: f.id, owner: f.adult },
+  });
+  await f.app.runPromise(
+    publishCopyChange(playback, await f.app.runPromise(f.sessions.admit), sessionId, (id) =>
+      sent.push(id),
+    ),
+  );
+  expect(sent).toEqual([sessionId]);
+  const other = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(await f.call(other, "playback.copyState", { sessionId })).toEqual({
+    ok: true,
+    value: null,
+  });
+  await f.app.runPromise(
+    publishCopyChange(playback, await f.app.runPromise(f.sessions.admit), sessionId, (id) =>
+      sent.push(id),
+    ),
+  );
+  expect(sent).toEqual([sessionId]);
+  const adult = await f.app.runPromise(f.sessions.switch(f.adult.id, other));
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: adult,
+      newPin: "1234",
+      profiles: [{ id: other.id, approved: [{ kind: "recording", id: f.id }] }],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(other.id, adult));
+  const allowed = await f.call(kid, "playback.openCopy", { copy: f.id, decoders: ["h264", "aac"] });
+  const next = type({ sessionId: "string" }).assert(allowed.ok ? allowed.value : null).sessionId;
+  expect(await f.call(kid, "playback.copyState", { sessionId: next })).toMatchObject({
+    ok: true,
+    value: { kind: "recording", copy: f.id },
+  });
+  // A colliding download id is not the approved recording, even with the same public registration.
+  const read = playback.copyState;
+
+  const changed = vi
+    .spyOn(playback, "copyState")
+    .mockImplementation((id, current) =>
+      Effect.map(read(id, current), (state) =>
+        state ? { ...state, kind: "download" as const } : state,
+      ),
+    );
+
+  expect(await f.call(kid, "playback.copyState", { sessionId: next })).toEqual({
+    ok: true,
+    value: null,
+  });
+  await f.app.runPromise(
+    publishCopyChange(playback, await f.app.runPromise(f.sessions.admit), next, (id) =>
+      sent.push(id),
+    ),
+  );
+  expect(sent).toEqual([sessionId]);
+  changed.mockRestore();
+  await f.app.runPromise(playback.close(next));
+  expect(await f.call(kid, "playback.copyState", { sessionId: next })).toEqual({
+    ok: true,
+    value: null,
+  });
+  await f.app.runPromise(
+    publishCopyChange(playback, await f.app.runPromise(f.sessions.admit), next, (id) =>
+      sent.push(id),
+    ),
+  );
+  expect(sent).toEqual([sessionId]);
+});
+
+it("namespace progress invalidations retain saved owner and exact recording approval and reject stale admission", async () => {
+  const f = await fixture();
+  await f.app.runPromise(
+    f.sessions.setPolicy({
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: [
+            { kind: "recording", id: "approved" },
+            { kind: "download", id: "wrong-kind" },
+          ],
+        },
+      ],
+    }),
+  );
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  const admission = await f.app.runPromise(f.sessions.admit);
+  const sent: null[] = [];
+
+  const send = (owner: ActiveProfile, id: string) =>
+    f.app.runPromise(publishRecordingProgress(admission, { owner, id }, () => sent.push(null)));
+
+  await send(kid, "approved");
+  await send(kid, "wrong-kind");
+  await send(kid, "unapproved");
+  await send(f.adult, "approved");
+  expect(sent).toEqual([null]);
+  await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  await expect(send(kid, "approved")).rejects.toBeDefined();
+  expect(sent).toEqual([null]);
+});
+
+it("namespace copy state drops sessions closed while the final policy check is pending", async () => {
+  const f = await namespaceRecording();
+  const playback = await f.app.runPromise(Playback);
+
+  const opened = await f.call(f.adult, "playback.openCopy", {
+    copy: f.id,
+    decoders: ["h264", "aac"],
+  });
+
+  const { sessionId } = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+  const admission = await f.app.runPromise(f.sessions.admit);
+  let checks = 0;
+
+  const current = Effect.gen(function* () {
+    checks++;
+
+    if (checks === 2) yield* playback.close(sessionId);
+    yield* admission.current;
+  });
+
+  const sent: string[] = [];
+  await f.app.runPromise(
+    publishCopyChange(playback, { ...admission, current }, sessionId, (id) => sent.push(id)),
+  );
+  expect(checks).toBe(2);
+  expect(sent).toEqual([]);
+});
+
+it("namespace copy read drops a replaced successful registration after an awaited read", async () => {
+  const f = await namespaceRecording();
+  const playback = await f.app.runPromise(Playback);
+
+  const opened = await f.call(f.adult, "playback.openCopy", {
+    copy: f.id,
+    decoders: ["h264", "aac"],
+  });
+
+  const { sessionId } = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+  const read = playback.copyState;
+  let release = () => {};
+  let arrived = () => {};
+
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const started = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+
+  const pending = vi.spyOn(playback, "copyState").mockImplementation((id, current) =>
+    read(id, current).pipe(
+      Effect.tap(() =>
+        Effect.promise(async () => {
+          arrived();
+          await held;
+        }),
+      ),
+    ),
+  );
+
+  onTestFinished(() => {
+    release();
+    pending.mockRestore();
+  });
+  const reading = f.call(f.adult, "playback.copyState", { sessionId });
+  await started;
+  expect(
+    await f.call(f.adult, "playback.openCopy", { copy: f.id, decoders: ["h264", "aac"] }),
+  ).toMatchObject({ ok: true });
+  release();
+  expect(await reading).toEqual({ ok: true, value: null });
+  pending.mockRestore();
 });

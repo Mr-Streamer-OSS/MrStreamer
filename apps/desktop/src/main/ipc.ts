@@ -430,6 +430,10 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
     "updates.status": handlers["updates.status"],
     "guide.savedQueries": () => Effect.succeed([]),
     "playback.failure": handlers["playback.failure"],
+    "playback.copyState": (input, frame) =>
+      Effect.map(handlers["playback.copyState"](input, frame), (state) =>
+        state && copy(state.kind, state.copy) ? state : null,
+      ),
     "playback.diagnostic": handlers["playback.diagnostic"],
     "library.status": handlers["library.status"],
     "library.categories": handlers["library.categories"],
@@ -589,6 +593,11 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
       ),
     "recordings.rules": () => Effect.succeed([]),
     "recordings.schedules": () => Effect.succeed([]),
+    "recordings.resume": (input, frame) =>
+      Effect.map(handlers["recordings.resume"](input, frame), (result) => ({
+        ...result,
+        items: result.items.filter((item) => copy("recording", item.recording.id)),
+      })),
     "recordings.list": (input, frame) =>
       Effect.map(handlers["recordings.list"](input, frame), (rows) =>
         rows.filter((row) => copy("recording", row.id)),

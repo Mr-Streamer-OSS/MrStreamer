@@ -5617,3 +5617,92 @@ describe("recording slot times", () => {
     });
   });
 });
+
+it("publishes recording progress invalidations for the original owner on immediate and retry success only", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  onTestFinished(() => runtime.dispose());
+  const provider = await fakeProvider({ live: true });
+  const subscriptions = await promised(runtime, Subscriptions);
+  const library = await promised(runtime, Library);
+  const recordings = await promised(runtime, Recordings);
+  const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+  await library.refresh(subscriptionId);
+  const source = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+
+  const answer = await recordings.start(
+    { subscriptionId, id: String(source.streamId) },
+    Date.now() + 60_000,
+    {},
+  );
+
+  if (answer.kind !== "started") throw new Error("Not started");
+  const { id } = answer.recording;
+  const profiles = await promised(runtime, ProfileSessions);
+  const original = await profiles.active();
+  const other = await profiles.create("Other", original);
+  const captured = await profiles.switch(other.id, original);
+  const service = await runtime.runPromise(Recordings);
+  const changes = await collect(runtime, service.progressChanges);
+  await recordings.recordProgress(id, 11, 90, captured);
+  await vi.waitFor(() => expect(changes).toEqual([{ owner: captured, id }]));
+  const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+  onTestFinished(() => db.close());
+  db.exec("begin immediate");
+
+  try {
+    await expect(recordings.recordProgress(id, 42, 90, captured)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    expect(changes).toHaveLength(1);
+  } finally {
+    db.exec("rollback");
+  }
+
+  await profiles.switch(original.id, captured);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_001);
+
+  try {
+    await recordings.check();
+  } finally {
+    clock.mockRestore();
+  }
+
+  await vi.waitFor(() =>
+    expect(changes).toEqual([
+      { owner: captured, id },
+      { owner: captured, id },
+    ]),
+  );
+  db.exec("begin immediate");
+
+  try {
+    await expect(recordings.recordProgress(id, 55, 90, captured)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+  } finally {
+    db.exec("rollback");
+  }
+
+  const current = await profiles.active();
+  await profiles.remove(captured.id, current);
+  const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20_002);
+
+  try {
+    await recordings.check();
+  } finally {
+    later.mockRestore();
+  }
+
+  expect(changes).toHaveLength(2);
+});

@@ -278,6 +278,8 @@ export class Recordings extends Context.Service<
       readonly scheduled: boolean;
       readonly unsaved: boolean;
     }>;
+    /** Main-only invalidation after a personal save, retaining its original owner and recording. */
+    readonly progressChanges: Stream.Stream<{ readonly owner: ActiveProfile; readonly id: string }>;
     /** Inventory after each change and as recordings grow, about once a second; no personal progress. */
     readonly changes: Stream.Stream<readonly Recording[]>;
     /** Lists saved rules; a refused startup inventory stays refused until the next start. */
@@ -402,6 +404,12 @@ function make(deps: RecordingsDeps) {
     const root = join(deps.dataDir, "recordings");
     const path = join(root, "recordings.json");
     const storagePath = join(root, "storage.json");
+
+    const progressChanges = yield* PubSub.unbounded<{
+      readonly owner: ActiveProfile;
+      readonly id: string;
+    }>();
+
     const changes = yield* PubSub.sliding<readonly Recording[]>(4);
     /** Asks the schedules to be checked: a recording started or ended, or the lists changed. */
     const wakes = yield* Queue.sliding<void>(1);
@@ -2425,8 +2433,10 @@ function make(deps: RecordingsDeps) {
           ),
         );
 
-        if (saved._tag === "Success" && pendingProgress.get(id) === progress)
+        if (saved._tag === "Success" && pendingProgress.get(id) === progress) {
           pendingProgress.delete(id);
+          yield* PubSub.publish(progressChanges, { owner: progress.owner.owner, id: progress.id });
+        }
       }
 
       const paused = yield* resumeDue(Date.now());
@@ -3134,6 +3144,7 @@ function make(deps: RecordingsDeps) {
                 if (pendingProgress.get(key) === progress) pendingProgress.delete(key);
               }),
             ),
+            Effect.tap(() => PubSub.publish(progressChanges, { owner: owner.owner, id })),
             Effect.onError(() => wake),
           );
         }),
@@ -3231,6 +3242,7 @@ function make(deps: RecordingsDeps) {
 
         return (yield* unkept).length === 0;
       }),
+      progressChanges: Stream.fromPubSub(progressChanges),
       changes: Stream.fromPubSub(changes),
       rules: scheduling(
         Effect.andThen(

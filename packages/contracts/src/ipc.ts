@@ -30,6 +30,7 @@ import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
 import type {
   CopySession,
+  CopyState,
   Download,
   DownloadList,
   DownloadFolder,
@@ -99,6 +100,7 @@ import {
   type RecordingRule,
   type RecordingRulePreview,
   type Recording,
+  type RecordingResumeList,
   type RecordingConnections,
   type RecordingStart,
   type RecordingStorage,
@@ -332,6 +334,7 @@ export const ipcInputs = {
       "newPin?": "string",
       profiles: KidsProfilePolicySchema().array(),
     }),
+  "recordings.resume": none,
   "recordings.list": none,
   /**
    * What holds a subscription's connections now, as Record shows before it starts, and with
@@ -467,6 +470,7 @@ export const ipcInputs = {
       sessionId: "string",
       "selector?": { kind: "'hls'", requestId: "string <= 256 | null" },
     }),
+  "playback.copyState": () => type({ sessionId: "string" }),
   "playback.diagnostic": () => type({ sessionId: "string" }),
   "playback.timeline": () => type({ sessionId: "string" }),
   "playback.seekLive": () =>
@@ -832,6 +836,8 @@ export interface IpcOutputs {
   "profiles.remove": null;
   "profiles.policy": KidsPolicy;
   "profiles.setPolicy": KidsPolicy;
+  /** Personal local recording positions for the admitted owner; storage failures remain failures. */
+  "recordings.resume": RecordingResumeList;
   /** Every recording, newest first. Fails while they can't be read. */
   "recordings.list": readonly Recording[];
   "recordings.connections": RecordingConnections;
@@ -930,6 +936,7 @@ export interface IpcOutputs {
   "playback.closeAll": null;
   /** Why a session's upstream request failed, or null if it has not failed. */
   "playback.failure": StreamFailure | null;
+  "playback.copyState": CopyState | null;
   "playback.diagnostic": PlaybackDiagnostic | null;
   "playback.timeline": LiveTimeline | null;
   "playback.seekLive": LiveTimeline | null;
@@ -1145,6 +1152,8 @@ export type IpcArgs<M extends IpcMethod> = IpcCallArgs<M> | [request: ProfileReq
 
 /** Events the main process pushes to the UI. */
 export interface IpcEvents {
+  "recordings.resumeChanged": null;
+  "playback.copyChanged": { readonly sessionId: string };
   "profiles.activeChanged": ActiveProfile;
   "profiles.viewingChanged": { readonly owner: ActiveProfile; readonly sequence: number };
   "profiles.watchlistChanged": { readonly owner: ActiveProfile };
