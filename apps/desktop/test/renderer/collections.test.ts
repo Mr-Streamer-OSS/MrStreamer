@@ -429,7 +429,7 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 async function mountTab() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = queryView(client);
-  await view.render(createElement(CollectionsPage, { active: true }));
+  await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
   const stop = syncOnDemand(client);
   unmount = () => {
     stop();
@@ -976,7 +976,7 @@ it("discards cached adult collection content before a delayed preference reread"
   });
   const view = queryView(client);
   unmount = view.unmount;
-  await view.render(createElement(CollectionsPage, { active: true }));
+  await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
   await poster("Kite Season, Movie, 2022");
   const reread = ipc.hold("collections.page");
   await act(async () => {
@@ -1010,7 +1010,7 @@ it.each([false, true])(
       view.unmount();
     };
 
-    await view.render(createElement(CollectionsPage, { active: true }));
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
     await poster("Kite Season, Movie, 2022");
     expect(document.body.innerHTML).toContain("private.jpg");
     const old = inFlight ? ipc.hold("collections.page") : null;
@@ -1027,7 +1027,7 @@ it.each([false, true])(
       ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
     );
     const reread = ipc.hold("collections.page");
-    await view.render(createElement(CollectionsPage, { active: true }));
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
 
     try {
       await act(async () => old?.resolve({ total: 1, members: [member(privateTitle)] }));
@@ -1300,7 +1300,7 @@ it("discards old collection responses and failures when the full owner changes",
     view.unmount();
   };
 
-  await view.render(createElement(CollectionsPage, { active: true }));
+  await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
   await poster("Kite Season, Movie, 2022");
   await pick("Kite Season");
   const held = ipc.hold("collections.change");
@@ -1315,7 +1315,7 @@ it("discards old collection responses and failures when the full owner changes",
   });
   mainCollections([{ name: "New films", members: [member(kite)] }]);
   const page = ipc.hold("collections.page");
-  await view.render(createElement(CollectionsPage, { active: true }));
+  await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
   await act(async () =>
     oldPage.resolve({
       total: 1,
@@ -1548,3 +1548,284 @@ it.each([
     );
   },
 );
+
+// Smart collections: rules instead of members, edited inline and stored only by Save rules.
+describe("a smart collection in the Collections tab", () => {
+  const dune = listedTitle("movie", "52", "Dune Road", 2021);
+  const options = { qualities: [], languages: [], verified: [], files: 0, genres: [] };
+
+  beforeEach(() => {
+    ipc.reset();
+    ipc.always("subscription.list", [SAVED]);
+    ipc.always("ondemand.filterOptions", options);
+    // What the edited rules would match now: one of the two saved matches.
+    ipc.answer("ondemand.collection", () => ({ name: "All", titles: [kite], total: 1 }));
+    useUi.setState({ details: null });
+  });
+
+  /** One smart collection of short films, stored as the main process stores rule changes. */
+  function smartMain() {
+    let kept: CollectionSummary[] = [
+      {
+        id: "s0",
+        name: "Short films",
+        total: 2,
+        rules: { kind: "movie", filters: { runtime: { max: 5399 } } },
+      },
+    ];
+
+    ipc.answer("collections.list", () => kept);
+    ipc.answer("collections.page", ({ id }) =>
+      id === "s0" ? { total: 2, members: [member(kite), member(dune)] } : { total: 0, members: [] },
+    );
+    ipc.answer("collections.change", (change) => {
+      if (change.kind === "rules")
+        kept = kept.map((each) =>
+          each.id === change.id ? { ...each, rules: change.rules } : each,
+        );
+      else if (change.kind === "create")
+        kept = [
+          ...kept,
+          {
+            id: change.id,
+            name: change.name,
+            total: 1,
+            ...(change.rules && { rules: change.rules }),
+          },
+        ];
+
+      return null;
+    });
+  }
+
+  /** Opens the rule menu named `rule`, or adds it with + Rule, then picks `choice` in it. */
+  async function setRule(rule: string, choice: string) {
+    const trigger = document.querySelector<HTMLElement>(
+      `[role=group][aria-label='${rule}'] button`,
+    );
+
+    if (trigger) await act(async () => trigger.click());
+    else {
+      await act(async () =>
+        document.querySelector<HTMLElement>("[role=group][aria-label='Add rule'] button")!.click(),
+      );
+      const add = await vi.waitFor(() => button(rule));
+      await act(async () => add.click());
+    }
+
+    const item = await vi.waitFor(() => {
+      const found = [
+        ...document.querySelectorAll<HTMLElement>(
+          `[role=menu][aria-label='${rule}'] [role^=menuitem]`,
+        ),
+      ].find((each) => each.textContent?.trim() === choice);
+
+      if (!found) throw new Error(`No ${choice}`);
+
+      return found;
+    });
+
+    await act(async () => item.click());
+  }
+
+  const bar = () => document.querySelector<HTMLElement>("[role=group][aria-label='Rules changed']");
+
+  it("previews edited rules, stores them only on Save rules and keeps them when refused", async () => {
+    smartMain();
+    await mountTab();
+    await vi.waitFor(() => expect(document.querySelector("h1")?.textContent).toBe("Short films"));
+    await poster("Dune Road, Movie, 2021");
+    expect(document.querySelector("[aria-label='Runtime: Under 90 min']")).not.toBeNull();
+
+    await setRule("Watched", "Unwatched");
+    await vi.waitFor(() => expect(bar()?.textContent).toContain("1 matches, 2 before"));
+    expect(document.body.textContent).toContain("1 title");
+    // The column keeps the saved count, and nothing is stored or fetched for the edit.
+    expect((await row("Short films")).textContent).toContain("2");
+    expect(ipc.argsOf("collections.change")).toEqual([]);
+    expect(ipc.methods()).not.toContain("ondemand.details");
+    expect(ipc.argsOf("ondemand.collection").at(-1)).toMatchObject({
+      kind: "movie",
+      id: "all",
+      filters: { runtime: { max: 5399 }, watched: "unwatched" },
+    });
+
+    const refused = ipc.hold("collections.change");
+    await act(async () => button("Save rules").click());
+    await act(async () => refused.reject({ kind: "unexpected", detail: "disk" }));
+    await vi.waitFor(() =>
+      expect(bar()?.querySelector("[role=alert]")?.textContent).toBe(
+        "Couldn't save. Your changes are kept.",
+      ),
+    );
+    expect(document.querySelector("[aria-label='Watched: Unwatched']")).not.toBeNull();
+
+    await act(async () => button("Retry").click());
+    await vi.waitFor(() => expect(bar()).toBeNull());
+    expect(ipc.argsOf("collections.change")).toEqual([
+      {
+        kind: "rules",
+        id: "s0",
+        rules: { kind: "movie", filters: { runtime: { max: 5399 }, watched: "unwatched" } },
+      },
+      {
+        kind: "rules",
+        id: "s0",
+        rules: { kind: "movie", filters: { runtime: { max: 5399 }, watched: "unwatched" } },
+      },
+    ]);
+    // The stored rules stay shown while the collections are read again.
+    expect(document.querySelector("[aria-label='Watched: Unwatched']")).not.toBeNull();
+  });
+
+  it("goes back to the saved rules on Discard, and removes a rule set to Any", async () => {
+    smartMain();
+    await mountTab();
+    await poster("Dune Road, Movie, 2021");
+
+    await setRule("Runtime", "Any");
+    await vi.waitFor(() => expect(bar()?.textContent).toContain("Add a rule to save"));
+    expect(document.querySelector("[role=group][aria-label='Runtime']")).toBeNull();
+    expect(button("Save rules").hasAttribute("disabled")).toBe(true);
+
+    await act(async () => button("Discard").click());
+    await vi.waitFor(() => expect(bar()).toBeNull());
+    expect(document.querySelector("[aria-label='Runtime: Under 90 min']")).not.toBeNull();
+    await poster("Dune Road, Movie, 2021");
+    expect(ipc.argsOf("collections.change")).toEqual([]);
+  });
+
+  it("makes a smart collection as a draft that is stored with its first saved rule", async () => {
+    smartMain();
+    await mountTab();
+    await row("Short films");
+
+    await act(async () => button("New collection").click());
+
+    const smart = await vi.waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((each) =>
+        each.textContent?.startsWith("Smart collection"),
+      );
+
+      if (!found) throw new Error("No Smart collection");
+
+      return found;
+    });
+
+    await act(async () => smart.click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(field()));
+    await type("Short comedies", "Enter");
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("h1")?.textContent).toBe("Short comedies"),
+    );
+    expect((await row("Short comedies")).textContent).toContain("New");
+
+    const draft = () =>
+      document.querySelector<HTMLElement>("[role=group][aria-label='New smart collection']");
+
+    expect(draft()?.textContent).toContain("Add a rule to save");
+    expect(ipc.argsOf("collections.change")).toEqual([]);
+
+    await setRule("Rating", "7+");
+    await vi.waitFor(() => expect(button("Save rules").hasAttribute("disabled")).toBe(false));
+    await act(async () => button("Save rules").click());
+    await vi.waitFor(() => expect(draft()).toBeNull());
+    expect(ipc.argsOf("collections.change")).toEqual([
+      {
+        kind: "create",
+        id: expect.any(String),
+        name: "Short comedies",
+        rules: { kind: "movie", filters: { rating: { min: 7 } } },
+      },
+    ]);
+    // Stored, it is a smart collection in the column like the others, no longer New.
+    await vi.waitFor(async () =>
+      expect((await row("Short comedies")).textContent).toBe("Short comediesSmart collection1"),
+    );
+  });
+
+  it("keeps the matches shown when reading them again fails, and says when they are from", async () => {
+    const viewer = { id: "sam", revision: 2 };
+    selectProfileOwner(viewer);
+    smartMain();
+    await mountTab();
+    await poster("Dune Road, Movie, 2021");
+
+    ipc.refuse("collections.page", { kind: "unexpected", detail: "worker" });
+    await act(async () => ipc.emit("collections.changed", { owner: { ...viewer } }));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[role=alert]")?.textContent).toMatch(
+        /^Couldn't refresh your sources\. Showing matches from .+\. Try again$/,
+      ),
+    );
+    await poster("Dune Road, Movie, 2021");
+  });
+
+  it("is left out of the picks' Add to collection and offers no Remove", async () => {
+    smartMain();
+    ipc.answer("collections.list", () => [
+      {
+        id: "s0",
+        name: "Short films",
+        total: 2,
+        rules: { kind: "movie", filters: { runtime: { max: 5399 } } },
+      },
+      {
+        id: "s1",
+        name: "Long films",
+        total: 0,
+        rules: { kind: "movie", filters: { runtime: { min: 7200 } } },
+      },
+      { id: "c0", name: "Weekend films", total: 0 },
+    ]);
+    await mountTab();
+    await poster("Kite Season, Movie, 2022");
+    await pick("Kite Season");
+    await act(async () => button("Add to collection").click());
+    await vi.waitFor(() => expect(button("Weekend films")).toBeTruthy());
+    expect(
+      [
+        ...document.querySelectorAll("[role=menu][aria-label='Add to collection'] [role=menuitem]"),
+      ].map((each) => each.textContent),
+    ).toEqual(["Weekend films"]);
+    expect(() => button("Remove from Short films")).toThrow();
+  });
+});
+
+it("leaves smart collections out of a title's collections menu", async () => {
+  const view = bareView();
+  unmount = view.unmount;
+  await view.render(
+    createElement(CollectionMembership, {
+      title: {
+        sourceId: SUBSCRIPTION,
+        kind: "movie",
+        titleId: "41",
+        name: "Kite Season",
+        year: 2022,
+      },
+      collections: [
+        {
+          id: "s0",
+          name: "Short films",
+          total: 2,
+          rules: { kind: "movie", filters: { runtime: { max: 5399 } } },
+        },
+        { id: "c0", name: "Weekend films", total: 0 },
+      ],
+      memberOf: new Set<string>(),
+      commit: async () => {},
+    }),
+  );
+  await act(async () => button("Add to collection").click());
+
+  const ticks = await vi.waitFor(() => {
+    const found = [...document.querySelectorAll("[role=menuitemcheckbox]")];
+    expect(found).not.toHaveLength(0);
+
+    return found;
+  });
+
+  expect(ticks.map((each) => each.textContent)).toEqual(["Weekend films"]);
+});

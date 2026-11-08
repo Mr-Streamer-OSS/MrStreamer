@@ -47,6 +47,7 @@ import { useDebounced } from "../../lib/use-debounced.ts";
 import { useFit } from "../../lib/use-fit.ts";
 import { cn } from "../../lib/utils.ts";
 import { CollectionsPage } from "../collections/CollectionsPage.tsx";
+import { SaveAsCollection } from "../collections/SmartRules.tsx";
 import { CollectionGrid, TitleGrid, useCollection } from "./CollectionGrid.tsx";
 import {
   FilterEmpty,
@@ -282,7 +283,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
           ) : tab === "genres" || tab === "services" ? (
             <Tiles kind={kind} of={tab} onOpen={open} />
           ) : tab === "collections" ? (
-            <CollectionsPage active={active} />
+            <CollectionsPage kind={kind} active={active} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col pl-10">
               <CollectionGrid
@@ -296,6 +297,9 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
                   tab === "all" ? (
                     <SortMenu value={place.sort} onChange={(sort) => go({ sort })} />
                   ) : undefined
+                }
+                action={
+                  tab === "all" ? <SaveAsCollection kind={kind} filters={filters} /> : undefined
                 }
               />
             </div>

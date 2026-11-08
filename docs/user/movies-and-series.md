@@ -36,9 +36,11 @@ The field at the end of the tabs searches movies on Movies and series on Series.
 
 ## Filtering the current list
 
-_Quality and Language narrow an open grid and its search results._
+_Filters narrow an open grid and its search results._
 
-**Quality** and **Language** filter an open movie or series grid and its search results. They are compact menus on one line with **Verified**, after **Sort** where a list has one. Each menu lists every choice, with the current one checked, and **Any** clears that filter. Long menus scroll, and Escape closes an open menu before it leaves the list.
+**Genre**, **Year**, **Runtime**, **Rating**, **Watched**, **Source**, **Quality**, **Language** and **Verified** filter an open movie or series grid and its search results. They are compact menus on one line, after **Sort** where a list has one. Each menu lists every choice, with the current one checked, and **Any** clears that filter. **Genre** and **Source** take several picks, and a title matches any of them. **Year** has a **From** and a **To** year, either left empty for no limit, and applies them when you press Enter or close it. Long menus scroll, and Escape closes an open menu before it leaves the list.
+
+Genres come from TMDB. Year and **Rating** are the provider's, for each version; Rating offers 6+ to 9+, out of 10. **Runtime** is the length of a file already opened on this computer, so it never fetches details or opens a file: a title whose runtime isn't known yet never matches, and a line under the menus says how many are left out. **Watched** follows this profile's progress: **Unwatched**, **In progress** or **Watched**. For a series, Runtime and Watched look at the episode files already read, not the whole series. A year, rating, runtime or genre that isn't known never matches. Every filter must hold for one version of a title, from one source.
 
 Quality and Language are hints from the provider's names. **Unknown** means no hint, and **MULTI** means a mark for several languages. The count shows matches out of the current list, beside a collection's name; **Reset** clears every filter. Switching between Movies and Series clears them too. ⌘K's search stays unfiltered.
 
@@ -131,8 +133,6 @@ The watchlist is kept on your computer, with the subscription each title was sav
 
 ## Collections
 
-Smart collections store rules instead of a fixed member list. Their matches follow the currently admitted catalogue and this profile's progress. Genres and sources allow several choices; year, runtime and provider rating use inclusive bounds. Runtime is measured in seconds internally and comes only from current details already loaded on this device. Unknown facts never satisfy a range. One exact version must meet every rule, including quality, language and verified tracks. For series, runtime and progress describe the loaded episode file, without fetching other episodes. Editing rules does not request metadata or probe media. A failed save keeps the previous rules stored so the edit can be retried. Manual collections retain their own members and order.
-
 _Named collections of movies and series, beside the watchlist._
 
 Collections are lists you name and keep, such as Family night or Weekend films. They are not the watchlist: **Save** still keeps a title for later, and a title can be saved and in several collections at once.
@@ -142,6 +142,10 @@ Collections are lists you name and keep, such as Family night or Weekend films. 
 An open collection shows its titles in the order you added them, as posters. A poster opens the details of the version that was added. The arrow keys move through the posters and Enter opens one; Tab reaches the poster they are on, then the ring in its corner, which selects it. Once something is selected the bar above the posters says how many, **Add to collection** puts them in another collection, **Remove from** takes them out of this one, and **Done** clears the selection.
 
 A collection holds the exact version you added, from the subscription you added it from. Another version of the same film, such as its 4K one, or the same film from another subscription, is a separate entry, and two titles that share a name stay two. A title keeps its place when your provider renames it. When no provider lists it any more it stays, dimmed and marked **Unavailable**: press it to select it, then **Remove from** takes it out. It can't be added to another collection until a provider lists it again.
+
+A smart collection keeps rules instead of titles you add, and holds the movies or the series that match them now. On **All movies** or **All series**, once a filter is set, **Save as collection** names one with those filters as its rules and says how many titles match. In the Collections tab **New collection** asks for a **Collection** or a **Smart collection**; a new smart collection is marked **New** in the column until its first rule is saved, and goes if you discard it. Smart collections are marked with a filter symbol before their count, and hold the kind of the tab they were made on.
+
+An open smart collection shows its rules above its matches, newest additions first. **+ Rule** adds a rule, and **Any** removes one. Changing a rule saves nothing: the count shows what the new rules match, and a bar says **Rules changed** with how many matched before. **Discard** goes back to the saved rules and **Save rules** keeps the new ones; if saving fails, your changes stay and **Retry** sends them again. The column keeps the saved count until they are saved. Matches follow your lists as they change, and leave out what the profile may not open, as other collections do. If they can't be read again, the matches already shown stay, with the time they are from and **Try again**. A source you removed stays in a saved **Source** rule, marked **Removed**, and matches nothing. A title's **Add to collection** offers only the collections you add titles to, and a smart collection's matches can be selected and added to one of those, but not removed.
 
 Each profile has its own collections, kept on your computer across restarts; another profile never sees them or their counts, and deleting a profile deletes its collections. Titles a profile may not open are left out of its collections and their counts: a kids profile sees only its approved titles, and titles for adults show only while **For adults** is on. Unavailable titles show only on a profile that isn't a kids profile, while **For adults** is on, since a title the lists no longer have can't be checked. If your collections can't be read, the page and the details say so with **Try again**, and show nothing as empty in their place.
 

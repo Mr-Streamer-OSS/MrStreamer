@@ -1878,4 +1878,77 @@ export const fr: Translation = {
     "Le nombre maximal de règles d'enregistrement est atteint.",
   "A rule sets this schedule. Change the rule instead.":
     "Une règle définit cette programmation. Modifiez la règle.",
+  // Smart collections and discovery rules
+  "rules.source": "Source",
+  Genre: "Genre",
+  Year: "Année",
+  Runtime: "Durée",
+  Rating: "Note",
+  Unwatched: "Non vus",
+  "In progress": "En cours",
+  "Under 90 min": "Moins de 90 min",
+  "Under 100 min": "Moins de 100 min",
+  "Under 2 h": "Moins de 2 h",
+  "2 h or more": "2 h ou plus",
+  "{rating}+": "{rating}+",
+  "{from} to {to}": "{from} à {to}",
+  "{year} or later": "{year} ou après",
+  "{year} or earlier": "{year} ou avant",
+  From: "De",
+  To: "À",
+  Removed: "Supprimée",
+  "Leave one empty for no limit. Titles without a year never match.":
+    "Laissez un champ vide pour ne pas fixer de limite. Les titres sans année ne correspondent jamais.",
+  "Matches any picked genre. Titles without TMDB genres never match.":
+    "Correspond à n'importe quel genre choisi. Les titres sans genre TMDB ne correspondent jamais.",
+  "Titles without a known runtime never match.":
+    "Les titres sans durée connue ne correspondent jamais.",
+  "The provider's rating out of 10. Titles without one never match.":
+    "La note du fournisseur sur 10. Les titres sans note ne correspondent jamais.",
+  "From this profile's progress.": "D'après la progression de ce profil.",
+  "A version from this source must meet every other rule.":
+    "Une version de cette source doit respecter toutes les autres règles.",
+  "Add rule": "Ajouter une règle",
+  Rule: "Règle",
+  "Verified sound or subtitles": "Son ou sous-titres vérifiés",
+  "A title matches when one of its versions meets every rule.":
+    "Un titre correspond quand l'une de ses versions respecte toutes les règles.",
+  "{count} titles have no runtime yet and are left out.": {
+    one: "{count} titre n'a pas encore de durée et est exclu.",
+    many: "{count} de titres n'ont pas encore de durée et sont exclus.",
+    other: "{count} titres n'ont pas encore de durée et sont exclus.",
+  },
+  "Save as collection": "Enregistrer comme collection",
+  "{count} movies now.": {
+    one: "{count} film pour l'instant.",
+    many: "{count} de films pour l'instant.",
+    other: "{count} films pour l'instant.",
+  },
+  "{count} series now.": {
+    one: "{count} série pour l'instant.",
+    many: "{count} de séries pour l'instant.",
+    other: "{count} séries pour l'instant.",
+  },
+  "Updates as your sources change.": "Se met à jour quand vos sources changent.",
+  "{count} match, {before} before": {
+    one: "{count} correspond, {before} avant",
+    many: "{count} correspondent, {before} avant",
+    other: "{count} correspondent, {before} avant",
+  },
+  "Add a rule to save": "Ajoutez une règle pour enregistrer",
+  "New smart collection": "Nouvelle collection intelligente",
+  "Rules changed": "Règles modifiées",
+  "Couldn't save. Your changes are kept.":
+    "Échec de l'enregistrement. Vos modifications sont conservées.",
+  Discard: "Annuler les modifications",
+  "Save rules": "Enregistrer les règles",
+  "Smart collection": "Collection intelligente",
+  Collection: "Collection",
+  "Titles you add": "Titres que vous ajoutez",
+  "Titles that match rules": "Titres qui respectent des règles",
+  "No titles match these rules.": "Aucun titre ne correspond à ces règles.",
+  "Titles appear here when your sources add them.":
+    "Les titres apparaissent ici quand vos sources les ajoutent.",
+  "Couldn't refresh your sources. Showing matches from {time}.":
+    "Impossible d'actualiser vos sources. Correspondances de {time} affichées.",
 };

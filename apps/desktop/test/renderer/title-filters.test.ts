@@ -540,6 +540,111 @@ it("Shift+Enter inside an open filter menu does not open a poster", async () => 
   expect(useUi.getState().details).toBeNull();
 });
 
+/** Sets a text field's value as typing does. */
+async function typeInto(input: HTMLInputElement, text: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+const enter = (input: HTMLElement) =>
+  act(async () => {
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+  });
+
+it("saves All's rules as a smart collection of this kind once, also after a refusal", async () => {
+  const page = await mount();
+  ipc.always("collections.list", []);
+  expect(page.container.textContent).not.toContain("Save as collection");
+
+  await page.click("Unwatched", "Watched");
+  await page.click("Under 2 h", "Runtime");
+  await page.until(() =>
+    expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({
+      watched: "unwatched",
+      runtime: { max: 7199 },
+    }),
+  );
+
+  await page.click("Save as collection");
+
+  const name = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLInputElement>("input[aria-label='Collection name']");
+    expect(found).not.toBeNull();
+
+    return found!;
+  });
+
+  const popup = () =>
+    document.querySelector<HTMLElement>("[aria-label='Save as collection'][role=dialog]");
+
+  await page.until(() => expect(popup()?.textContent).toContain("10 movies now."));
+  expect(popup()?.textContent).toContain("Under 2 h · Unwatched");
+
+  await typeInto(name, "Short unwatched");
+  const refused = ipc.hold("collections.change");
+  await enter(name);
+  await act(async () => refused.reject({ kind: "unexpected", detail: "disk" }));
+  await page.until(() =>
+    expect(popup()?.querySelector("[role=alert]")?.textContent).toBe("Couldn't save."),
+  );
+
+  ipc.always("collections.change", null);
+
+  const retry = [...popup()!.querySelectorAll("button")].find(
+    (each) => each.textContent === "Retry",
+  );
+
+  await act(async () => retry!.click());
+  await page.until(() => expect(popup()).toBeNull());
+
+  const sent = ipc.argsOf("collections.change");
+  expect(sent).toHaveLength(2);
+  expect(sent[0]).toEqual({
+    kind: "create",
+    id: expect.any(String),
+    name: "Short unwatched",
+    rules: { kind: "movie", filters: { watched: "unwatched", runtime: { max: 7199 } } },
+  });
+  // Retry sends the same collection, so it is stored once.
+  expect(sent[1]).toEqual(sent[0]);
+});
+
+it("applies a typed year range only once it is confirmed", async () => {
+  const page = await mount();
+  const trigger = page.group("Year").querySelector<HTMLButtonElement>("button")!;
+  await act(async () => trigger.click());
+
+  const [from, to] = await vi.waitFor(() => {
+    const fields = [
+      ...document.querySelectorAll<HTMLInputElement>("[role=dialog][aria-label=Year] input"),
+    ];
+
+    expect(fields).toHaveLength(2);
+
+    return fields;
+  });
+
+  const reads = ipc.argsOf("ondemand.collection").length;
+  await typeInto(to!, "2015");
+  await typeInto(from!, "2026");
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(ipc.argsOf("ondemand.collection")).toHaveLength(reads);
+
+  await enter(from!);
+  // Bounds are inclusive and kept in order, whichever field holds which.
+  await page.until(() =>
+    expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({
+      year: { min: 2015, max: 2026 },
+    }),
+  );
+  await page.until(() => expect(trigger.getAttribute("aria-label")).toBe("Year: 2015 to 2026"));
+  expect(ipc.methods()).not.toContain("ondemand.details");
+});
+
 it("announces a collection's count when filtering changes it", async () => {
   const page = await mount();
   await act(async () => openCollection("movie", "genre:Drama"));

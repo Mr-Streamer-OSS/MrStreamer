@@ -1,11 +1,13 @@
 // The viewer's own collections, as Paper A3 draws them: a column of collections with their counts
 // and New collection, each with Rename, Move up, Move down and Delete collection, and a title's
 // "Add to collection" menu that ticks every collection holding it. Watchlist stays Save, apart.
+// A smart collection (see SmartRules.tsx) is marked in the column; the title menu leaves it out,
+// since its rules decide its members.
 //   Both are controlled. They show what they are given and send each change through `commit`,
 // one atomic `CollectionChange`, then wait for new props: nothing is shown as saved before it is.
 // A member is the exact source version given as `title`, never every title of the same name.
 import { Menu } from "@base-ui/react/menu";
-import { Check, Ellipsis, ListPlus, Plus } from "lucide-react";
+import { Check, Ellipsis, ListFilter, ListPlus, Plus } from "lucide-react";
 import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import {
   COLLECTION_NAME_MAX,
@@ -186,11 +188,31 @@ const NEW = Symbol("new collection");
 interface Editing {
   readonly kind: "create" | "rename" | "delete";
   readonly id: string;
+  /** A new smart collection's name: it becomes a draft to give rules, not a change. */
+  readonly smart?: true;
+}
+
+/** A smart collection named but not stored yet, until its first rule is saved. */
+export interface SmartDraft {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** The mark before a smart collection's count, with its name for the reader. */
+function SmartMark() {
+  return (
+    <>
+      <ListFilter aria-hidden className="size-3.5 flex-none text-muted-foreground" />
+      <span className="sr-only">{t("Smart collection")}</span>
+    </>
+  );
 }
 
 /**
  * The column of collections. `selected` is the one open beside it, `onOpen` opens another. Every
- * control is a button or a menu, so Tab, Enter, Space and the arrow keys reach all of it.
+ * control is a button or a menu, so Tab, Enter, Space and the arrow keys reach all of it. With
+ * `onSmart`, New collection asks which: a Collection, or a Smart collection whose name becomes
+ * `draft`, shown selected and marked New until it is stored.
  */
 export function CollectionNav({
   collections,
@@ -198,12 +220,16 @@ export function CollectionNav({
   onOpen,
   commit,
   ready = true,
+  draft = null,
+  onSmart,
 }: {
   ready?: boolean;
   collections: readonly CollectionSummary[];
   selected: string | null;
   onOpen: (id: string) => void;
   commit: CommitCollection;
+  draft?: SmartDraft | null;
+  onSmart?: (draft: SmartDraft) => void;
 }) {
   const [editing, setEditing] = useState<Editing | null>(null);
   const edit = useRef<Editing | null>(null);
@@ -298,6 +324,7 @@ export function CollectionNav({
                   className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="min-w-0 flex-1 truncate">{collection.name}</span>
+                  {collection.rules && <SmartMark />}
                   <span className="flex-none text-xs text-muted-foreground tabular-nums">
                     {collection.total}
                   </span>
@@ -325,6 +352,22 @@ export function CollectionNav({
             )}
           </li>
         ))}
+        {draft && !collections.some((each) => each.id === draft.id) && (
+          <li>
+            <button
+              aria-current={selected === draft.id ? "page" : undefined}
+              onClick={() => onOpen(draft.id)}
+              className={cn(
+                "flex h-[34px] w-full items-center gap-2 rounded-lg pr-3 pl-3 text-left outline-none hover:bg-white/6 focus-visible:ring-2 focus-visible:ring-ring",
+                selected === draft.id && "bg-accent hover:bg-accent",
+              )}
+            >
+              <span className="min-w-0 flex-1 truncate">{draft.name}</span>
+              <SmartMark />
+              <span className="flex-none text-xs text-muted-foreground">{t("New")}</span>
+            </button>
+          </li>
+        )}
       </ul>
       {editing?.kind === "create" ? (
         <NameField
@@ -332,14 +375,30 @@ export function CollectionNav({
           initial={change.requested?.kind === "create" ? change.requested.name : ""}
           failed={failedHere("create")}
           onCancel={() => close(NEW)}
-          onSave={(name) => void save({ kind: "create", id: editing.id, name }, NEW)}
+          onSave={(name) => {
+            if (!editing.smart) return void save({ kind: "create", id: editing.id, name }, NEW);
+            onSmart?.({ id: editing.id, name });
+            close(NEW);
+          }}
+        />
+      ) : onSmart ? (
+        <NewCollection
+          triggerRef={focusIfDue(NEW)}
+          // One id per field, so sending a refused create again cannot make a second collection.
+          onPick={(smart) =>
+            begin(
+              smart
+                ? { kind: "create", id: crypto.randomUUID(), smart }
+                : { kind: "create", id: crypto.randomUUID() },
+            )
+          }
         />
       ) : (
         <button
           ref={focusIfDue(NEW)}
           // One id per field, so sending a refused create again cannot make a second collection.
           onClick={() => begin({ kind: "create", id: crypto.randomUUID() })}
-          className="flex h-[34px] items-center gap-2 rounded-lg px-3 text-muted-foreground outline-none hover:bg-white/6 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className={newClass}
         >
           <Plus className="size-3.5 flex-none" />
           {t("New collection")}
@@ -355,6 +414,62 @@ export function CollectionNav({
         </p>
       )}
     </nav>
+  );
+}
+
+const newClass =
+  "flex h-[34px] items-center gap-2 rounded-lg px-3 text-muted-foreground outline-none hover:bg-white/6 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-white/6 data-popup-open:text-foreground";
+
+/** New collection as a menu: Collection, titles you add, or Smart collection, by rules. */
+function NewCollection({
+  triggerRef,
+  onPick,
+}: {
+  triggerRef: (node: HTMLButtonElement | null) => void;
+  onPick: (smart: true | null) => void;
+}) {
+  const picked = useRef(false);
+  const item = cn(menuItem, "flex flex-col gap-0.5 p-2");
+
+  return (
+    <Menu.Root onOpenChange={(open) => open && (picked.current = false)}>
+      <Menu.Trigger ref={triggerRef} className={newClass}>
+        <Plus className="size-3.5 flex-none" />
+        {t("New collection")}
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="start" sideOffset={6} className="z-[60]">
+          <Menu.Popup
+            aria-label={t("New collection")}
+            // The name field that opens takes the focus; Escape gives it back to the button.
+            finalFocus={() => !picked.current}
+            className={cn(menuSurface, "w-[15rem] text-[0.8125rem] text-white")}
+            onKeyDown={keep}
+            onClick={keep}
+          >
+            {(
+              [
+                [null, t("Collection"), t("Titles you add")],
+                [true, t("Smart collection"), t("Titles that match rules")],
+              ] as const
+            ).map(([smart, name, hint]) => (
+              <Menu.Item
+                key={name}
+                closeOnClick
+                onClick={() => {
+                  picked.current = true;
+                  onPick(smart);
+                }}
+                className={item}
+              >
+                <span>{name}</span>
+                <span className="text-xs text-muted-foreground">{hint}</span>
+              </Menu.Item>
+            ))}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
 
@@ -467,13 +582,13 @@ function ConfirmDelete({
 }
 
 /**
- * A title's collections menu, beside Save in its details: every collection, ticked where it holds
- * `title`, then New collection, which makes one and puts the title in it. `memberOf` names the
+ * A title's collections menu, beside Save in its details: every manual collection, ticked where it
+ * holds `title`, then New collection, which makes one and puts the title in it. `memberOf` names the
  * collections holding this exact source version.
  */
 export function CollectionMembership({
   title,
-  collections,
+  collections: every,
   memberOf,
   commit,
   ready = true,
@@ -485,6 +600,8 @@ export function CollectionMembership({
   commit: CommitCollection;
 }) {
   const change = useCommit(commit, ready);
+  // Rules decide a smart collection's members, so only manual ones are offered.
+  const collections = every.filter((each) => !each.rules);
   const [creating, setCreating] = useState<string | null>(null);
   const draft = useRef<string | null>(null);
   // A successful create is a receipt, not a successful add. Keep only its target while admission

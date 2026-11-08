@@ -1810,4 +1810,66 @@ export const de: Translation = {
   "The recording rule limit was reached.": "Die Höchstzahl an Aufnahmeregeln ist erreicht.",
   "A rule sets this schedule. Change the rule instead.":
     "Eine Regel legt diesen Zeitplan fest. Ändere die Regel.",
+  // Smart collections and discovery rules
+  "rules.source": "Quelle",
+  Genre: "Genre",
+  Year: "Jahr",
+  Runtime: "Laufzeit",
+  Rating: "Bewertung",
+  Unwatched: "Nicht gesehen",
+  "In progress": "Begonnen",
+  "Under 90 min": "Unter 90 Min.",
+  "Under 100 min": "Unter 100 Min.",
+  "Under 2 h": "Unter 2 Std.",
+  "2 h or more": "2 Std. oder mehr",
+  "{rating}+": "{rating}+",
+  "{from} to {to}": "{from} bis {to}",
+  "{year} or later": "{year} oder später",
+  "{year} or earlier": "{year} oder früher",
+  From: "Von",
+  To: "Bis",
+  Removed: "Entfernt",
+  "Leave one empty for no limit. Titles without a year never match.":
+    "Ein Feld leer lassen für keine Grenze. Titel ohne Jahr passen nie.",
+  "Matches any picked genre. Titles without TMDB genres never match.":
+    "Passt zu jedem gewählten Genre. Titel ohne TMDB-Genres passen nie.",
+  "Titles without a known runtime never match.": "Titel ohne bekannte Laufzeit passen nie.",
+  "The provider's rating out of 10. Titles without one never match.":
+    "Die Bewertung des Anbieters von 10. Titel ohne Bewertung passen nie.",
+  "From this profile's progress.": "Nach dem Fortschritt dieses Profils.",
+  "A version from this source must meet every other rule.":
+    "Eine Version aus dieser Quelle muss jede andere Regel erfüllen.",
+  "Add rule": "Regel hinzufügen",
+  Rule: "Regel",
+  "Verified sound or subtitles": "Geprüfter Ton oder Untertitel",
+  "A title matches when one of its versions meets every rule.":
+    "Ein Titel passt, wenn eine seiner Versionen jede Regel erfüllt.",
+  "{count} titles have no runtime yet and are left out.": {
+    one: "{count} Titel hat noch keine Laufzeit und fehlt.",
+    other: "{count} Titel haben noch keine Laufzeit und fehlen.",
+  },
+  "Save as collection": "Als Sammlung speichern",
+  "{count} movies now.": { one: "Jetzt {count} Film.", other: "Jetzt {count} Filme." },
+  "{count} series now.": { one: "Jetzt {count} Serie.", other: "Jetzt {count} Serien." },
+  "Updates as your sources change.": "Aktualisiert sich, wenn sich deine Quellen ändern.",
+  "{count} match, {before} before": {
+    one: "{count} passt, vorher {before}",
+    other: "{count} passen, vorher {before}",
+  },
+  "Add a rule to save": "Füge eine Regel hinzu, um zu speichern",
+  "New smart collection": "Neue intelligente Sammlung",
+  "Rules changed": "Regeln geändert",
+  "Couldn't save. Your changes are kept.":
+    "Speichern fehlgeschlagen. Deine Änderungen bleiben erhalten.",
+  Discard: "Verwerfen",
+  "Save rules": "Regeln speichern",
+  "Smart collection": "Intelligente Sammlung",
+  Collection: "Sammlung",
+  "Titles you add": "Titel, die du hinzufügst",
+  "Titles that match rules": "Titel, die Regeln erfüllen",
+  "No titles match these rules.": "Keine Titel passen zu diesen Regeln.",
+  "Titles appear here when your sources add them.":
+    "Titel erscheinen hier, wenn deine Quellen sie hinzufügen.",
+  "Couldn't refresh your sources. Showing matches from {time}.":
+    "Quellen konnten nicht aktualisiert werden. Treffer von {time} werden gezeigt.",
 };
