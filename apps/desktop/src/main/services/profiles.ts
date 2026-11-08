@@ -36,8 +36,6 @@ import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
-import * as Deferred from "effect/Deferred";
-import * as Fiber from "effect/Fiber";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as Scope from "effect/Scope";
@@ -349,13 +347,14 @@ export function makeProfiles({
               )
             : original;
 
-        let collectionFiber: Fiber.Fiber<void> | undefined;
+        // Owns this handle's collection subscription and forwarder; dispose closes both.
+        const watch = yield* Scope.make();
 
         const handle = {
           context,
           dispose: async () => {
             try {
-              if (collectionFiber) await Effect.runPromise(Fiber.interrupt(collectionFiber));
+              await Effect.runPromise(Scope.close(watch, Exit.void));
             } finally {
               await runtime?.dispose();
             }
@@ -365,66 +364,26 @@ export function makeProfiles({
           erased: new Map<string, number>(),
         };
 
-        // Probe before starting watches; cache only after collection acquisition succeeds.
+        // Probe before starting watches, so a failed open remains retryable.
         yield* Context.get(context, CustomListStore).lists.pipe(
           Effect.onError(() => Effect.promise(handle.dispose)),
         );
-        const collections = Context.get(context, Collections);
 
-        // The watch owns acquisition through its drain. Only its startup wait belongs to this
-        // caller; cancellation must roll back an uncommitted handle, not strand the watch.
-        yield* Effect.uninterruptibleMask((restore) => {
-          let finished: Exit.Exit<void> | undefined;
+        // Subscribe before caching, so changes are buffered even before the forwarder consumes.
+        // A failed or canceled start disposes the uncached handle's scope.
+        yield* Effect.gen(function* () {
+          const changes = yield* Scope.provide(watch)(
+            Context.get(context, Collections).profileChanges,
+          );
 
-          return Effect.gen(function* () {
-            const acquired = yield* Deferred.make<Exit.Exit<void>>();
-
-            const collectionWatch = Effect.scoped(
-              Effect.gen(function* () {
-                const changes = yield* collections.profileChanges;
-                yield* Deferred.succeed(acquired, Exit.void);
-                yield* Stream.runForEach(changes, (owner) =>
-                  PubSub.publish(events, { kind: "collections", owner }),
-                );
-              }),
-            ).pipe(
-              Effect.onExit((exit) =>
-                Effect.andThen(
-                  Effect.sync(() => {
-                    finished = exit;
-                  }),
-                  Deferred.succeed(acquired, exit),
-                ),
-              ),
-              Effect.interruptible,
-            );
-
-            collectionFiber = runtime
-              ? runtime.runFork(collectionWatch)
-              : yield* Effect.forkIn(collectionWatch, scope);
-
-            // A fiber canceled before entering its body may never signal the Deferred.
-            // Awaiting its Exit also settles startup; canceling that waiter does not stop it.
-            const started = yield* restore(
-              Effect.raceFirst(Deferred.await(acquired), Fiber.await(collectionFiber)),
-            );
-
-            yield* Effect.suspend(() => {
-              if (Exit.isFailure(started)) return Effect.failCause(started.cause);
-
-              if (finished)
-                return Exit.isFailure(finished)
-                  ? Effect.failCause(finished.cause)
-                  : Effect.fail(
-                      failedWith(new Error("Collection forwarding ended during profile startup.")),
-                    );
-
-              handles.set(id, handle);
-
-              return Effect.void;
-            });
-          }).pipe(Effect.onError(() => Effect.promise(handle.dispose)));
-        });
+          yield* Effect.forkIn(
+            Stream.runForEach(changes, (owner) =>
+              PubSub.publish(events, { kind: "collections", owner }),
+            ),
+            watch,
+          );
+          handles.set(id, handle);
+        }).pipe(Effect.onError(() => Effect.promise(handle.dispose)));
 
         const viewing = Context.get(context, ViewingRecord);
         const watchlist = Context.get(context, Watchlist);

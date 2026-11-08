@@ -262,7 +262,7 @@ export class Collections extends Context.Service<
     ) => Effect.Effect<CollectionPage, Failed>;
     readonly memberships: (title: CollectionIdentity) => Effect.Effect<readonly string[], Failed>;
     readonly change: (change: CollectionChange) => Effect.Effect<void, Failed>;
-    /** Acquire one consumer in its retained scope before exposing an admitted writer. */
+    /** Subscribes in the caller's scope; later changes are buffered until consumed. */
     readonly profileChanges: Effect.Effect<Stream.Stream<ActiveProfile>, never, Scope.Scope>;
   }
 >()("mrstreamer/Collections") {

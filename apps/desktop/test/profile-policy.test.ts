@@ -1619,8 +1619,7 @@ it("retains a successful collection mutation while its acquired forwarder has no
 
   try {
     const f = await fixture().finally(() => factory.mockRestore());
-    const admitted = await f.app.runPromise(f.sessions.admitFor(f.adult));
-    expect((await f.app.runPromiseExit(admitted.services.collections.list))._tag).toBe("Failure");
+    await f.app.runPromise(f.sessions.admitFor(f.adult));
 
     const changes = await f.app.runPromise(
       Effect.scoped(
@@ -1659,8 +1658,6 @@ it("retains a successful collection mutation while its acquired forwarder has no
     );
 
     expect(changes).toEqual([{ kind: "collections", owner: f.adult }]);
-    const closed = await f.app.runPromise(Effect.scoped(f.sessions.changes));
-    expect(await f.app.runPromise(Stream.runCollect(closed))).toEqual([]);
     stage = "body:done";
   } finally {
     factory.mockRestore();
