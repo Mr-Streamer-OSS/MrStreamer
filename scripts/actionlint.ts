@@ -11,6 +11,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { type } from "arktype";
 
 /** The platforms the tools publish builds for, as Node names them: `${platform}-${arch}`. */
 type Host = "linux-x64" | "linux-arm64" | "darwin-x64" | "darwin-arm64" | "win32-x64";
@@ -19,8 +20,8 @@ type Host = "linux-x64" | "linux-arm64" | "darwin-x64" | "darwin-arm64" | "win32
 interface Tool {
   readonly name: string;
   readonly version: string;
-  /** The archive's address for a host's file name. */
-  readonly url: (file: string) => string;
+  /** The official GitHub repository that publishes the release. */
+  readonly repository: string;
   readonly files: Readonly<Record<Host, { readonly file: string; readonly sha256: string }>>;
   /** The program's path inside the unpacked archive. */
   readonly program: (host: Host) => string;
@@ -29,7 +30,7 @@ interface Tool {
 const ACTIONLINT: Tool = {
   name: "actionlint",
   version: "1.7.12",
-  url: (file) => `https://github.com/rhysd/actionlint/releases/download/v1.7.12/${file}`,
+  repository: "rhysd/actionlint",
   files: {
     "linux-x64": {
       file: "actionlint_1.7.12_linux_amd64.tar.gz",
@@ -58,7 +59,7 @@ const ACTIONLINT: Tool = {
 const SHELLCHECK: Tool = {
   name: "shellcheck",
   version: "0.11.0",
-  url: (file) => `https://github.com/koalaman/shellcheck/releases/download/v0.11.0/${file}`,
+  repository: "koalaman/shellcheck",
   files: {
     "linux-x64": {
       file: "shellcheck-v0.11.0.linux.x86_64.tar.xz",
@@ -86,6 +87,10 @@ const SHELLCHECK: Tool = {
 
 const CACHE = resolve("node_modules/.cache/actionlint");
 
+const RELEASE = type({
+  assets: type({ id: "0 < number.integer <= 9007199254740991", name: "string" }).array(),
+});
+
 /** This machine as the tools' releases name it, or a failure naming what they cover. */
 function host(): Host {
   const name = `${process.platform}-${process.arch}`;
@@ -106,9 +111,33 @@ async function install(tool: Tool, on: Host): Promise<string> {
 
   if (existsSync(join(folder, tool.program(on)))) return folder;
   const { file, sha256 } = tool.files[on];
-  const response = await fetch(tool.url(file));
+  let url = `https://github.com/${tool.repository}/releases/download/v${tool.version}/${file}`;
+  let response = await fetch(url);
 
-  if (!response.ok) throw new Error(`${tool.url(file)} answered HTTP ${response.status}.`);
+  // GitHub's release-download route can time out while its official asset API still serves
+  // the same archive. Only that observed outage uses the API; the checksum stays mandatory.
+  if (response.status === 504) {
+    await response.body?.cancel();
+    const releaseUrl = `https://api.github.com/repos/${tool.repository}/releases/tags/v${tool.version}`;
+    const releaseResponse = await fetch(releaseUrl);
+
+    if (!releaseResponse.ok) {
+      throw new Error(`${releaseUrl} answered HTTP ${releaseResponse.status}.`);
+    }
+
+    const release = RELEASE(await releaseResponse.json());
+
+    if (release instanceof type.errors)
+      throw new Error(`${releaseUrl} has invalid release assets.`);
+
+    const asset = release.assets.find((entry) => entry.name === file);
+
+    if (!asset) throw new Error(`${releaseUrl} has no valid asset named ${file}.`);
+    url = `https://api.github.com/repos/${tool.repository}/releases/assets/${asset.id}`;
+    response = await fetch(url, { headers: { Accept: "application/octet-stream" } });
+  }
+
+  if (!response.ok) throw new Error(`${url} answered HTTP ${response.status}.`);
   const archive = Buffer.from(await response.arrayBuffer());
   const actual = createHash("sha256").update(archive).digest("hex");
 

@@ -1,7 +1,8 @@
-import { readdir, readFile } from "node:fs/promises";
+import type { Decode } from "@mrstreamer/contracts/persisted-file";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
-import { writeJsonFile } from "../platform/json-file.ts";
+import { readJsonResult, writeJsonResult } from "../platform/json-file.ts";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import {
@@ -44,6 +45,10 @@ export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
  */
 const FormatOne = lazy(() => type({ format: "1", pending: "unknown[]" }));
 const LegacySummary = lazy(() => type({ event: { event: "'app_summary_day'" } }));
+const Format = lazy(() => type({ format: "number.integer" }));
+
+/** The only load failure the app sees: stored values and file causes stay private. */
+const unavailable = () => new Error("Analytics state unavailable.");
 
 // Analytics state is private. Never use storage diagnostics that print a parse failure's values.
 export function analyticsStore(dataDir: string) {
@@ -51,163 +56,167 @@ export function analyticsStore(dataDir: string) {
 
   return {
     async load(): Promise<AnalyticsRecord | null> {
-      let text: string;
+      const read = await readJsonResult(path, decodeAnalytics, unavailable);
 
-      try {
-        text = await readFile(path, "utf8");
-      } catch (error) {
-        if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
-        throw new Error("Analytics state unavailable.");
-      }
+      if (read.kind === "missing") return null;
 
-      let record: AnalyticsRecord;
-      let migrated: boolean;
+      if (read.kind !== "read") throw read.error;
 
-      try {
-        const parsed: unknown = JSON.parse(text);
-        const legacy = FormatOne()(parsed);
-
-        const current =
-          legacy instanceof type.errors
-            ? parsed
-            : {
-                ...legacy,
-                format: 2,
-                pending: legacy.pending.filter(
-                  (item) => LegacySummary()(item) instanceof type.errors,
-                ),
-              };
-
-        migrated = current !== parsed;
-
-        // New optional diagnostic literals cannot invalidate otherwise valid consent or legacy work.
-        const queue = type({
-          pending: type({ event: type({ event: "string", properties: "object" }) }).array(),
-        })(current);
-
-        const diagnosticSafe =
-          queue instanceof type.errors
-            ? current
-            : {
-                ...queue,
-                pending: queue.pending.map((item) =>
-                  item.event.event !== "stream_error"
-                    ? item
-                    : {
-                        ...item,
-                        event: {
-                          ...item.event,
-                          properties: Object.fromEntries(
-                            Object.entries(item.event.properties).filter(
-                              ([key, entry]) =>
-                                !key.startsWith("diagnostic_") ||
-                                !(PlaybackDiagnostic()({ [key]: entry }) instanceof type.errors),
-                            ),
-                          ),
-                        },
-                      },
-                ),
-              };
-
-        const checked = LegacyRecord()(diagnosticSafe);
-
-        if (
-          checked instanceof type.errors ||
-          checked.firstSeen !== (checked.installationId !== null) ||
-          (checked.firstSeen && checked.lastDay === null) ||
-          (!checked.firstSeen && (checked.lastDay !== null || checked.pending.length !== 0)) ||
-          (!checked.enabled && checked.pending.length !== 0) ||
-          checked.pending.some((item) => item.event.distinct_id !== checked.installationId)
-        )
-          throw new Error();
-        record = checked;
-        // Optional new work cannot turn valid .15 consent into an unavailable preference.
-        const optional = type({ "summaries?": "unknown" })(current);
-
-        if (!(optional instanceof type.errors) && optional.summaries !== undefined) {
-          const block = SummaryBlock()(optional.summaries);
-
-          if (
-            !(block instanceof type.errors) &&
-            checked.enabled &&
-            block.installationId === checked.installationId &&
-            [
-              ...block.pending.map((item) => item.event),
-              block.usage,
-              block.unfinished?.event,
-            ].every(
-              (event) =>
-                !event ||
-                (event.distinct_id === checked.installationId &&
-                  (event.event !== "usage_window" ||
-                    (event.timestamp === event.properties.window_start &&
-                      Date.parse(event.properties.window_end) -
-                        Date.parse(event.properties.window_start) ===
-                        WINDOW_MS &&
-                      Date.parse(event.timestamp) % WINDOW_MS === 0 &&
-                      Object.keys(event.properties.counts).length > 0))),
-            ) &&
-            Buffer.byteLength(JSON.stringify(block)) <= OUTBOX_BYTES
-          ) {
-            const cutoff = Date.now() - SUMMARY_TTL_MS;
-            // Age is per item. An expired peer cannot discard fresh, valid offline work.
-            record = {
-              ...checked,
-              summaries: {
-                ...block,
-                pending: block.pending.filter((item) => Date.parse(item.event.timestamp) >= cutoff),
-                usage:
-                  block.usage && Date.parse(block.usage.timestamp) >= cutoff ? block.usage : null,
-                unfinished:
-                  block.unfinished && Date.parse(block.unfinished.event.timestamp) >= cutoff
-                    ? block.unfinished
-                    : null,
-              },
-            };
-          }
-        }
-
-        const lifecycle = type({ "lifecycle?": "unknown" })(current);
-
-        if (!(lifecycle instanceof type.errors) && lifecycle.lifecycle !== undefined) {
-          const block = LifecycleBlock()(lifecycle.lifecycle);
-
-          if (
-            !(block instanceof type.errors) &&
-            checked.enabled &&
-            block.installationId === checked.installationId &&
-            block.pending.every((item) => item.event.distinct_id === checked.installationId) &&
-            new Set(block.pending.map((item) => item.event.uuid)).size === block.pending.length &&
-            new Set(block.legacyRetries.map((item) => item.uuid)).size ===
-              block.legacyRetries.length &&
-            Buffer.byteLength(JSON.stringify(block)) <= OUTBOX_BYTES
-          ) {
-            const cutoff = Date.now() - SUMMARY_TTL_MS;
-            record.lifecycle = {
-              ...block,
-              pending: block.pending.filter((item) => Date.parse(item.event.timestamp) >= cutoff),
-              legacyRetries: block.legacyRetries.filter((retry) =>
-                checked.pending.some(
-                  (item) =>
-                    item.event.uuid === retry.uuid &&
-                    (item.event.event === "installation_observed" ||
-                      item.event.event === "app_active_day"),
-                ),
-              ),
-            };
-          }
-        }
-      } catch {
-        throw new Error("Analytics state unavailable.");
-      }
+      const { record, migrated } = read.value;
 
       // The discarded counts leave the disk now, not at the next unrelated write.
-      if (migrated) await writeJsonFile(path, record);
+      if (migrated) {
+        const write = await writeJsonResult(path, record, unavailable);
+
+        if (write.kind === "refused") throw write.error;
+      }
 
       return record;
     },
-    save(record: AnalyticsRecord): Promise<void> {
-      return writeJsonFile(path, record);
+    async save(record: AnalyticsRecord): Promise<void> {
+      const write = await writeJsonResult(path, record, (cause) => cause);
+
+      if (write.kind === "refused") throw write.error;
     },
   };
 }
+
+/** Interprets only analytics formats and salvages optional work without exposing stored values. */
+const decodeAnalytics: Decode<{ record: AnalyticsRecord; migrated: boolean }, Error> = (parsed) => {
+  // A later envelope need not retain the current record's fields.
+  const format = Format()(parsed);
+
+  if (!(format instanceof type.errors) && format.format > 2)
+    return { kind: "newer", error: unavailable() };
+
+  try {
+    const legacy = FormatOne()(parsed);
+
+    const current =
+      legacy instanceof type.errors
+        ? parsed
+        : {
+            ...legacy,
+            format: 2,
+            pending: legacy.pending.filter((item) => LegacySummary()(item) instanceof type.errors),
+          };
+
+    const migrated = current !== parsed;
+
+    // New optional diagnostic literals cannot invalidate otherwise valid consent or legacy work.
+    const queue = type({
+      pending: type({ event: type({ event: "string", properties: "object" }) }).array(),
+    })(current);
+
+    const diagnosticSafe =
+      queue instanceof type.errors
+        ? current
+        : {
+            ...queue,
+            pending: queue.pending.map((item) =>
+              item.event.event !== "stream_error"
+                ? item
+                : {
+                    ...item,
+                    event: {
+                      ...item.event,
+                      properties: Object.fromEntries(
+                        Object.entries(item.event.properties).filter(
+                          ([key, entry]) =>
+                            !key.startsWith("diagnostic_") ||
+                            !(PlaybackDiagnostic()({ [key]: entry }) instanceof type.errors),
+                        ),
+                      ),
+                    },
+                  },
+            ),
+          };
+
+    const checked = LegacyRecord()(diagnosticSafe);
+
+    if (
+      checked instanceof type.errors ||
+      checked.firstSeen !== (checked.installationId !== null) ||
+      (checked.firstSeen && checked.lastDay === null) ||
+      (!checked.firstSeen && (checked.lastDay !== null || checked.pending.length !== 0)) ||
+      (!checked.enabled && checked.pending.length !== 0) ||
+      checked.pending.some((item) => item.event.distinct_id !== checked.installationId)
+    )
+      throw new Error();
+    let record: AnalyticsRecord = checked;
+    // Optional new work cannot turn valid .15 consent into an unavailable preference.
+    const optional = type({ "summaries?": "unknown" })(current);
+
+    if (!(optional instanceof type.errors) && optional.summaries !== undefined) {
+      const block = SummaryBlock()(optional.summaries);
+
+      if (
+        !(block instanceof type.errors) &&
+        checked.enabled &&
+        block.installationId === checked.installationId &&
+        [...block.pending.map((item) => item.event), block.usage, block.unfinished?.event].every(
+          (event) =>
+            !event ||
+            (event.distinct_id === checked.installationId &&
+              (event.event !== "usage_window" ||
+                (event.timestamp === event.properties.window_start &&
+                  Date.parse(event.properties.window_end) -
+                    Date.parse(event.properties.window_start) ===
+                    WINDOW_MS &&
+                  Date.parse(event.timestamp) % WINDOW_MS === 0 &&
+                  Object.keys(event.properties.counts).length > 0))),
+        ) &&
+        Buffer.byteLength(JSON.stringify(block)) <= OUTBOX_BYTES
+      ) {
+        const cutoff = Date.now() - SUMMARY_TTL_MS;
+        // Age is per item. An expired peer cannot discard fresh, valid offline work.
+        record = {
+          ...checked,
+          summaries: {
+            ...block,
+            pending: block.pending.filter((item) => Date.parse(item.event.timestamp) >= cutoff),
+            usage: block.usage && Date.parse(block.usage.timestamp) >= cutoff ? block.usage : null,
+            unfinished:
+              block.unfinished && Date.parse(block.unfinished.event.timestamp) >= cutoff
+                ? block.unfinished
+                : null,
+          },
+        };
+      }
+    }
+
+    const lifecycle = type({ "lifecycle?": "unknown" })(current);
+
+    if (!(lifecycle instanceof type.errors) && lifecycle.lifecycle !== undefined) {
+      const block = LifecycleBlock()(lifecycle.lifecycle);
+
+      if (
+        !(block instanceof type.errors) &&
+        checked.enabled &&
+        block.installationId === checked.installationId &&
+        block.pending.every((item) => item.event.distinct_id === checked.installationId) &&
+        new Set(block.pending.map((item) => item.event.uuid)).size === block.pending.length &&
+        new Set(block.legacyRetries.map((item) => item.uuid)).size === block.legacyRetries.length &&
+        Buffer.byteLength(JSON.stringify(block)) <= OUTBOX_BYTES
+      ) {
+        const cutoff = Date.now() - SUMMARY_TTL_MS;
+        record.lifecycle = {
+          ...block,
+          pending: block.pending.filter((item) => Date.parse(item.event.timestamp) >= cutoff),
+          legacyRetries: block.legacyRetries.filter((retry) =>
+            checked.pending.some(
+              (item) =>
+                item.event.uuid === retry.uuid &&
+                (item.event.event === "installation_observed" ||
+                  item.event.event === "app_active_day"),
+            ),
+          ),
+        };
+      }
+    }
+
+    return { kind: "read", value: { record, migrated } };
+  } catch {
+    return { kind: "unreadable", error: unavailable() };
+  }
+};

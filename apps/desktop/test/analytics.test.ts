@@ -1,7 +1,7 @@
 import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { type } from "arktype";
@@ -224,6 +224,165 @@ describe("analytics observations", () => {
 });
 
 describe("analytics consent and persistence", () => {
+  it("initializes only confirmed absence through the real analytics store", async () => {
+    const dataDir = await tempDir();
+    expect(await analyticsStore(dataDir).load()).toBeNull();
+    const { owner, events } = await start({ dataDir });
+    expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
+    expect(events).toEqual([]);
+    owner.setForeground(true);
+    await until(() => events.length === 2);
+    expect((await analyticsStore(dataDir).load())?.installationId).toBe(events[0]?.distinct_id);
+  });
+
+  it.each([
+    ["malformed", "{PRIVATE-BYTES"],
+    ["null", "null"],
+    [
+      "inconsistent",
+      '{"format":2,"enabled":false,"installationId":null,"profileOrigin":"fresh","firstSeen":true,"lastDay":null,"pending":[]}',
+    ],
+    ["minimal future", '{"format":3}'],
+  ])(
+    "preserves %s analytics without initializing or accepting consent, then allows repair",
+    async (kind, text) => {
+      const dataDir = await tempDir();
+      const path = join(dataDir, "analytics.json");
+      await writeFile(path, text);
+
+      await expect(analyticsStore(dataDir).load()).rejects.toThrow(
+        /^Analytics state unavailable\.$/,
+      );
+      const refused = await start({ dataDir });
+      refused.owner.setForeground(true);
+      expect(await refused.owner.settings()).toEqual({
+        enabled: false,
+        transport: "unavailable",
+      });
+      await expect(refused.owner.configure(true)).rejects.toThrow(
+        "Analytics preference could not be saved.",
+      );
+      expect(refused.events).toEqual([]);
+      await refused.owner.close();
+
+      expect(await readFile(path, "utf8")).toBe(text);
+      const identity = "f157c0b7-1b97-4a60-a96b-1c2ca9e56904";
+      await writeFile(
+        path,
+        JSON.stringify({
+          format: 2,
+          enabled: false,
+          installationId: identity,
+          profileOrigin: "upgrading",
+          firstSeen: true,
+          lastDay: "2026-10-11",
+          pending: [],
+        }),
+      );
+      const repaired = await start({ dataDir });
+      expect(await repaired.owner.settings()).toEqual({ enabled: false, transport: "local" });
+      expect((await analyticsStore(dataDir).load())?.installationId).toBe(identity);
+      expect(repaired.events).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "preserves unreadable valid analytics without accepting consent, then allows repair",
+    async () => {
+      const dataDir = await tempDir();
+      const path = join(dataDir, "analytics.json");
+
+      const record: AnalyticsRecord = {
+        format: 2,
+        enabled: false,
+        installationId: "f157c0b7-1b97-4a60-a96b-1c2ca9e56904",
+        profileOrigin: "upgrading",
+        firstSeen: true,
+        lastDay: "2026-10-11",
+        pending: [],
+      };
+
+      await analyticsStore(dataDir).save(record);
+      const text = await readFile(path, "utf8");
+      await chmod(path, 0o000);
+
+      try {
+        await expect(analyticsStore(dataDir).load()).rejects.toThrow(
+          /^Analytics state unavailable\.$/,
+        );
+        const refused = await start({ dataDir });
+        refused.owner.setForeground(true);
+        expect(await refused.owner.settings()).toEqual({
+          enabled: false,
+          transport: "unavailable",
+        });
+        await expect(refused.owner.configure(true)).rejects.toThrow(
+          "Analytics preference could not be saved.",
+        );
+        expect(refused.events).toEqual([]);
+        await refused.owner.close();
+      } finally {
+        await chmod(path, 0o600);
+      }
+
+      expect(await readFile(path, "utf8")).toBe(text);
+      expect(await analyticsStore(dataDir).load()).toEqual(record);
+      const repaired = await start({ dataDir });
+      expect(await repaired.owner.settings()).toEqual({ enabled: false, transport: "local" });
+      expect(repaired.events).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "retains the original save cause and refuses consent until a real write can persist",
+    async () => {
+      const dataDir = await tempDir();
+      const path = join(dataDir, "analytics.json");
+      const identity = "f157c0b7-1b97-4a60-a96b-1c2ca9e56904";
+
+      const record: AnalyticsRecord = {
+        format: 2,
+        enabled: false,
+        installationId: identity,
+        profileOrigin: "upgrading",
+        firstSeen: true,
+        lastDay: new Date().toISOString().slice(0, 10),
+        pending: [],
+      };
+
+      await analyticsStore(dataDir).save(record);
+      const text = await readFile(path, "utf8");
+      const first = await start({ dataDir });
+      await chmod(dataDir, 0o555);
+
+      try {
+        await expect(
+          analyticsStore(dataDir).save({ ...record, enabled: true }),
+        ).rejects.toMatchObject({ code: "EACCES" });
+        await expect(first.owner.configure(true)).rejects.toThrow(
+          "Analytics preference could not be saved.",
+        );
+        first.owner.setForeground(true);
+        expect(await first.owner.settings()).toEqual({ enabled: false, transport: "unavailable" });
+        expect(first.events).toEqual([]);
+        expect(await readFile(path, "utf8")).toBe(text);
+        await first.owner.close();
+      } finally {
+        await chmod(dataDir, 0o755);
+      }
+
+      const retry = await start({ dataDir });
+      expect(await retry.owner.settings()).toEqual({ enabled: false, transport: "local" });
+      await retry.owner.configure(true);
+      expect(await retry.owner.settings()).toEqual({ enabled: true, transport: "local" });
+      expect(await analyticsStore(dataDir).load()).toMatchObject({
+        enabled: true,
+        installationId: identity,
+        profileOrigin: "upgrading",
+      });
+    },
+  );
+
   it("has a narrow typed IPC preference, persists disable before first use and stays off on restart", async () => {
     expect(
       ipcInputs["preferences.update"]()({
@@ -1134,6 +1293,69 @@ describe("persisted state migration", () => {
     ready: null,
     reportedDay: "2026-10-11",
   };
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses an undurable migration privately and retries with the original identity and work",
+    async () => {
+      const dataDir = await tempDir();
+      const path = join(dataDir, "analytics.json");
+      const install = legacy("installation_observed", {}, 1);
+      const day = legacy("app_active_day", { activity_date: "2026-10-11" }, 2);
+
+      const text = JSON.stringify({
+        format: 1,
+        enabled: true,
+        installationId: install.event.distinct_id,
+        profileOrigin: "upgrading",
+        firstSeen: true,
+        lastDay: "2026-10-11",
+        summary,
+        pending: [install, legacy("app_summary_day", { counts: {} }, 0), day],
+      });
+
+      await writeFile(path, text);
+      await chmod(dataDir, 0o555);
+
+      try {
+        await expect(analyticsStore(dataDir).load()).rejects.toThrow(
+          /^Analytics state unavailable\.$/,
+        );
+        const refused = await start({ dataDir });
+        refused.owner.setForeground(true);
+        expect(await refused.owner.settings()).toEqual({
+          enabled: false,
+          transport: "unavailable",
+        });
+        await expect(refused.owner.configure(false)).rejects.toThrow(
+          "Analytics preference could not be saved.",
+        );
+        expect(refused.events).toEqual([]);
+        expect(await readFile(path, "utf8")).toBe(text);
+        await refused.owner.close();
+      } finally {
+        await chmod(dataDir, 0o755);
+      }
+
+      const restored = await analyticsStore(dataDir).load();
+      expect(restored).toMatchObject({
+        format: 2,
+        enabled: true,
+        installationId: install.event.distinct_id,
+        profileOrigin: "upgrading",
+        pending: [install, day],
+      });
+      expect(await saved(dataDir)).toEqual(restored);
+      expect(await readFile(path, "utf8")).not.toContain('"summary"');
+      const capture = await captureServer();
+      const restarted = await start({ dataDir, transport: localCapture(capture.endpoint) });
+      restarted.owner.setForeground(true);
+      await until(() => capture.payloads.length >= 2);
+      expect(capture.payloads.slice(0, 2)).toEqual([
+        { api_key: "mrstreamer-local-verification", ...install.event },
+        { api_key: "mrstreamer-local-verification", ...day.event },
+      ]);
+    },
+  );
 
   it("discards queued daily summaries and their counts, never sending them, and keeps other queued events", async () => {
     const dataDir = await tempDir();

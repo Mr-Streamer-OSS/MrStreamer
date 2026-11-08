@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -685,14 +685,28 @@ describe("optional analytics startup", () => {
       await writeFile(path, JSON.stringify(legacy));
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
-      const original = jsonFile.writeJsonFile;
-      vi.spyOn(jsonFile, "writeJsonFile").mockImplementationOnce(async (destination, value) => {
-        entered.resolve();
-        await release.promise;
+      const original = jsonFile.writeJsonResult;
+      vi.spyOn(jsonFile, "writeJsonResult").mockImplementationOnce(
+        async (destination, value, refused) => {
+          entered.resolve();
+          await release.promise;
 
-        if (outcome === "failure") throw new Error("PRIVATE-ID rename EACCES");
-        await original(destination, value);
-      });
+          if (outcome !== "failure") return original(destination, value, refused);
+
+          // Obstruct the real writer's directory, then restore the untouched legacy file.
+          const heldDirectory = `${dataDir}.migration`;
+          await rename(dataDir, heldDirectory);
+
+          try {
+            await writeFile(dataDir, "blocked");
+
+            return await original(destination, value, refused);
+          } finally {
+            await rm(dataDir, { force: true });
+            await rename(heldDirectory, dataDir);
+          }
+        },
+      );
       const { owner, events } = await start({ store: analyticsStore(dataDir) });
 
       const disabled =
