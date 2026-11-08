@@ -586,6 +586,79 @@ it("retains the collection acquisition past caller scope closure and releases it
   }
 });
 
+it("publishes named-owner collection changes and refuses retained admission after inactive removal", async ({
+  signal,
+}) => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const sessions = await runtime.runPromise(ProfileSessions);
+  const initial = await runtime.runPromise(sessions.active, { signal });
+  const created = await runtime.runPromise(sessions.create("Viewer B", initial), { signal });
+  const named = await runtime.runPromise(sessions.switch(created.id, initial), { signal });
+  const admitted = await runtime.runPromise(sessions.admitFor(named), { signal });
+
+  const commands = collectionsHandlers({
+    collections: admitted.services.collections,
+    current: admitted.current,
+  });
+
+  const changes = await runtime.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const stream = yield* sessions.changes;
+
+        const pull = yield* Stream.toPull(
+          Stream.filter(stream, (change) => change.kind === "collections"),
+        );
+
+        yield* admitted.run(
+          commands["collections.change"](
+            { kind: "create", id: "named", name: "Named collection" },
+            "test",
+          ),
+        );
+
+        return yield* pull;
+      }),
+    ),
+    { signal },
+  );
+
+  expect(changes).toEqual([{ kind: "collections", owner: named }]);
+  expect(
+    await runtime.runPromise(admitted.run(commands["collections.list"](undefined, "test")), {
+      signal,
+    }),
+  ).toEqual([expect.objectContaining({ id: "named", name: "Named collection" })]);
+
+  const current = await runtime.runPromise(sessions.switch(DEFAULT_PROFILE_ID, named), { signal });
+  await runtime.runPromise(sessions.remove(created.id, current), { signal });
+  expect(await runtime.runPromise(sessions.list, { signal })).not.toContainEqual(
+    expect.objectContaining({ id: created.id }),
+  );
+
+  const refused = await runtime.runPromiseExit(admitted.run(Effect.void), { signal });
+  expect(Exit.isFailure(refused)).toBe(true);
+
+  if (Exit.isFailure(refused))
+    expect(Cause.squash(refused.cause)).toMatchObject({
+      error: {
+        kind: "unexpected",
+        detail: "This profile admission has ended; retry the operation.",
+      },
+    });
+});
+
 describe("profile lifecycle before UI enablement", () => {
   it("retains admitted owners across switch, erases all owners retryably, and deletes only inactive personal data", async () => {
     const dataDir = await tempDir();
