@@ -364,9 +364,11 @@ function YearMenu({
   const text = value ? yearText(value) : undefined;
 
   const apply = () => {
-    const [min, max] = [from, to]
-      .map((each) => (/^\d+$/.test(each.trim()) ? Number(each.trim()) : undefined))
-      .toSorted((a, b) => (a === undefined || b === undefined ? 0 : a - b));
+    let [min, max] = [from, to].map((each) =>
+      /^\d+$/.test(each.trim()) ? Number(each.trim()) : undefined,
+    );
+
+    if (min !== undefined && max !== undefined && min > max) [min, max] = [max, min];
 
     const year: NonNullable<TitleFilters["year"]> = {};
 
@@ -698,29 +700,19 @@ export function RuleMenus({
       {shown.map((rule) => (
         <Fragment key={rule}>{menu(rule)}</Fragment>
       ))}
-      {setOnly && unset.length > 0 && (
-        <AddRule rules={unset} onAdd={setAdding} disabled={!options} />
-      )}
+      {setOnly && unset.length > 0 && <AddRule rules={unset} onAdd={setAdding} />}
     </>
   );
 }
 
 /** + Rule: the rules not set yet. The one picked opens its own menu next. */
-function AddRule({
-  rules,
-  onAdd,
-  disabled,
-}: {
-  rules: readonly Rule[];
-  onAdd: (rule: Rule) => void;
-  disabled: boolean;
-}) {
+function AddRule({ rules, onAdd }: { rules: readonly Rule[]; onAdd: (rule: Rule) => void }) {
   const label = t("Add rule");
 
   return (
     <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
       <Menu.Root>
-        <Menu.Trigger disabled={disabled} aria-label={label} className={triggerClass}>
+        <Menu.Trigger aria-label={label} className={triggerClass}>
           <Plus aria-hidden className="size-3.5 flex-none" />
           {t("Rule")}
         </Menu.Trigger>
@@ -785,7 +777,6 @@ export function TitleFilterBar({
   /** Beside the count, such as All's Save as collection. */
   action?: ReactNode;
 }) {
-  const available = useQuery(queries.titleFilterOptions(kind));
   const filtered = Object.keys(filters).length > 0;
 
   const reset = filtered && (
@@ -822,18 +813,8 @@ export function TitleFilterBar({
       </div>
       <div className="mt-2 empty:hidden">
         <RuleNotes kind={kind} filters={filters} />
+        <RuleOptionsFailure kind={kind} />
       </div>
-      {available.error && (
-        <p className="mt-2 text-destructive">
-          {describeError(appError(available.error))}{" "}
-          <button
-            className="text-white underline underline-offset-4"
-            onClick={() => void available.refetch()}
-          >
-            {t("Try again")}
-          </button>
-        </p>
-      )}
     </div>
   );
 }
@@ -845,6 +826,25 @@ export function FilterEmpty({ filters }: { filters: TitleFilters }) {
       {t("No titles match these filters.")}
       {filters.verified &&
         ` ${t("Verified tracks come from files played on this device. Filtering opens no files.")}`}
+    </p>
+  );
+}
+
+/** A refused options read keeps the draft and can be retried in place. */
+export function RuleOptionsFailure({ kind }: { kind: TitleKind }) {
+  const available = useQuery(queries.titleFilterOptions(kind));
+
+  if (!available.error) return null;
+
+  return (
+    <p className="mt-2 text-destructive">
+      {describeError(appError(available.error))}{" "}
+      <button
+        className="text-white underline underline-offset-4"
+        onClick={() => void available.refetch()}
+      >
+        {t("Try again")}
+      </button>
     </p>
   );
 }

@@ -540,6 +540,11 @@ it("re-evaluates saved smart rules through admitted catalogue reads after refres
     total: 1,
     members: [{ sourceId: source.id, titleId: String(seed.id), available: true }],
   });
+  const other = await fakeProvider({ titles: 1, second: true });
+  other.failTitles(503);
+  const unloaded = await subscriptions.add(demoLogin(other));
+  expect(await run(collections.page("smart", 0, 48))).toMatchObject({ total: 1 });
+  expect(await run(collections.list)).toMatchObject([{ id: "smart", total: 1 }]);
   const before = [provider.detailRequests(), provider.fileRequests()];
   provider.serveTitles((all) => ({
     ...all,
@@ -549,4 +554,10 @@ it("re-evaluates saved smart rules through admitted catalogue reads after refres
   await onDemand.refresh(source.id);
   expect(await run(collections.page("smart", 0, 48))).toEqual({ total: 0, members: [] });
   expect([provider.detailRequests(), provider.fileRequests()]).toEqual(before);
+  await expect(onDemand.refresh(unloaded.id)).rejects.toThrow();
+  await run(collections.change({ kind: "create", id: "manual", name: "Manual" }));
+  expect(await run(collections.page("manual", 0, 48))).toEqual({ total: 0, members: [] });
+  expect(await run(collections.page("smart", 0, 48))).toEqual({ total: 0, members: [] });
+  await run(collections.change({ kind: "delete", id: "smart" }));
+  expect(await run(collections.list)).toMatchObject([{ id: "manual", total: 0 }]);
 });

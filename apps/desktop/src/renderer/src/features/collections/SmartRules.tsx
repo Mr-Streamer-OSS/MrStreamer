@@ -23,6 +23,7 @@ import { CollectionGrid, PAGE } from "../titles/CollectionGrid.tsx";
 import {
   RuleMenus,
   RuleNotes,
+  RuleOptionsFailure,
   sameFilters,
   setRules,
   useRuleChoices,
@@ -222,6 +223,7 @@ export function SmartPane({
       </div>
       <div className="flex flex-none flex-col gap-1 pr-8 pb-4 empty:hidden">
         <RuleNotes kind={kind} filters={filters} />
+        <RuleOptionsFailure kind={kind} />
         {!changed && notes}
       </div>
       {changed && (
@@ -317,7 +319,7 @@ function RulesChanged({
           </span>
         )}
         <span className="grow" />
-        <Button variant="ghost" size="sm" onClick={onDiscard}>
+        <Button variant="ghost" size="sm" disabled={saving} onClick={onDiscard}>
           {t("Discard")}
         </Button>
         <Button

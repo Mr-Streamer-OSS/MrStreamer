@@ -5,7 +5,7 @@
 // the same, mounted: the Collections tab's grid and picks, and the menu in a title's details.
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
-import { syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
+import { syncViewing, syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement, useState } from "react";
@@ -1695,8 +1695,22 @@ describe("a smart collection in the Collections tab", () => {
     expect(ipc.argsOf("collections.change")).toEqual([]);
   });
 
+  it("keeps edits while a rule save is pending", async () => {
+    smartMain();
+    await mountTab();
+    await poster("Dune Road, Movie, 2021");
+    await setRule("Rating", "7+");
+    const held = ipc.hold("collections.change");
+    await act(async () => button("Save rules").click());
+    expect(button("Discard").hasAttribute("disabled")).toBe(true);
+    await act(async () => held.reject({ kind: "unexpected", detail: "disk" }));
+    await vi.waitFor(() => expect(button("Discard").hasAttribute("disabled")).toBe(false));
+    expect(bar()?.textContent).toContain("Your changes are kept");
+  });
+
   it("makes a smart collection as a draft that is stored with its first saved rule", async () => {
     smartMain();
+    ipc.refuse("ondemand.filterOptions", { kind: "unexpected", detail: "choices unavailable" });
     await mountTab();
     await row("Short films");
 
@@ -1727,7 +1741,12 @@ describe("a smart collection in the Collections tab", () => {
     expect(draft()?.textContent).toContain("Add a rule to save");
     expect(ipc.argsOf("collections.change")).toEqual([]);
 
+    await vi.waitFor(() => expect(button("Try again")).toBeTruthy());
     await setRule("Rating", "7+");
+    ipc.always("ondemand.filterOptions", { qualities: [], languages: [], verified: [], files: 0 });
+    await act(async () => button("Try again").click());
+    await vi.waitFor(() => expect(() => button("Try again")).toThrow());
+    expect(document.querySelector("h1")?.textContent).toBe("Short comedies");
     await vi.waitFor(() => expect(button("Save rules").hasAttribute("disabled")).toBe(false));
     await act(async () => button("Save rules").click());
     await vi.waitFor(() => expect(draft()).toBeNull());
@@ -1743,6 +1762,38 @@ describe("a smart collection in the Collections tab", () => {
     await vi.waitFor(async () =>
       expect((await row("Short comedies")).textContent).toBe("Short comediesSmart collection1"),
     );
+  });
+
+  it("refreshes smart matches and counts on this owner's viewing event alone", async () => {
+    const owner = { id: "sam", revision: 2 };
+    selectProfileOwner(owner);
+    smartMain();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = queryView(client);
+    const stop = syncViewing(client);
+    unmount = () => {
+      stop();
+      view.unmount();
+    };
+
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
+    await poster("Dune Road, Movie, 2021");
+    ipc.always("collections.list", [
+      {
+        id: "s0",
+        name: "Short films",
+        total: 0,
+        rules: { kind: "movie", filters: { watched: "unwatched" } },
+      },
+    ]);
+    ipc.always("collections.page", { total: 0, members: [] });
+    await act(async () =>
+      ipc.emit("profiles.viewingChanged", { owner: { id: "other", revision: 2 }, sequence: 1 }),
+    );
+    await poster("Dune Road, Movie, 2021");
+    await act(async () => ipc.emit("profiles.viewingChanged", { owner, sequence: 1 }));
+    await vi.waitFor(() => expect(document.querySelector("[data-index] button")).toBeNull());
+    expect((await row("Short films")).textContent).toContain("0");
   });
 
   it("keeps the matches shown when reading them again fails, and says when they are from", async () => {

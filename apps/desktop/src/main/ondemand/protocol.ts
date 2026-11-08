@@ -60,6 +60,9 @@ export interface KnownFile {
   readonly kind: "movie" | "episode";
   readonly id: string;
   readonly seriesId?: string;
+  /** Exact episode numbers from the current loaded listing, for admitted manual marks. */
+  readonly season?: number;
+  readonly episode?: number;
   readonly listingKey: string;
   readonly runtime?: number | null;
   readonly tracks?: {

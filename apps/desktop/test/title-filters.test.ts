@@ -659,3 +659,91 @@ it("filters watched movies using only the admitted profile record", async () => 
   expect(unwatched.titles.some((title) => title.id === first.id)).toBe(false);
   expect(asked(provider)).toEqual(before);
 });
+
+it("counts a movie as in progress only after the public started threshold", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  await app.titles.refresh(source.id);
+  const sessions = await app.runtime.runPromise(ProfileSessions);
+  const admission = await app.runtime.runPromise(sessions.admit);
+  const onDemand = await app.runtime.runPromise(OnDemand);
+
+  const query = {
+    kind: "movie" as const,
+    id: "all" as const,
+    offset: 0,
+    limit: 48,
+    filters: { watched: "in-progress" as const },
+  };
+
+  const first = (await app.titles.collection({ ...query, filters: {} })).titles[0]!;
+
+  for (const [position, total] of [
+    [5, 0],
+    [120, 1],
+  ] as const) {
+    await app.runtime.runPromise(
+      admission.run(
+        admission.services.viewing.recordProgress(
+          `sample-${position}`,
+          { kind: "movie", subscriptionId: source.id, id: first.id },
+          position,
+          6000,
+          Date.now(),
+        ),
+      ),
+    );
+    expect((await app.runtime.runPromise(admission.run(onDemand.collection(query)))).total).toBe(
+      total,
+    );
+  }
+});
+
+it("includes manual episode marks only on currently loaded exact series files", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  await app.titles.refresh(source.id);
+  const seriesId = String(provider.titles.series[0]!.id);
+  const details = await app.titles.details("series", { subscriptionId: source.id, id: seriesId });
+
+  if (details.kind !== "series") throw new Error("Expected series");
+  const first = details.seasons[0]!.episodes[0]!;
+  const sessions = await app.runtime.runPromise(ProfileSessions);
+  const admission = await app.runtime.runPromise(sessions.admit);
+  const onDemand = await app.runtime.runPromise(OnDemand);
+  await app.runtime.runPromise(
+    admission.run(
+      admission.services.viewing.markEpisode(
+        "mark",
+        {
+          kind: "episode",
+          subscriptionId: source.id,
+          id: first.id,
+          seriesId: first.seriesId,
+          season: first.season,
+          episode: first.number,
+        },
+        true,
+      ),
+    ),
+  );
+  const before = asked(provider);
+  expect(
+    (
+      await app.runtime.runPromise(
+        admission.run(
+          onDemand.collection({
+            kind: "series",
+            id: "all",
+            offset: 0,
+            limit: 48,
+            filters: { watched: "watched" },
+          }),
+        ),
+      )
+    ).titles.map((title) => title.id),
+  ).toContain(seriesId);
+  expect(asked(provider)).toEqual(before);
+});

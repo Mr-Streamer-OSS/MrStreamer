@@ -6,7 +6,6 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { defined } from "@mrstreamer/core/defined";
 import { ViewingErasure } from "@mrstreamer/core/viewing/service";
-import { hasTitles } from "@mrstreamer/contracts/subscription";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { t } from "@mrstreamer/core/i18n";
 import { Failed } from "@mrstreamer/core/failure";
@@ -282,7 +281,7 @@ export class Collections extends Context.Service<
           },
         });
 
-      const request = (extra: readonly CollectionIdentity[] = []) =>
+      const request = (extra: readonly CollectionIdentity[] = [], smartId?: string | false) =>
         Effect.gen(function* () {
           const policy = yield* Effect.serviceOption(CollectionCurrent);
 
@@ -339,14 +338,24 @@ export class Collections extends Context.Service<
 
           // Resolve each exact saved version separately. The existing catalogue admission filters
           // before grouping and artwork; a sibling version must never become this member's primary.
+          const statuses = yield* onDemand.status;
+
+          const loadedSources = statuses.lists
+            .filter((list) => list.fetchedAt !== null)
+            .map((list) => list.subscriptionId);
+
+          const evaluating = saved.filter(
+            (list) =>
+              list.rules && smartId !== false && (smartId === undefined || list.id === smartId),
+          );
+
           const snapshot = yield* onDemand.catalogueSnapshot(
-            saved.some((list) => list.rules)
-              ? sources.filter(hasTitles).map((source) => source.id)
+            evaluating.length > 0
+              ? [...permitted.map((identity) => identity.sourceId), ...loadedSources]
               : permitted.map((identity) => identity.sourceId),
           );
 
           catalogueCurrent = snapshot.current;
-          const statuses = yield* onDemand.status;
 
           for (const identity of new Map(
             permitted.map((item) => [collectionKey(item), item]),
@@ -403,7 +412,7 @@ export class Collections extends Context.Service<
 
           const smart = new Map<string, CollectionTitle[]>();
 
-          for (const list of saved) {
+          for (const list of evaluating) {
             if (!list.rules) continue;
             const matches: CollectionTitle[] = [];
 
@@ -412,7 +421,14 @@ export class Collections extends Context.Service<
               id: "all",
               offset: 0,
               limit: Number.MAX_SAFE_INTEGER,
-              filters: list.rules.filters,
+              // A source first accepted during this read belongs to the next snapshot.
+              filters: {
+                ...list.rules.filters,
+                sourceIds: loadedSources.filter(
+                  (id) =>
+                    !list.rules?.filters.sourceIds || list.rules.filters.sourceIds.includes(id),
+                ),
+              },
             });
 
             for (const title of page.titles) {
@@ -454,12 +470,12 @@ export class Collections extends Context.Service<
       return {
         list: Effect.flatMap(request(), ({ module, visibility }) => module.list(visibility)),
         page: (id, offset, limit) =>
-          Effect.flatMap(request(), ({ module, visibility }) =>
+          Effect.flatMap(request([], id), ({ module, visibility }) =>
             module.page(visibility, id, offset, limit),
           ),
         memberships: (title) =>
           Effect.gen(function* () {
-            const { module, visibility } = yield* request([title]);
+            const { module, visibility } = yield* request([title], false);
             const lists = yield* module.list(visibility);
             const ids: string[] = [];
 
@@ -482,7 +498,7 @@ export class Collections extends Context.Service<
           Effect.gen(function* () {
             // Copied before the first await, like the module's other caller-owned input.
             const change = structuredClone(input);
-            const { module, visibility, owner } = yield* request(changedTitles(change));
+            const { module, visibility, owner } = yield* request(changedTitles(change), false);
             yield* module.change(visibility, change);
             yield* PubSub.publish(changes, owner);
           }),

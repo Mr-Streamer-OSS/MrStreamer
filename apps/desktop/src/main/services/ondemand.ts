@@ -1,3 +1,4 @@
+import { STARTED_SECONDS } from "@mrstreamer/core/viewing/titles";
 import { AdmittedKids } from "./profile-policy.ts";
 import { ArkErrors } from "arktype";
 import { workerResults } from "../ondemand/protocol.ts";
@@ -347,6 +348,16 @@ function make(deps: OnDemandDeps) {
       fetching: false,
     };
 
+    // Bounded full-rule answers avoid repeating catalogue work and large IPC transfers.
+    // Keys include captured policy and all local facts; worker content/lifetime changes clear them.
+    const rulePages = new Map<string, WorkerCalls["collection"]["result"]>();
+    let ruleCurrency = 0;
+
+    const clearRulePages = () => {
+      ruleCurrency++;
+      rulePages.clear();
+    };
+
     // Acceptance and worker lifetime own currency, independently of wall-clock timestamps.
     let incarnation = {};
     let workerAvailable = false;
@@ -361,6 +372,7 @@ function make(deps: OnDemandDeps) {
     >();
 
     const invalidateWorker = () => {
+      clearRulePages();
       incarnation = {};
       catalogues.clear();
     };
@@ -381,6 +393,7 @@ function make(deps: OnDemandDeps) {
                 : null,
             }),
           (event) => {
+            if (event.content) clearRulePages();
             metadataProgress = event.status;
             // New content has the UI refetch what it shows, with the lists' status. Without, the
             // UI only takes TMDB's progress, and reads nothing again.
@@ -558,6 +571,10 @@ function make(deps: OnDemandDeps) {
 
     const call = <M extends WorkerMethod>(method: M, args: WorkerCalls[M]["args"]) =>
       Effect.gen(function* () {
+        const changesCatalogue =
+          method === "refresh" || method === "finishRefresh" || method === "forget";
+
+        if (changesCatalogue) clearRulePages();
         const admitted = yield* Effect.serviceOption(AdmittedSettings);
         const policy = yield* Effect.serviceOption(AdmittedKids);
         // Only owner-scoped reads carry this selection; storage and household work use the full catalogue.
@@ -599,7 +616,50 @@ function make(deps: OnDemandDeps) {
             return worker.call(method, selected);
           },
           catch: failedWith,
-        });
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              // Concurrent reads begun while acceptance was in flight cannot survive its completion.
+              if (changesCatalogue) clearRulePages();
+            }),
+          ),
+        );
+      });
+
+    const rulePage = (args: WorkerCalls["collection"]["args"]) =>
+      Effect.gen(function* () {
+        if (args.limit !== Number.MAX_SAFE_INTEGER) return yield* call("collection", args);
+        const admitted = yield* Effect.serviceOption(AdmittedSettings);
+        const kids = yield* Effect.serviceOption(AdmittedKids);
+
+        if (admitted._tag === "Some" && !admitted.value.current())
+          return yield* new Failed({
+            error: {
+              kind: "unexpected",
+              detail: "Viewing profile changed; retry this catalogue read.",
+            },
+          });
+        const currency = ruleCurrency;
+
+        const key = JSON.stringify([
+          currency,
+          admitted._tag === "Some" ? admitted.value.owner : null,
+          kids._tag === "Some" ? kids.value.approved : null,
+          (yield* preferences).adultTitles ?? false,
+          args,
+        ]);
+
+        const kept = rulePages.get(key);
+
+        if (kept) return kept;
+        const page = yield* call("collection", args);
+
+        if (currency === ruleCurrency) {
+          if (rulePages.size >= 8) rulePages.delete(rulePages.keys().next().value!);
+          rulePages.set(key, page);
+        }
+
+        return page;
       });
 
     /** Whose lists a call to the worker is about. */
@@ -1380,6 +1440,8 @@ function make(deps: OnDemandDeps) {
                 kind: "episode",
                 id: episode.id,
                 seriesId: held.version.id,
+                season: episode.season,
+                episode: episode.number,
                 listingKey,
                 tags: hints,
                 runtime: episode.duration,
@@ -1411,7 +1473,7 @@ function make(deps: OnDemandDeps) {
           });
         const record = admitted.value;
 
-        const page = yield* call("collection", {
+        const page = yield* rulePage({
           owners,
           language,
           kind,
@@ -1426,12 +1488,49 @@ function make(deps: OnDemandDeps) {
           kind === "movie" ? { movies: versions } : { series: versions },
         );
 
-        return progress
-          .filter((entry) => entry.finished || entry.position > 0)
-          .map((entry) => ({
-            key: ownedKey(entry.title),
-            state: entry.finished ? ("watched" as const) : ("in-progress" as const),
-          }));
+        const watched = new Map(
+          progress
+            .filter((entry) => entry.finished || entry.position >= STARTED_SECONDS)
+            .map((entry) => [
+              ownedKey(entry.title),
+              {
+                key: ownedKey(entry.title),
+                state: entry.finished ? ("watched" as const) : ("in-progress" as const),
+              },
+            ]),
+        );
+
+        if (kind === "series") {
+          const files = yield* knownFiles(kind);
+
+          for (const version of versions) {
+            const exact = files.filter(
+              (file) =>
+                file.subscriptionId === version.subscriptionId && file.seriesId === version.id,
+            );
+
+            if (exact.length === 0) continue;
+            const viewing = yield* record.episodes(version);
+
+            for (const file of exact) {
+              const mark = viewing.marks.find(
+                (mark) => mark.season === file.season && mark.episode === file.episode,
+              );
+
+              const played = viewing.progress.find(
+                (played) => ownedKey(played.title) === ownedKey(file),
+              );
+
+              if (!mark || (played && played.since > mark.at)) continue;
+              const key = ownedKey(file);
+
+              if (mark.watched) watched.set(key, { key, state: "watched" });
+              else watched.delete(key);
+            }
+          }
+        }
+
+        return [...watched.values()];
       });
 
     /** One read of validated observations decorates each season without joining rows by id. */
@@ -1625,7 +1724,7 @@ function make(deps: OnDemandDeps) {
               const files = filters ? yield* knownFiles(kind) : undefined;
               const watched = yield* watchedFiles(kind, filters, owners, language);
 
-              return yield* call("collection", {
+              return yield* rulePage({
                 owners,
                 language,
                 kind,

@@ -9,7 +9,7 @@ import type { Title, TitleKind, MovieDetails } from "@mrstreamer/contracts/ondem
 import { defaultSubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { openCollection, TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
-import { queries } from "../../src/renderer/src/lib/queries.ts";
+import { syncViewing, queries } from "../../src/renderer/src/lib/queries.ts";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import type { DetailsTarget } from "../../src/renderer/src/app/ui-store.ts";
 
@@ -618,7 +618,7 @@ it("applies a typed year range only once it is confirmed", async () => {
   const trigger = page.group("Year").querySelector<HTMLButtonElement>("button")!;
   await act(async () => trigger.click());
 
-  const [from, to] = await vi.waitFor(() => {
+  const [, to] = await vi.waitFor(() => {
     const fields = [
       ...document.querySelectorAll<HTMLInputElement>("[role=dialog][aria-label=Year] input"),
     ];
@@ -630,11 +630,21 @@ it("applies a typed year range only once it is confirmed", async () => {
 
   const reads = ipc.argsOf("ondemand.collection").length;
   await typeInto(to!, "2015");
-  await typeInto(from!, "2026");
-  await act(() => vi.advanceTimersByTimeAsync(200));
-  expect(ipc.argsOf("ondemand.collection")).toHaveLength(reads);
+  await enter(to!);
+  await page.until(() =>
+    expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({ year: { max: 2015 } }),
+  );
+  await act(async () => trigger.click());
 
-  await enter(from!);
+  const reopened = [
+    ...document.querySelectorAll<HTMLInputElement>("[role=dialog][aria-label=Year] input"),
+  ];
+
+  await typeInto(reopened[0]!, "2026");
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  expect(ipc.argsOf("ondemand.collection")).toHaveLength(reads + 1);
+
+  await enter(reopened[0]!);
   // Bounds are inclusive and kept in order, whichever field holds which.
   await page.until(() =>
     expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({
@@ -643,6 +653,24 @@ it("applies a typed year range only once it is confirmed", async () => {
   );
   await page.until(() => expect(trigger.getAttribute("aria-label")).toBe("Year: 2015 to 2026"));
   expect(ipc.methods()).not.toContain("ondemand.details");
+});
+
+it("cancels an obsolete watched-filter read on a viewing event without a catalogue event", async () => {
+  const page = await mount();
+  const stop = syncViewing(page.client);
+
+  try {
+    const held = ipc.hold("ondemand.collection");
+    await page.click("Unwatched", "Watched");
+    ipc.always("ondemand.collection", { name: "All", titles: [], total: 3 });
+    await act(async () => ipc.emit("viewing.changed", { sequence: 1 }));
+    await page.until(() => expect(page.container.textContent).toContain("3 of 3"));
+    await act(async () => held.resolve({ name: "All", titles: [], total: 99 }));
+    expect(page.container.textContent).toContain("3 of 3");
+    expect(page.container.textContent).not.toContain("99 of 99");
+  } finally {
+    stop();
+  }
 });
 
 it("announces a collection's count when filtering changes it", async () => {
