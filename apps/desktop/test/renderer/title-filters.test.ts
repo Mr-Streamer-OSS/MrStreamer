@@ -778,3 +778,70 @@ it.each([
   await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(view.container.querySelector(`[role=group][aria-label='${rule}']`)).toBeNull();
 });
+
+it("returns to Add rule after cancelling its last offered rule", async () => {
+  vi.useRealTimers();
+  ipc.always("subscription.list", [SAVED]);
+  ipc.always("ondemand.filterOptions", options);
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = queryView(client);
+  cleanup = view.unmount;
+  await view.render(
+    createElement(RuleMenus, {
+      kind: "movie",
+      filters: {
+        genres: ["Drama"],
+        year: { max: 2024 },
+        runtime: { max: 7199 },
+        watched: "unwatched",
+        sourceIds: [SUBSCRIPTION],
+        quality: "4k",
+        language: "en",
+        verified: { kind: "audio", language: "en" },
+      },
+      onFilters: () => {},
+      setOnly: true,
+    }),
+  );
+
+  await act(async () => {
+    const trigger = view.container.querySelector<HTMLButtonElement>(
+      "button[aria-label='Add rule']",
+    )!;
+
+    trigger.focus();
+    trigger.click();
+  });
+
+  const choice = await vi.waitFor(() => {
+    const items = document.querySelectorAll<HTMLElement>(
+      "[role=menu][aria-label='Add rule'] [role=menuitem]",
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.textContent).toBe("Rating");
+
+    return items[0]!;
+  });
+
+  await act(async () => choice.click());
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector("[role=menu][aria-label=Rating]")?.contains(document.activeElement),
+    ).toBe(true),
+  );
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  });
+  await vi.waitFor(() =>
+    expect(view.container.querySelector("[role=group][aria-label=Rating]")).toBeNull(),
+  );
+  await vi.waitFor(() => {
+    const returned = view.container.querySelector("button[aria-label='Add rule']");
+    expect(returned).not.toBeNull();
+    expect(document.activeElement).toBe(returned);
+  });
+});

@@ -744,7 +744,7 @@ export function RuleMenus({
       {shown.map((rule) => (
         <Fragment key={rule}>{menu(rule)}</Fragment>
       ))}
-      {setOnly && unset.length > 0 && (
+      {setOnly && (unset.length > 0 || adding !== null) && (
         <AddRule rules={unset} onAdd={setAdding} triggerRef={addTrigger} />
       )}
     </>
@@ -767,7 +767,12 @@ function AddRule({
   return (
     <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
       <Menu.Root onOpenChange={(open) => open && (picked.current = false)}>
-        <Menu.Trigger ref={triggerRef} aria-label={label} className={triggerClass}>
+        <Menu.Trigger
+          ref={triggerRef}
+          disabled={rules.length === 0}
+          aria-label={label}
+          className={triggerClass}
+        >
           <Plus aria-hidden className="size-3.5 flex-none" />
           {t("Rule")}
         </Menu.Trigger>
