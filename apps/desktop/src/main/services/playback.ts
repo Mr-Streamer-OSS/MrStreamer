@@ -99,7 +99,12 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import { VerifiedFiles } from "../platform/verified-files.ts";
 import { SavedSubtitles, subtitlesOfCopy, type SubtitleFile } from "../platform/saved-subtitles.ts";
-import { fileRequest, recordingFile, type RecordingFile } from "../playback/file-source.ts";
+import {
+  fileRequest,
+  recordingFile,
+  type RecordingFile,
+  type RecordingExtent,
+} from "../playback/file-source.ts";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { createCleanStart } from "../playback/clean-start.ts";
@@ -454,6 +459,8 @@ type TitleOrigin =
       readonly copyKind: "download" | "recording";
       readonly file: SubtitleFile;
       readonly recording?: RecordingFile | undefined;
+      refreshRecording?: (() => Promise<void>) | undefined;
+      finalRecording?: { readonly revision: number; readonly duration: number | null };
     };
 
 interface TitleSessionState extends SessionBase {
@@ -2707,6 +2714,21 @@ function make(deps: PlaybackDeps) {
         rejectedCopy: session.rejectedCopy,
       };
 
+      if (session.origin.kind === "copy" && session.origin.recording) {
+        await session.origin.refreshRecording?.();
+        const extent = await session.origin.recording.read(signal);
+        signal.throwIfAborted();
+
+        if (
+          run.start > 0 &&
+          !extent.seekable.some((range) => run.start >= range.from && run.start <= range.to)
+        ) {
+          response.writeHead(416).end();
+
+          return;
+        }
+      }
+
       const probe = session.probe;
 
       if (!probe || !deps.ffmpeg) {
@@ -3651,8 +3673,11 @@ function make(deps: PlaybackDeps) {
      * is known from when the title was open before. What was read is known for the next time
      * only when the file stayed the same one meanwhile.
      */
-    async function probeTitle(session: TitleSessionState): Promise<TitleProbe> {
-      const known = probes.get(session.probeKey);
+    async function probeTitle(
+      session: TitleSessionState,
+      settledPath?: string,
+    ): Promise<TitleProbe> {
+      const known = settledPath ? undefined : probes.get(session.probeKey);
 
       if (known) return known;
       const ffprobe = deps.ffprobe;
@@ -3674,13 +3699,14 @@ function make(deps: PlaybackDeps) {
         });
       }
 
+      session.closed.signal.throwIfAborted();
       const generation = session.identity.generation;
       let toolFailed = false;
 
       const output = await new Promise<string | null>((resolve) => {
         const child = execFile(
           ffprobe,
-          [...PROBE_ARGUMENTS, `${base}/source/${session.token}`],
+          [...PROBE_ARGUMENTS, settledPath ?? `${base}/source/${session.token}`],
           { timeout: PROBE_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
           (error, stdout) => {
             session.closed.signal.removeEventListener("abort", stop);
@@ -3693,6 +3719,8 @@ function make(deps: PlaybackDeps) {
         });
         const stop = () => void child.kill("SIGKILL");
         session.closed.signal.addEventListener("abort", stop, { once: true });
+
+        if (session.closed.signal.aborted) stop();
       });
 
       let json: Json | null = null;
@@ -3726,7 +3754,7 @@ function make(deps: PlaybackDeps) {
         });
       }
 
-      if (session.identity.generation === generation) {
+      if (!settledPath && session.identity.generation === generation) {
         probes.set(session.probeKey, probe);
 
         if (probes.size > PROBES_KEPT) probes.delete(probes.keys().next().value ?? "");
@@ -4045,11 +4073,24 @@ function make(deps: PlaybackDeps) {
             error: { kind: "unexpected", detail: "Copy session is unavailable." },
           });
 
+        yield* Effect.tryPromise({
+          try: () => origin.refreshRecording?.() ?? Promise.resolve(),
+          catch: failedWith,
+        });
         const source = origin.recording;
 
         const extent = source
           ? yield* Effect.tryPromise({ try: (signal) => source.read(signal), catch: failedWith })
           : undefined;
+
+        const duration =
+          extent?.final && extent.presentation
+            ? origin.finalRecording?.revision === extent.revision
+              ? origin.finalRecording.duration
+              : null
+            : extent
+              ? extent.duration
+              : session.probe.duration;
 
         // Keep byte extents and disk identity in main, including when source facts grow later.
         const recording = extent
@@ -4057,7 +4098,7 @@ function make(deps: PlaybackDeps) {
               revision: extent.revision,
               status: extent.status,
               final: extent.final,
-              duration: extent.duration,
+              duration,
               seekable: extent.seekable,
               gaps: extent.gaps,
             }
@@ -4068,7 +4109,7 @@ function make(deps: PlaybackDeps) {
           copy: origin.copy,
           kind: origin.copyKind,
           ...defined({ owner: session.owner, recording }),
-          duration: extent ? extent.duration : session.probe.duration,
+          duration,
           audio: audioTracks(session.probe.audio),
           subtitles: subtitleTracks(session.probe.subtitles),
         } satisfies CopyState;
@@ -4088,6 +4129,7 @@ function make(deps: PlaybackDeps) {
         readonly request: Provider["request"];
         readonly probeKey: string;
         readonly probeRequest?: Provider["request"] | undefined;
+        readonly recordingPath?: string | undefined;
       },
       decoders: readonly Codec[],
       receiver: ReceiverTarget | null,
@@ -4148,6 +4190,15 @@ function make(deps: PlaybackDeps) {
 
         register(session);
 
+        const recordingSource = origin.kind === "copy" ? origin.recording : undefined;
+
+        const opened = recordingSource
+          ? yield* Effect.tryPromise({
+              try: () => recordingSource.read(session.closed.signal),
+              catch: failedWith,
+            }).pipe(Effect.tapError(() => Scope.close(forked, Exit.void)))
+          : undefined;
+
         const probe = yield* Effect.tryPromise({
           try: () => probeTitle(session),
           catch: failedWith,
@@ -4156,6 +4207,72 @@ function make(deps: PlaybackDeps) {
         probing = false;
         session.probe = probe;
         session.probed = session.identity.generation;
+
+        if (origin.kind === "copy" && origin.recording && file.recordingPath) {
+          const source = origin.recording;
+          const path = file.recordingPath;
+          let settled = opened?.final ?? false;
+
+          const durationOf = (probe: TitleProbe, extent: RecordingExtent) =>
+            extent.presentation &&
+            probe.duration !== null &&
+            extent.presentation.from >= probe.origin &&
+            extent.presentation.to <= probe.origin + probe.duration
+              ? probe.duration
+              : null;
+
+          if (opened?.final)
+            origin.finalRecording = {
+              revision: opened.revision,
+              duration: durationOf(probe, opened),
+            };
+          let pending: Promise<void> | undefined;
+          let layoutChanged = false;
+
+          origin.refreshRecording = () => {
+            if (pending) return pending;
+            pending = (async () => {
+              const before = await source.read(session.closed.signal);
+              layoutChanged ||=
+                opened?.layout !== undefined &&
+                before.layout?.signature !== opened.layout.signature;
+
+              if (layoutChanged)
+                throw new Failed({
+                  error: { kind: "unexpected", detail: "Recording track layout changed." },
+                });
+
+              if (settled || !before.final) return;
+              // Attempt once after settlement. A failed probe never turns a PTS span into duration.
+              settled = true;
+
+              if (!before.presentation) return;
+              const finalProbe = await probeTitle(session, path);
+              const after = await source.read(session.closed.signal);
+
+              if (
+                sessions.get(session.id) !== session ||
+                session.closed.signal.aborted ||
+                !after.final ||
+                before.revision !== after.revision ||
+                before.bytes !== after.bytes ||
+                before.device !== after.device ||
+                before.inode !== after.inode
+              )
+                return;
+              // Preserve the actual stream-index mapping used by all existing runs.
+              origin.finalRecording = {
+                revision: after.revision,
+                duration: durationOf(finalProbe, after),
+              };
+            })().finally(() => {
+              // Retain a settled probe failure as refusal; reopening permits a fresh attempt.
+              if (!settled) pending = undefined;
+            });
+
+            return pending;
+          };
+        }
 
         return { session, probe };
       });
@@ -4343,6 +4460,7 @@ function make(deps: PlaybackDeps) {
                 url: `copy:${copy.id}`,
                 headers: new Headers(),
                 request: fileRequest(copy.path, copy.container, recording, "follow"),
+                recordingPath: recording ? copy.path : undefined,
                 probeRequest: recording
                   ? fileRequest(copy.path, copy.container, recording, "snapshot")
                   : undefined,

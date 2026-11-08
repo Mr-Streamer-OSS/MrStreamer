@@ -3107,7 +3107,7 @@ function make(deps: RecordingsDeps) {
               final: !isLive(current) && !capture,
               duration: null,
               seekable: [],
-              gaps: [],
+              gaps: current.gaps ?? [],
             };
 
             const revision =

@@ -76,6 +76,8 @@ export interface RecordingExtent extends RecordingCopyState {
   readonly layout?: Inspection;
   /** Recorder interruption history; wall-clock gaps do not describe media intervals. */
   readonly mediaRevision?: number;
+  /** Verified presentation span on the transport clock, not the final sample end. */
+  readonly presentation?: { readonly from: number; readonly to: number };
 }
 
 /** wait atomically observes a newer revision or subscribes, and must honor cancellation. */
@@ -370,7 +372,12 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
       return {
         ...extent,
         // Only the observed presentation span is known, not the final frame's end or a seek map.
-        duration: !uncertain && maximum > 0 ? maximum / 90_000 : null,
+        duration: !extent.final && !uncertain && maximum > 0 ? maximum / 90_000 : null,
+        ...(!uncertain &&
+          first !== undefined &&
+          maximum > 0 && {
+            presentation: { from: first / 90_000, to: (first + maximum) / 90_000 },
+          }),
         ...(layout && { layout }),
       };
     } finally {

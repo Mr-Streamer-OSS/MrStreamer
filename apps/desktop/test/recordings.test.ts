@@ -5776,7 +5776,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     await recordings.stop(id);
     const final = await source.read();
     expect(final).toMatchObject({ final: true, status: { kind: "stopped" }, bytes: bytes.length });
-    expect(final.gaps).toEqual([]);
+    expect(final.gaps).toEqual((await recordings.list()).find((row) => row.id === id)?.gaps);
 
     const session = await playback.openCopy(
       {
@@ -5793,10 +5793,145 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
 
     const state = await playback.copyState(session.sessionId);
     expect(state?.audio).toHaveLength(2);
-    expect(state?.recording).toMatchObject({ final: true, duration: final.duration, seekable: [] });
+    expect(final.duration).toBeNull();
+    expect(state?.recording).toMatchObject({ final: true, duration: null, seekable: [] });
     expect(state?.recording).not.toHaveProperty("layout");
     await playback.closeCopy(id, "recording");
     expect((await source.read()).final).toBe(true);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("refuses stale session track indexes after an actual captured layout change", async () => {
+    const output = Promise.withResolvers<Writable>();
+
+    const { recordings, channel, playback, dataDir, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(fixture(TRACKS_FIXTURE));
+        output.resolve(out);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const first = await source.read();
+    const file = await fileOf(dataDir, started.recording);
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    expect(copy.audio).toHaveLength(2);
+    const changed = source.wait(first.revision, AbortSignal.timeout(5000));
+    (await output.promise).write(fixture("h264-aac.mpegts"));
+    const next = await changed;
+    expect(next.layout?.layout.audio).toHaveLength(1);
+    expect(next.duration).toBeNull();
+    await expect(playback.copyState(copy.sessionId)).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Recording track layout changed." },
+    });
+    await playback.closeCopy(id, "recording");
+    expect((await source.read()).final).toBe(false);
+    expect(provider.streamRequests()).toBe(1);
+    await recordings.stop(id);
+  });
+
+  it("refuses a nonzero recording seek without verified session media coverage", async () => {
+    const { recordings, channel, playback, dataDir, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(fixture(TRACKS_FIXTURE));
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const file = await fileOf(dataDir, started.recording);
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    const response = await fetch(copy.url + "?start=1", { signal: AbortSignal.timeout(1500) });
+
+    try {
+      expect(response.status).toBe(416);
+    } finally {
+      await response.body?.cancel();
+    }
+
+    expect((await source.read()).final).toBe(false);
+    await playback.closeCopy(id, "recording");
+    expect(provider.streamRequests()).toBe(1);
+    await recordings.stop(id);
+  });
+
+  it("settles an open recorder session to the last sample end, without changing tracks or capture ownership", async () => {
+    const { recordings, channel, playback, provider, dataDir } = await connected({
+      streams: (_source, out) => {
+        out.write(fixture(TRACKS_FIXTURE));
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const file = await fileOf(dataDir, started.recording);
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    expect(copy.duration).toBeLessThan(4.021333);
+    await recordings.stop(id);
+
+    const states = await Promise.all(
+      Array.from({ length: 3 }, () => playback.copyState(copy.sessionId)),
+    );
+
+    for (const state of states) {
+      // The fixture's last audio sample ends after the last video PTS.
+      expect(state?.duration).toBeCloseTo(4.021333, 6);
+      expect(state?.recording).toMatchObject({ final: true, duration: state?.duration });
+      expect(state?.audio).toEqual(copy.audio);
+      expect(state?.subtitles).toEqual(copy.subtitles);
+    }
+
+    await playback.closeCopy(id, "recording");
+    expect(await playback.copyState(copy.sessionId)).toBeNull();
     expect(provider.streamRequests()).toBe(1);
   });
 
@@ -5841,7 +5976,9 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     }
 
     expect(extent.status).toEqual({ kind: "partial", cut: "stream" });
-    expect(extent.gaps).toEqual([]);
+    const retained = (await recordings.list()).find((row) => row.id === started.recording.id);
+    expect(extent.gaps.length).toBeGreaterThan(0);
+    expect(extent.gaps).toEqual(retained?.gaps);
     expect(provider.streamRequests()).toBe(3);
   });
 
