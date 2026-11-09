@@ -348,13 +348,13 @@ export function makeProfiles({
             : original;
 
         // Owns this handle's collection subscription and forwarder; dispose closes both.
-        const watch = yield* Scope.make();
+        const collectionScope = yield* Scope.make();
 
         const handle = {
           context,
           dispose: async () => {
             try {
-              await Effect.runPromise(Scope.close(watch, Exit.void));
+              await Effect.runPromise(Scope.close(collectionScope, Exit.void));
             } finally {
               await runtime?.dispose();
             }
@@ -370,9 +370,9 @@ export function makeProfiles({
         );
 
         // Subscribe before caching, so changes are buffered even before the forwarder consumes.
-        // A failed or canceled start disposes the uncached handle's scope.
+        // A failed or canceled start disposes the uncached handle.
         yield* Effect.gen(function* () {
-          const changes = yield* Scope.provide(watch)(
+          const changes = yield* Scope.provide(collectionScope)(
             Context.get(context, Collections).profileChanges,
           );
 
@@ -380,7 +380,7 @@ export function makeProfiles({
             Stream.runForEach(changes, (owner) =>
               PubSub.publish(events, { kind: "collections", owner }),
             ),
-            watch,
+            collectionScope,
           );
           handles.set(id, handle);
         }).pipe(Effect.onError(() => Effect.promise(handle.dispose)));
