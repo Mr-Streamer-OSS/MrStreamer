@@ -306,6 +306,12 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           const pid = ((packet[1]! & 31) << 8) | packet[2]!;
           const start = (packet[1]! & 64) !== 0;
 
+          // A transport-error PAT cannot establish the program whose clock we report.
+          if (pid === 0 && (packet[1]! & 0x80) !== 0) {
+            uncertain = true;
+            continue;
+          }
+
           // A fresh table can change tracks after capture resumes. Reuse the existing parser.
           if (pid === 0 && start) inspector = createInspector();
           const inspected = inspector.push(packet);

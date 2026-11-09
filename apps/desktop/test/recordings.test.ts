@@ -5709,6 +5709,51 @@ it("publishes recording progress invalidations for the original owner on immedia
 });
 
 describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
+  it("refuses recording media time when every captured PAT carries a transport error", async () => {
+    const bytes = Buffer.from(fixture(TRACKS_FIXTURE));
+    let damaged = 0;
+
+    // Damage table transport headers only; retain the recorded picture, sound and clocks.
+    for (let offset = 0; offset + 188 <= bytes.length; offset += 188) {
+      if (bytes[offset] !== 0x47) throw new Error("Fixture is not packet aligned");
+      const pid = ((bytes[offset + 1]! & 31) << 8) | bytes[offset + 2]!;
+
+      if (pid !== 0) continue;
+      bytes[offset + 1] = bytes[offset + 1]! | 0x80;
+      damaged++;
+    }
+
+    if (!damaged) throw new Error("Fixture has no PAT packets to damage");
+    const { recordings, channel, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+
+    try {
+      const source = await recordings.file(id);
+      const signal = AbortSignal.timeout(5000);
+      const extent = await until(
+        () => source.read(signal),
+        (current) => current.bytes === bytes.length,
+        5000,
+      );
+      expect(extent.bytes).toBe(bytes.length);
+      expect(extent.final).toBe(false);
+      expect(extent.duration).toBeNull();
+      expect(extent.seekable).toEqual([]);
+      await expect(recordings.copy(id)).rejects.toBeTruthy();
+      expect(provider.streamRequests()).toBe(1);
+    } finally {
+      await recordings.stop(id);
+    }
+  });
+
   it("follows committed appends, pause and final settlement without another provider read", async () => {
     const output = Promise.withResolvers<Writable>();
     const bytes = fixture(TRACKS_FIXTURE);
