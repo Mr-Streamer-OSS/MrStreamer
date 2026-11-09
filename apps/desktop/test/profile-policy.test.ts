@@ -1,3 +1,6 @@
+import { Collections } from "../src/main/services/collections.ts";
+import * as Deferred from "effect/Deferred";
+import * as Stream from "effect/Stream";
 import { collectionsHandlers } from "../src/main/handlers/collections.ts";
 import { type } from "arktype";
 import { playbackHandlers } from "../src/main/handlers/playback.ts";
@@ -1551,6 +1554,115 @@ it("refuses a suspended collection mutation after the same owner's durable appro
     ok: true,
     value: { total: 0 },
   });
+});
+
+it("retains a successful collection mutation while its acquired forwarder has not consumed", async ({
+  signal,
+  task,
+}) => {
+  const held = await Effect.runPromise(Deferred.make<void>());
+  const release = await Effect.runPromise(Deferred.make<void>());
+  const originalLayer = ProfileSessions.layer;
+  let stage = "fixture";
+  let consumptionHeld = false;
+  let mutationSucceeded = false;
+  let released = false;
+  let reported = false;
+
+  const report = () => {
+    if (reported) return;
+    reported = true;
+    console.error(
+      "[818 upstream retention control]",
+      JSON.stringify(Object.freeze({ stage, consumptionHeld, mutationSucceeded, released })),
+    );
+  };
+
+  const releaseGate = () => Effect.runPromise(Deferred.succeed(release, undefined));
+
+  const onAbort = () => {
+    report();
+    void releaseGate();
+  };
+
+  signal.addEventListener("abort", onAbort, { once: true });
+  onTestFinished(() => {
+    signal.removeEventListener("abort", onAbort);
+
+    if (task.result?.state === "fail") report();
+  });
+
+  const holdConsumption = (stream: Stream.Stream<ActiveProfile>) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        consumptionHeld = true;
+        yield* Deferred.succeed(held, undefined);
+        yield* Deferred.await(release);
+
+        return stream;
+      }),
+    );
+
+  const factory = vi.spyOn(ProfileSessions, "layer").mockImplementationOnce((options) =>
+    originalLayer(options).pipe(
+      Layer.provide(
+        Layer.effect(
+          Collections,
+          Effect.map(Collections, (collections) => ({
+            ...collections,
+            profileChanges: Effect.map(collections.profileChanges, holdConsumption),
+          })),
+        ),
+      ),
+    ),
+  );
+
+  try {
+    const f = await fixture().finally(() => factory.mockRestore());
+    await f.app.runPromise(f.sessions.admitFor(f.adult));
+
+    const changes = await f.app.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const stream = yield* f.sessions.changes;
+
+          const pull = yield* Stream.toPull(
+            Stream.filter(stream, (change) => change.kind === "collections"),
+          );
+
+          stage = "await-held-consumption";
+          yield* Deferred.await(held);
+          stage = "mutation";
+
+          const result = yield* Effect.promise(() =>
+            f.call(f.adult, "collections.change", {
+              kind: "create",
+              id: "one",
+              name: "Private name",
+            }),
+          );
+
+          expect(result).toMatchObject({ ok: true });
+          mutationSucceeded = true;
+          yield* Deferred.succeed(release, undefined);
+          released = true;
+          stage = "await-profile-event";
+
+          const pulled = yield* pull;
+          stage = "caller-scope-close";
+
+          return pulled;
+        }),
+      ),
+      { signal },
+    );
+
+    expect(changes).toEqual([{ kind: "collections", owner: f.adult }]);
+    stage = "body:done";
+  } finally {
+    factory.mockRestore();
+    await releaseGate();
+  }
 });
 
 it("publishes only the captured collection owner and refuses missing admitted context", async ({
