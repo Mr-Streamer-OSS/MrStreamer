@@ -6347,6 +6347,74 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     expect(provider.streamRequests()).toBe(1);
   });
 
+  it("keeps an open session's seeks after its recording stops, from the same keyframe", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+
+    const { recordings, channel, playback, dataDir, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const signal = AbortSignal.timeout(5000);
+
+    await until(
+      () => source.read(signal),
+      (current) => current.bytes === bytes.length,
+      5000,
+    );
+
+    const file = await fileOf(dataDir, started.recording);
+    const recorded = (await readFile(file.path)).subarray(0, bytes.length);
+    const origin = Number(mediaProbe(recorded, ["-show_entries", "format=start_time"])[0]);
+
+    // Decoded pictures: the recording's at PTS 216000 (2.4 s), its IDR before 2.478667 s.
+    const picture = (input: Buffer, options: readonly string[] = []) =>
+      packets(input, ["-copyts", "-map", "0:v:0", ...options, "-frames:v", "1"])[0];
+
+    const keyframe = picture(recorded, ["-vf", "select=gte(pts\\,216000)"]);
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    try {
+      await recordings.stop(id);
+      expect((await playback.copyState(copy.sessionId))?.recording).toMatchObject({
+        final: true,
+        seekable: [{}],
+      });
+
+      const response = await fetch(copy.url + "?start=1.1", { signal: AbortSignal.timeout(4000) });
+
+      try {
+        expect(response.status).toBe(200);
+        expect(Number(response.headers.get("x-start")) + origin).toBeCloseTo(2.4, 3);
+        expect(picture(Buffer.from(await response.arrayBuffer()))).toBe(keyframe);
+      } finally {
+        await response.body?.cancel().catch(() => {});
+      }
+    } finally {
+      await playback.closeCopy(id, "recording");
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
   it("settles an open recorder session to the last sample end, without changing tracks or capture ownership", async () => {
     const { recordings, channel, playback, provider, dataDir } = await connected({
       streams: (_source, out) => {

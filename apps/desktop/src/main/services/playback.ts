@@ -4998,11 +4998,12 @@ function copiesVideo(session: TitleSessionState): boolean {
 }
 
 /**
- * Where runs of an active recording can start: from its first verified access point to the last
- * picture time read, in title seconds, and the point a run from `start` reads from, the last at
- * or before it, as a title's copied picture starts at the keyframe before. Null when any fact it
- * needs is unverified: a final or interrupted recording, no access point, no reported origin, a
- * converted or reordered picture, or a track ffprobe and the recorded tables don't name alike.
+ * Where runs of a recording opened while it records can start: from its first verified access
+ * point to the last picture time read, in title seconds, and the point a run from `start` reads
+ * from, the last at or before it, as a title's copied picture starts at the keyframe before. It
+ * holds after the recording ends too. Null when any fact it needs is unverified: an interrupted
+ * recording, no access point, no reported origin, a converted or reordered picture, or a track
+ * ffprobe and the recorded tables don't name alike.
  */
 function recordingCoverage(
   extent: RecordingExtent,
@@ -5018,7 +5019,6 @@ function recordingCoverage(
   const video = probe.video;
 
   if (
-    extent.final ||
     (extent.mediaRevision ?? 0) > 0 ||
     !access?.[0] ||
     !extent.presentation ||
