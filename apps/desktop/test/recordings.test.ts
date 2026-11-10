@@ -152,6 +152,42 @@ async function allClosed(provider: { activeStreams(): number }) {
 }
 
 /** The one recording's file in its folder. */
+/** ffprobe's CSV lines for `entries` of `input`, read on standard input. */
+function mediaProbe(input: Buffer, entries: readonly string[]): string[] {
+  const result = spawnSync(
+    "ffprobe",
+    ["-v", "error", ...entries, "-of", "csv=p=0", "-i", "pipe:0"],
+    { input, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  expect(result.status).toBe(0);
+
+  // Frame entries end with an empty field.
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim().replace(/,$/, ""))
+    .filter(Boolean);
+}
+
+/** The MD5 of each packet's data ffmpeg writes from `input` with `options`, in order. */
+function packets(input: Buffer, options: readonly string[]): string[] {
+  const result = spawnSync(
+    "ffmpeg",
+    ["-v", "error", "-i", "pipe:0", ...options, "-f", "framemd5", "-"],
+    { input, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  expect(result.status).toBe(0);
+
+  return (
+    result.stdout
+      .split("\n")
+      .filter((line) => /^\d/.test(line))
+      // stream, dts, pts, duration, size, then the data's hash; side data may follow.
+      .map((line) => line.split(",")[5]!.trim())
+  );
+}
+
 async function fileOf(dataDir: string, recording: Recording) {
   const folder = join(dataDir, "recordings", recording.id);
   const name = (await readdir(folder)).find((each) => each.endsWith(".ts"));
@@ -6046,6 +6082,211 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
       // The run follows the file while it records, and ends with it.
       await recordings.stop(id);
       expect(picture(Buffer.from(await response.arrayBuffer()))).toBe(keyframe);
+    } finally {
+      await response.body?.cancel().catch(() => {});
+      await playback.closeCopy(id, "recording");
+      await recordings.stop(id);
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("reports an active recording's seek range from its first decodable picture to its last", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+
+    const { recordings, channel, playback, dataDir } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const signal = AbortSignal.timeout(5000);
+    await until(
+      () => source.read(signal),
+      (current) => current.bytes === bytes.length,
+      5000,
+    );
+    const file = await fileOf(dataDir, started.recording);
+    const recorded = (await readFile(file.path)).subarray(0, bytes.length);
+    const probe = (entries: readonly string[]) => mediaProbe(recorded, entries);
+    const origin = Number(probe(["-show_entries", "format=start_time"])[0]);
+
+    // ffprobe decodes the first picture a fresh decoder shows; packets name the last.
+    const first = Number(probe(["-select_streams", "v:0", "-show_entries", "frame=pts_time"])[0]);
+
+    const last = Math.max(
+      ...probe(["-select_streams", "v:0", "-show_entries", "packet=pts_time"]).map(Number),
+    );
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    try {
+      const seekable = (await playback.copyState(copy.sessionId))?.recording?.seekable;
+      expect(seekable).toHaveLength(1);
+      expect(seekable?.[0]?.from).toBeCloseTo(first - origin, 6);
+      expect(seekable?.[0]?.to).toBeCloseTo(last - origin, 6);
+    } finally {
+      await playback.closeCopy(id, "recording");
+      await recordings.stop(id);
+    }
+  });
+
+  it("plays the chosen sound track of an active recording from a nonzero position, by its own packets", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+
+    const { recordings, channel, playback, dataDir } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const signal = AbortSignal.timeout(5000);
+    await until(
+      () => source.read(signal),
+      (current) => current.bytes === bytes.length,
+      5000,
+    );
+    const file = await fileOf(dataDir, started.recording);
+    const recorded = (await readFile(file.path)).subarray(0, bytes.length);
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    expect(copy.audio).toHaveLength(2);
+    const [other, chosen] = copy.audio.map((track) => track.id);
+
+    // Which transport stream each listed track is, as ffprobe names it in the recorded bytes.
+    const pids = new Map(
+      mediaProbe(recorded, ["-show_entries", "stream=index,id"]).map((line) => {
+        const [index, pid] = line.split(",");
+
+        return [Number(index), pid] as const;
+      }),
+    );
+
+    // The compressed sound packets of one transport stream, as a run copies them into MP4.
+    const run = (pid: string | undefined) =>
+      packets(recorded, ["-map", `0:i:${pid}`, "-c", "copy", "-bsf:a", "aac_adtstoasc"]).join();
+
+    const response = await fetch(`${copy.url}?start=1.1&audio=${chosen}`, {
+      signal: AbortSignal.timeout(4000),
+    });
+
+    try {
+      expect(response.status).toBe(200);
+      await recordings.stop(id);
+
+      const returned = packets(Buffer.from(await response.arrayBuffer()), [
+        "-map",
+        "0:a:0",
+        "-c",
+        "copy",
+      ]);
+
+      // Tracks can share packets, as both open with the same silent frames: the whole returned
+      // run tells them apart.
+      expect(returned.length).toBeGreaterThan(0);
+      expect(run(pids.get(chosen!))).toContain(returned.join());
+      expect(run(pids.get(other!))).not.toContain(returned.join());
+    } finally {
+      await response.body?.cancel().catch(() => {});
+      await playback.closeCopy(id, "recording");
+      await recordings.stop(id);
+    }
+  });
+
+  it("follows a recording that grows during a run from a nonzero position, and ends with it", async () => {
+    const output = Promise.withResolvers<Writable>();
+    const bytes = fixture(TRACKS_FIXTURE);
+    // ffmpeg reads 1.5 s of a recording run's input before its first output (title.ts), so the
+    // run starts on most of the recording and its last second comes after.
+    const split = Math.floor((bytes.length * 0.8) / 188) * 188;
+
+    const { recordings, channel, playback, dataDir, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes.subarray(0, split));
+        output.resolve(out);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const signal = AbortSignal.timeout(5000);
+    await until(
+      () => source.read(signal),
+      (current) => current.bytes === split,
+      5000,
+    );
+    const file = await fileOf(dataDir, started.recording);
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    const response = await fetch(copy.url + "?start=1.1", { signal: AbortSignal.timeout(4000) });
+
+    try {
+      expect(response.status).toBe(200);
+      expect((await source.read()).bytes).toBe(split);
+      const appended = source.wait((await source.read()).revision, AbortSignal.timeout(5000));
+      (await output.promise).write(bytes.subarray(split));
+      expect((await appended).bytes).toBe(bytes.length);
+      await recordings.stop(id);
+      const returned = Buffer.from(await response.arrayBuffer());
+
+      const times = (input: Buffer) =>
+        mediaProbe(input, ["-select_streams", "v:0", "-show_entries", "packet=pts_time"]).map(
+          Number,
+        );
+
+      // The run's last picture is the recording's last, written after the run began.
+      expect(Math.max(...times(returned))).toBeCloseTo(
+        Math.max(...times((await readFile(file.path)).subarray(0, bytes.length))),
+        6,
+      );
     } finally {
       await response.body?.cancel().catch(() => {});
       await playback.closeCopy(id, "recording");
