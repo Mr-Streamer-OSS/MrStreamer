@@ -46,9 +46,21 @@ import {
 // only once main kept this one's progress: a save it refused keeps this copy, says so and leaves
 // Next to try again. A next episode whose copy isn't complete, or isn't on this computer, stops it
 // there, this copy left as it was; a copy queued before downloads kept their series has no next.
+//
+// A recording plays as a copy too, also while it records. Its session says what is verified of it
+// (`playback.copyState`), read as it opens and again each time main says it changed
+// (`playback.copyChanged`): its length once known, and where a run of the chosen tracks may start.
+// A seek or a resume lands there, or at 0, never where nothing verifies a start. Its track lists
+// follow the session's, keeping each track's id. While it grows, its progress is saved against
+// what it verifiably reaches, and it is never taken as watched to its end.
 import { SubtitleTiming, type SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { createStore, useStore } from "zustand";
-import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
+import type {
+  CopyState,
+  Download,
+  DownloadList,
+  RecordingSessionState,
+} from "@mrstreamer/contracts/downloads";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import {
   seriesOf,
@@ -288,6 +300,8 @@ export interface TitlePlayerState {
    * where the viewer skipped to meanwhile.
    */
   readonly confirmed: number | null;
+  /** For a recording, what its open session last said is verified of it; null otherwise. */
+  readonly recording: RecordingSessionState | null;
 }
 
 const idle: TitlePlayerState = {
@@ -310,6 +324,7 @@ const idle: TitlePlayerState = {
   continued: false,
   shows: null,
   confirmed: null,
+  recording: null,
 };
 
 const store = createStore<TitlePlayerState>(() => idle);
@@ -337,6 +352,136 @@ export function useSubtitleNote(): "loading" | "unavailable" | null {
     !state || state.covered || state.recovery === "recovered" ? null : state.recovery,
   );
 }
+
+type Range = RecordingSessionState["seekable"][number];
+
+const NO_RANGES: readonly Range[] = [];
+
+/**
+ * Where a run of the open recording may start other than at 0 with the chosen tracks: the chosen
+ * sound's own ranges where it has them, else the session's, and none with a subtitle the session
+ * can't seek with. Empty for anything else.
+ */
+export function recordingRanges(state: TitlePlayerState): readonly Range[] {
+  const { recording, audioId, subtitle } = state;
+
+  if (!recording || (subtitle && !recording.subtitleSeek)) return NO_RANGES;
+
+  return audioRanges(recording, audioId);
+}
+
+function audioRanges(recording: RecordingSessionState, audioId: number | null): readonly Range[] {
+  return (
+    recording.audioSeekable.find((each) => each.id === audioId)?.seekable ?? recording.seekable
+  );
+}
+
+/**
+ * How far the open recording verifiably reaches with the chosen sound: its length, which is what
+ * its index has observed so far while it grows, else the end of its last range. Null when neither
+ * is known, as for a codec its index doesn't read.
+ */
+export function recordingEdge(state: TitlePlayerState): number | null {
+  const { recording, audioId } = state;
+
+  if (!recording) return null;
+
+  return recording.duration ?? audioRanges(recording, audioId).at(-1)?.to ?? null;
+}
+
+/**
+ * `target` as a run of the open recording can start: 0, or inside a range of the chosen tracks,
+ * else the nearest point of either. Anything but a recording starts where asked.
+ */
+function reachable(target: number): number {
+  const state = store.getState();
+
+  if (!state.recording || target <= 0) return target;
+  let best = 0;
+
+  for (const { from, to } of recordingRanges(state)) {
+    if (target >= from && target <= to) return target;
+
+    for (const point of [from, to]) {
+      if (Math.abs(point - target) < Math.abs(best - target)) best = point;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * The length progress is saved against: the title's, or for a recording that grows, what it
+ * verifiably reaches, at least where it plays. Null while neither is known: nothing is saved.
+ */
+function savedLength(state: TitlePlayerState): number | null {
+  if (!state.recording || state.recording.final) return state.duration;
+  const edge = recordingEdge(state);
+
+  return edge === null ? null : Math.max(edge, state.position);
+}
+
+/** Takes an open recording's facts from its session, and its tracks, each keeping its id. */
+function takeRecording({ recording, duration, audio, subtitles }: CopyState): void {
+  if (!recording) return;
+  const { audioId, subtitle } = store.getState();
+  const kept = subtitle ? (subtitles.find((track) => track.id === subtitle.id) ?? null) : null;
+
+  // A chosen subtitle the session no longer lists has no feed: it goes from the screen.
+  if (subtitle && !kept) {
+    engine?.hideSubtitles();
+    store.setState({ subtitleState: null });
+  }
+
+  store.setState({
+    recording,
+    duration,
+    audio,
+    subtitles,
+    // The run under way plays on; the next one takes a sound the session still lists.
+    audioId: audio.some((track) => track.id === audioId) ? audioId : (audio[0]?.id ?? null),
+    subtitle: kept,
+  });
+}
+
+/** Whether the open recording's facts are being read, and whether a change came meanwhile. */
+let recordingRead: Promise<void> | null = null;
+let recordingAgain = false;
+
+/**
+ * Reads the open recording's facts again: one read at a time, once more after it when main said
+ * they changed meanwhile. A failed read keeps what was known, and the next change reads again.
+ */
+function readRecording(): void {
+  if (recordingRead) {
+    recordingAgain = true;
+
+    return;
+  }
+
+  const current = session;
+  const { now } = store.getState();
+
+  if (!current || now?.kind !== "copy" || !now.recording) return;
+  recordingRead = call("playback.copyState", { sessionId: current.id })
+    .then(
+      (state) => {
+        if (session === current && state?.sessionId === current.id) takeRecording(state);
+      },
+      () => {},
+    )
+    .finally(() => {
+      recordingRead = null;
+
+      if (!recordingAgain) return;
+      recordingAgain = false;
+      readRecording();
+    });
+}
+
+listen("playback.copyChanged", ({ sessionId }) => {
+  if (session?.id === sessionId) readRecording();
+});
 
 let subtitleChoices: (() => void) | null = null;
 
@@ -596,7 +741,9 @@ function followCopies(now: CopyNow, list: DownloadList): void {
 function save(): Promise<boolean> {
   // What a receiver plays, the main process saves, from what the receiver confirmed.
   if (receiver) return Promise.resolve(true);
-  const { now, position, duration, next } = store.getState();
+  const state = store.getState();
+  const { now, position, next } = state;
+  const duration = savedLength(state);
 
   if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought)))
     return Promise.resolve(true);
@@ -920,8 +1067,9 @@ function releaseRun(): void {
  * Starts a run at `start` with the chosen tracks, held on its first picture when `paused`.
  * `attempt` counts reconnects.
  */
-async function run(start: number, attempt = 0, paused = false): Promise<void> {
+async function run(asked: number, attempt = 0, paused = false): Promise<void> {
   if (!session) return;
+  const start = reachable(asked);
   const mine = ++generation;
   stopEngine();
   stopCountdown();
@@ -1728,11 +1876,27 @@ export const titlePlayer = {
           store.setState({ now });
         }
 
-        const { progress } = opened;
+        const { progress, recording } = opened;
+        const recorded = now.kind === "copy" && now.recording === true;
+
+        // A recording's place may be in its credits only when saved against its verified length:
+        // one saved while it grew was against what it had then, and goes on from there, as
+        // Recordings says (`settledPlace`).
+        const settled =
+          !recorded ||
+          (recording?.final === true &&
+            opened.duration !== null &&
+            progress !== null &&
+            progress.duration >= opened.duration - 1);
+
         from =
-          progress && !isFinished(progress.position, progress.duration)
+          progress && !(settled && isFinished(progress.position, progress.duration))
             ? Math.max(0, progress.position - 5)
             : 0;
+
+        if (recording) store.setState({ recording });
+        // Its session may answer before its index has read it: its facts are asked for once more.
+        else if (recorded) void Promise.resolve().then(readRecording);
       }
 
       store.setState({ subtitleSessionId: opened.sessionId, position: from });
@@ -1825,6 +1989,13 @@ export const titlePlayer = {
 
     // A skip while paused stays paused, on the new picture.
     void run(target, 0, pausedByViewer());
+  },
+
+  /** Goes to the latest the open recording verifiably reaches with the chosen tracks. */
+  goLatest(): void {
+    const edge = recordingRanges(store.getState()).at(-1)?.to;
+
+    if (edge !== undefined) titlePlayer.seek(edge);
   },
 
   /** Skips back or forward by `seconds`. */
