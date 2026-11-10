@@ -55,7 +55,7 @@ import {
   episodeLine,
   offersNext,
   recordingEdge,
-  recordingRanges,
+  recordingLatest,
   titlePlayer,
   useSubtitleNote,
   useTitlePlayer,
@@ -566,7 +566,7 @@ function Scrubber() {
 function RecordingActions() {
   const recording = useTitlePlayer((state) => state.recording);
   const position = useTitlePlayer((state) => state.position);
-  const latest = useTitlePlayer((state) => recordingRanges(state).at(-1)?.to ?? null);
+  const latest = useTitlePlayer(recordingLatest);
 
   if (!recording) return null;
   const live = recording.status.kind === "recording" || recording.status.kind === "paused";

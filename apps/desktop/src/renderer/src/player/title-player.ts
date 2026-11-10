@@ -362,7 +362,7 @@ const NO_RANGES: readonly Range[] = [];
  * sound's own ranges where it has them, else the session's, and none with a subtitle the session
  * can't seek with. Empty for anything else.
  */
-export function recordingRanges(state: TitlePlayerState): readonly Range[] {
+function recordingRanges(state: TitlePlayerState): readonly Range[] {
   const { recording, audioId, subtitle } = state;
 
   if (!recording || (subtitle && !recording.subtitleSeek)) return NO_RANGES;
@@ -374,6 +374,11 @@ function audioRanges(recording: RecordingSessionState, audioId: number | null): 
   return (
     recording.audioSeekable.find((each) => each.id === audioId)?.seekable ?? recording.seekable
   );
+}
+
+/** The latest a run of the open recording can start with the chosen tracks, or null. */
+export function recordingLatest(state: TitlePlayerState): number | null {
+  return recordingRanges(state).at(-1)?.to ?? null;
 }
 
 /**
@@ -1993,9 +1998,9 @@ export const titlePlayer = {
 
   /** Goes to the latest the open recording verifiably reaches with the chosen tracks. */
   goLatest(): void {
-    const edge = recordingRanges(store.getState()).at(-1)?.to;
+    const latest = recordingLatest(store.getState());
 
-    if (edge !== undefined) titlePlayer.seek(edge);
+    if (latest !== null) titlePlayer.seek(latest);
   },
 
   /** Skips back or forward by `seconds`. */

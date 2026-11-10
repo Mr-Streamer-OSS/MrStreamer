@@ -134,12 +134,19 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
   // The rules read keeps startup failures until the next start; refetching cannot reload it.
   const restartRequired = !standalone && ruleList.isError;
 
+  const recordedCount = recordings.filter((each) => !isLive(each)).length;
+
+  const show = (id: Shelf) => {
+    setQuery("");
+    setShelf(id);
+  };
+
   const heading = searching
     ? { title: t("Recordings"), count: shown.length }
     : group
       ? { title: group.name, count: group.recordings.length }
       : showing === "recorded"
-        ? { title: t("Recorded"), count: recordings.filter((each) => !isLive(each)).length }
+        ? { title: t("Recorded"), count: recordedCount }
         : showing === "scheduled"
           ? { title: t("Scheduled"), count: scheduled.length }
           : showing === "rules"
@@ -151,11 +158,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
   // Standing alone, nothing is scheduled and nothing follows a rule.
   const shelves: { id: Shelf; label: string; count: number | null }[] = [
     { id: "overview", label: t("Overview"), count: null },
-    {
-      id: "recorded",
-      label: t("Recorded"),
-      count: recordings.filter((each) => !isLive(each)).length,
-    },
+    { id: "recorded", label: t("Recorded"), count: recordedCount },
     ...(standalone
       ? []
       : [
@@ -233,10 +236,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
               label={each.label}
               count={each.count}
               current={!searching && showing === each.id}
-              onClick={() => {
-                setQuery("");
-                setShelf(each.id);
-              }}
+              onClick={() => show(each.id)}
             />
           ))}
           {groupShelves.length > 0 && (
@@ -248,10 +248,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
               label={each.label}
               count={each.count}
               current={!searching && showing === each.id}
-              onClick={() => {
-                setQuery("");
-                setShelf(each.id);
-              }}
+              onClick={() => show(each.id)}
             />
           ))}
           <span className="flex-1" />

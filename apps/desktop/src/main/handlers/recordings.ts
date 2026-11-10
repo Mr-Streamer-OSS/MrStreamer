@@ -83,6 +83,8 @@ export function recordingHandlers({
   readonly openFolder: (folder: string) => Promise<void>;
 }): HandlersFor<"recordings"> {
   return {
+    // Personal: the admitted window's handlers replace this with `recordingResume` for its owner
+    // (index.ts). Without an admission, there is no owner to read for.
     "recordings.resume": () =>
       Effect.fail(
         new Failed({

@@ -4596,13 +4596,14 @@ function make(deps: PlaybackDeps) {
             yield* coordination.whileAsked(turn);
 
             const recording = copy.recording ? recordingFile(copy.path, copy.recording) : undefined;
+            const copyKind = copy.kind ?? "download";
 
             const { session } = yield* fileSession(
               randomUUID(),
               {
                 kind: "copy",
                 copy: copy.id,
-                copyKind: copy.kind ?? "download",
+                copyKind,
                 file: subtitlesOfCopy(copy.id, copy.title),
                 recording,
               },
@@ -4618,7 +4619,7 @@ function make(deps: PlaybackDeps) {
                   .update(
                     JSON.stringify([
                       "copy",
-                      copy.kind ?? "download",
+                      copyKind,
                       copy.id,
                       copy.path,
                       recording ? randomUUID() : null,

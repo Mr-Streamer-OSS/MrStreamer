@@ -6,7 +6,6 @@ import {
 import { spawnSync } from "node:child_process";
 import {
   appendFile,
-  mkdtemp,
   rename,
   rm,
   truncate,
@@ -15,7 +14,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
@@ -2198,12 +2197,10 @@ describe.skipIf(!hasFfmpeg)("live history", () => {
   });
 });
 
-// These tests exercise opt-in main-only sources. Recordings.copy still refuses active capture.
+// A recording's file as playback reads it while it grows, from a source the test drives.
 describe("growing copy readers", () => {
   async function growing(bytes: Buffer = Buffer.from("first")) {
-    const scratch = resolve(import.meta.dirname, "../../../.local/798");
-    await mkdir(scratch, { recursive: true });
-    const root = await mkdtemp(join(scratch, "reader-"));
+    const root = await tempDir();
     const path = join(root, "capture.ts");
     await writeFile(path, bytes);
     const found = await stat(path);

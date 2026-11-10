@@ -93,7 +93,7 @@ export interface RecordingExtent extends RecordingCopyState {
  * arrived in when no PAT just before it was read. Repeats of one table are one entry, and
  * `layout` is the object the access points under it share.
  */
-export interface RecordingTable {
+interface RecordingTable {
   readonly from: number;
   readonly layout: Inspection;
 }
@@ -123,8 +123,7 @@ export interface RecordingFile {
 }
 
 /** Pins incarnation and rejects regressing extent/revision or disappearance for every consumer. */
-export function recordingFile(path: string, source: RecordingFile, index = false): RecordingFile {
-  if (index) return indexRecording(path, recordingFile(path, source));
+export function recordingFile(path: string, source: RecordingFile): RecordingFile {
   let previous: RecordingExtent | undefined;
 
   const verify = async (extent: RecordingExtent) => {
@@ -295,8 +294,11 @@ function recordingRequest(
   };
 }
 
-/** One bounded scan of existing bytes, then only appended bytes. No provider or ffprobe reads. */
-function indexRecording(path: string, source: RecordingFile): RecordingFile {
+/**
+ * Adds the media facts of `source`'s bytes: one bounded scan of existing bytes, then only appended
+ * bytes. No provider or ffprobe reads. `source` should be a verified `recordingFile`.
+ */
+export function indexRecording(path: string, source: RecordingFile): RecordingFile {
   let position = 0;
   let carry = Buffer.alloc(0);
   let inspector = createInspector();

@@ -85,6 +85,7 @@ import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
+  indexRecording,
   recordingFile,
   type RecordingFile,
   type RecordingExtent,
@@ -2952,9 +2953,8 @@ function make(deps: RecordingsDeps) {
               // Subscribe before reading: an append during stat cannot fall between check and wait.
               const change = Promise.withResolvers<void>();
               const wake = () => change.resolve();
-              const abort = () => change.resolve();
               fileListeners.add(wake);
-              signal.addEventListener("abort", abort, { once: true });
+              signal.addEventListener("abort", wake, { once: true });
 
               try {
                 const next = await read(signal);
@@ -2963,13 +2963,13 @@ function make(deps: RecordingsDeps) {
                 await change.promise;
               } finally {
                 fileListeners.delete(wake);
-                signal.removeEventListener("abort", abort);
+                signal.removeEventListener("abort", wake);
               }
             }
           },
         };
 
-        const file = recordingFile(path, source, true);
+        const file = indexRecording(path, recordingFile(path, source));
         yield* Effect.tryPromise({ try: (signal) => file.read(signal), catch: failedWith });
 
         return file;
