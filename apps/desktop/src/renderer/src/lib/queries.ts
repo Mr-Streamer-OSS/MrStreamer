@@ -514,6 +514,23 @@ export const queries = {
       queryFn: () => call("viewing.episodes", { series: ownedId(series) }),
       staleTime: Infinity,
     }),
+  /** The marks that still stand of these movie versions. Kept current by `syncViewing`. */
+  filmMarks: (movies: readonly OwnedId[]) =>
+    queryOptions({
+      queryKey: ["viewing", "film-marks", movies.map(ownedKey)],
+      queryFn: () => call("viewing.filmMarks", { movies: movies.map(ownedId) }),
+      staleTime: Infinity,
+    }),
+  /**
+   * Every film and series version this profile played or marked, most recent first. Kept
+   * current by `syncViewing`, as everything under `viewing` is.
+   */
+  history: () =>
+    queryOptions({
+      queryKey: ["viewing", "history"],
+      queryFn: () => call("viewing.history"),
+      staleTime: Infinity,
+    }),
   // Only availability is retained across adult-policy resets; no title data survives here.
   watchlistAvailability: () =>
     queryOptions({
