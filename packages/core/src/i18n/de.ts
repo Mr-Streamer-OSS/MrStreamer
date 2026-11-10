@@ -15,6 +15,7 @@ export const de: Translation = {
   "Kids policy: enter the correct PIN.": "Kinderregeln: die richtige PIN eingeben.",
   "Kids policy: this content or action is not approved.":
     "Kinderregeln: Dieser Inhalt oder diese Aktion ist nicht freigegeben.",
+  "A channel can't be its own fallback.": "Ein Sender kann nicht sein eigener Ersatz sein.",
   "Kids · allowed titles only": "Kinder · nur freigegebene Titel",
   "Manage profiles": "Profile verwalten",
   PIN: "PIN",

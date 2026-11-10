@@ -108,6 +108,115 @@ export const SubscriptionPreferences = lazy(() =>
 
 export type SubscriptionPreferences = Infer<typeof SubscriptionPreferences>;
 
+/** The longest name and the highest number a viewer can give a channel. */
+export const CHANNEL_NAME_MAX = 80;
+export const CHANNEL_NUMBER_MAX = 99_999;
+
+/** How many fallback channels one channel can name. */
+export const FALLBACKS_MAX = 3;
+
+const ownedChannel = () => type({ subscriptionId: "string > 0", id: "string > 0" });
+
+/**
+ * A sound or subtitle track the viewer picked on a channel: its id, which stays the same whenever
+ * the channel lists it, its language, which says whether a track of that id is still it, and for
+ * subtitles the page of several in one track (teletext).
+ */
+export const TrackChoice = lazy(() =>
+  type({
+    id: "number.integer >= 0",
+    language: "string | null",
+    "page?": "number.integer | null",
+  }),
+);
+
+export type TrackChoice = Infer<typeof TrackChoice>;
+
+/**
+ * Channel choices: what the viewer chose for one channel in their viewing profile, by the
+ * channel's source-qualified id. Each field is optional and its absence restores what the
+ * provider and the profile's preferences give: the provider's name and number, shown in lists,
+ * no fallback, the profile's languages. The stream picked for a channel stays in
+ * `SubscriptionPreferences.channelVariants`, where earlier releases look for it.
+ */
+export const ChannelChoices = lazy(() =>
+  type({
+    channel: ownedChannel(),
+    /** The name lists show instead of the provider's. */
+    "name?": `0 < string <= ${CHANNEL_NAME_MAX}`,
+    /** The number lists show and channel digits go to instead of the provider's. */
+    "number?": `1 <= number.integer <= ${CHANNEL_NUMBER_MAX}`,
+    /** Left out of every list, Live TV's search included, until shown again. */
+    "hidden?": "true",
+    /**
+     * Fallback channels: other channels, of any subscription, to play in this order when this one
+     * fails for a reason another source can help with. Only those the viewer named, never one
+     * found by its name.
+     */
+    "fallbacks?": ownedChannel().array().atLeastLength(1).atMostLength(FALLBACKS_MAX),
+    /** The sound track to play. */
+    "audio?": TrackChoice(),
+    /** The subtitles to show, or "off" for none. */
+    "subtitles?": TrackChoice().or("'off'"),
+  }),
+);
+
+export type ChannelChoices = Infer<typeof ChannelChoices>;
+
+/**
+ * A change to one channel's choices. A field left out stays as it is; null, false or an empty
+ * list restores it. A name or number the same as the provider's restores it too.
+ */
+export const ChannelChoicesChange = lazy(() =>
+  type({
+    "name?": type(`string <= ${CHANNEL_NAME_MAX}`).or("null"),
+    "number?": type(`1 <= number.integer <= ${CHANNEL_NUMBER_MAX}`).or("null"),
+    "hidden?": "boolean",
+    "fallbacks?": ownedChannel().array().atMostLength(FALLBACKS_MAX),
+    "audio?": TrackChoice().or("null"),
+    "subtitles?": TrackChoice().or("'off' | null"),
+  }).onUndeclaredKey("delete"),
+);
+
+export type ChannelChoicesChange = Infer<typeof ChannelChoicesChange>;
+
+/** A change that restores everything the viewer chose for a channel. */
+export const RESTORE_CHANNEL: Required<ChannelChoicesChange> = {
+  name: null,
+  number: null,
+  hidden: false,
+  fallbacks: [],
+  audio: null,
+  subtitles: null,
+};
+
+/**
+ * The track of `tracks` a remembered choice names: the one of its id while that is still in its
+ * language, else the first in its language. Null when the channel has none of them now: the
+ * player then says so and plays by the profile's languages, and the choice stays for when the
+ * track is back.
+ */
+export function rememberedTrack<
+  Track extends {
+    readonly id: number;
+    readonly language: string | null;
+    readonly page?: number | null;
+  },
+>(tracks: readonly Track[], choice: TrackChoice): Track | null {
+  return (
+    tracks.find(
+      (track) =>
+        track.id === choice.id &&
+        track.language === choice.language &&
+        (track.page ?? null) === (choice.page ?? null),
+    ) ??
+    (choice.language === null
+      ? undefined
+      : tracks.find((track) => track.language === choice.language)) ??
+    null
+  );
+}
+
 /** Subtitles as Chromium draws text cues: its own size, on a box, at the foot of the picture. */
 export const DEFAULT_SUBTITLE_LOOK: SubtitleLook = {
   size: "medium",

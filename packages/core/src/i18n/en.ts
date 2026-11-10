@@ -16,6 +16,7 @@ export const en = {
   "Kids policy: enter the correct PIN.": "Kids policy: enter the correct PIN.",
   "Kids policy: this content or action is not approved.":
     "Kids policy: this content or action is not approved.",
+  "A channel can't be its own fallback.": "A channel can't be its own fallback.",
   "Kids · allowed titles only": "Kids · allowed titles only",
   "Manage profiles": "Manage profiles",
   PIN: "PIN",

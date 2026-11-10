@@ -25,6 +25,8 @@ export function libraryHandlers({
     "library.channels": (filter) => library.channels(filter),
     "library.searchGroups": () => library.searchGroups,
     "library.channel": ({ channel }) => library.channel(channel),
+    "library.chosenChannels": () => library.chosen,
+    "library.chooseForChannel": ({ channel, change }) => library.choose(channel, change),
     "library.refresh": ({ subscriptionId }) =>
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(subscriptionId);

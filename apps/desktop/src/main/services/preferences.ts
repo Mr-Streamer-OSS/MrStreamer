@@ -30,6 +30,7 @@ import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/pr
 import { profileDirectory } from "../platform/profile-store.ts";
 import type { LanguageChoice } from "@mrstreamer/contracts/language";
 import {
+  ChannelChoices,
   defaultPreferences,
   defaultSubscriptionPreferences,
   Preferences,
@@ -71,6 +72,11 @@ type Stored = Infer<typeof Stored> & {
   nextEpisodeDelaySeconds?: Json;
   multiviewLayouts?: Json;
   rememberedLiveBrowse?: Json;
+  /**
+   * The viewer's channel choices of every subscription, a list of `ChannelChoices`. Entries this
+   * release can't read stay as they are; anything but a list stays until the viewer changes one.
+   */
+  channelChoices?: Json;
 };
 
 async function readStored(path: string): Promise<Stored | null> {
@@ -138,6 +144,15 @@ export class Settings extends Context.Service<
     readonly liveBrowse: Effect.Effect<LiveDiscovery>;
     rememberLiveBrowse(selection: LiveDiscovery): Effect.Effect<LiveDiscovery, Failed>;
     update(patch: Partial<Preferences>): Effect.Effect<Preferences>;
+    /** The viewer's channel choices this release can read, of any subscription. */
+    readonly channelChoices: Effect.Effect<readonly ChannelChoices[]>;
+    /**
+     * Replaces the channel choices with what `apply` makes of them, in one turn with every other
+     * change, and answers with them. Entries this release can't read are kept beside them.
+     */
+    changeChannelChoices(
+      apply: (choices: readonly ChannelChoices[]) => readonly ChannelChoices[],
+    ): Effect.Effect<readonly ChannelChoices[]>;
     /** The interface language as saved, which may be one this release doesn't know. */
     readonly interfaceLanguage: Effect.Effect<string | undefined>;
     setInterfaceLanguage(choice: LanguageChoice): Effect.Effect<void>;
@@ -152,7 +167,8 @@ export class Settings extends Context.Service<
     ): Effect.Effect<SubscriptionPreferences, Failed>;
     /**
      * Forgets what the viewer left `subscription` at, for when it goes: what was watched last and
-     * the versions and channel streams picked. For the original, lists not yet imported go too:
+     * the versions and channel streams picked, and its channels' choices, fallbacks to them
+     * included. For the original, lists not yet imported go too:
      * they belong to its account. Snapshot effective discovery before the folder is removed, so
      * a prior stable category edit keeps precedence while the surviving baseline changes. The
      * returned effect settles admitted writes after logical removal and before folder deletion.
@@ -397,6 +413,24 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
           }),
           effective,
         ),
+      channelChoices: one.withPermits(1)(
+        Effect.map(stored, (file) => readableChoices(file.channelChoices)),
+      ),
+      changeChannelChoices: (
+        apply: (choices: readonly ChannelChoices[]) => readonly ChannelChoices[],
+      ) =>
+        Effect.map(
+          change(({ channelChoices: raw, ...file }) => {
+            const kept = Array.isArray(raw)
+              ? raw.filter((entry) => !ChannelChoices().allows(entry))
+              : [];
+
+            const next = [...apply(readableChoices(raw)), ...kept];
+
+            return next.length > 0 ? { ...file, channelChoices: next } : file;
+          }),
+          (file) => readableChoices(file.channelChoices),
+        ),
       interfaceLanguage: one.withPermits(1)(Effect.map(stored, (file) => file.interfaceLanguage)),
       setInterfaceLanguage: (choice: LanguageChoice) =>
         Effect.asVoid(change((previous) => ({ ...previous, interfaceLanguage: choice }))),
@@ -404,8 +438,13 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
         whileSaved(subscriptionId, (subscription) =>
           subscription.original ? Effect.map(stored, ofOriginal) : ofAdded(subscription),
         ),
-      updateSubscription: (subscriptionId: string, patch: Partial<SubscriptionPreferences>) =>
-        whileSaved(subscriptionId, (subscription) =>
+      updateSubscription: (subscriptionId: string, asked: Partial<SubscriptionPreferences>) => {
+        // A patch from a window keeps keys its schema doesn't declare. The original's keys share
+        // the file with every other setting, so only a subscription's own keys are taken.
+        const { lastChannelId, lastCategoryId, titleVersions, channelVariants } = asked;
+        const patch = defined({ lastChannelId, lastCategoryId, titleVersions, channelVariants });
+
+        return whileSaved(subscriptionId, (subscription) =>
           subscription.original
             ? Effect.map(
                 applied((previous) => ({ ...previous, ...patch })),
@@ -416,7 +455,8 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
 
                 return yield* saveAdded(subscription, next);
               }),
-        ),
+        );
+      },
       prepareForget: (subscription: SavedSubscription) =>
         one.withPermits(1)(
           Effect.gen(function* () {
@@ -454,9 +494,22 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
                     : undefined;
                 }
 
-                if (subscription.original || !(record instanceof type.errors)) {
+                const channelChoices = withoutSubscription(
+                  previous.channelChoices,
+                  subscription.id,
+                );
+
+                if (
+                  subscription.original ||
+                  !(record instanceof type.errors) ||
+                  channelChoices !== previous.channelChoices
+                ) {
                   yield* applied((file) => {
-                    const { rememberedLiveBrowse: _remembered, ...kept } = subscription.original
+                    const {
+                      rememberedLiveBrowse: _remembered,
+                      channelChoices: _choices,
+                      ...kept
+                    } = subscription.original
                       ? {
                           ...general(file),
                           ...defaultSubscriptionPreferences,
@@ -466,7 +519,7 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
 
                     return {
                       ...kept,
-                      ...defined({ rememberedLiveBrowse }),
+                      ...defined({ rememberedLiveBrowse, channelChoices }),
                     };
                   });
                 }
@@ -507,6 +560,7 @@ function general({
   recentChannelIds: _recent,
   interfaceLanguage: _language,
   rememberedLiveBrowse: _browse,
+  channelChoices: _choices,
   ...preferences
 }: Stored) {
   return preferences;
@@ -545,6 +599,44 @@ function ofOriginal({
     lastCategoryId,
     ...defined({ titleVersions, channelVariants }),
   };
+}
+
+/** The entries of the stored channel choices this release can read. */
+function readableChoices(raw: Json | undefined): ChannelChoices[] {
+  return Array.isArray(raw) ? raw.filter((entry) => ChannelChoices().allows(entry)) : [];
+}
+
+/**
+ * The stored channel choices without those of `subscriptionId`'s channels or fallbacks to them,
+ * or `raw` itself when it has none. An entry left with nothing chosen goes.
+ */
+function withoutSubscription(raw: Json | undefined, subscriptionId: string): Json | undefined {
+  if (!Array.isArray(raw)) return raw;
+
+  let changed = false;
+
+  const kept = raw.flatMap((entry): Json[] => {
+    if (!ChannelChoices().allows(entry)) return [entry];
+
+    if (entry.channel.subscriptionId === subscriptionId) {
+      changed = true;
+
+      return [];
+    }
+
+    const fallbacks = entry.fallbacks?.filter((each) => each.subscriptionId !== subscriptionId);
+
+    if (!fallbacks || fallbacks.length === entry.fallbacks?.length) return [entry];
+    changed = true;
+    const { fallbacks: _old, ...rest } = entry;
+    const next = fallbacks.length > 0 ? { ...rest, fallbacks } : rest;
+
+    return Object.keys(next).length > 1 ? [next] : [];
+  });
+
+  if (!changed) return raw;
+
+  return kept.length > 0 ? kept : undefined;
 }
 
 /** Compare effective defaults inside the file serializer. Values never leave Settings. */
@@ -630,17 +722,23 @@ export class AdmittedSettings extends Context.Service<
   }
 >()("mrstreamer/AdmittedSettings") {}
 
+/**
+ * The settings of the viewer a request was admitted for, while that viewer is still the one
+ * admitted, or `fallback` outside an admitted request.
+ */
+export const viewingSettings = (fallback: Settings["Service"]) =>
+  Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
+    admitted._tag === "None"
+      ? Effect.succeed(fallback)
+      : Effect.sync(() => {
+          if (!admitted.value.current())
+            throw new Error("Viewing profile changed; retry this catalogue read.");
+
+          return admitted.value.settings;
+        }),
+  );
+
 /** Shared catalogue facts may be reused; an admitted viewer's preferences are read only for it. */
 export function viewingPreferences(fallback: Settings["Service"]) {
-  return Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) => {
-    if (admitted._tag === "None") return fallback.get;
-
-    return Effect.andThen(
-      Effect.sync(() => {
-        if (!admitted.value.current())
-          throw new Error("Viewing profile changed; retry this catalogue read.");
-      }),
-      admitted.value.settings.get,
-    );
-  });
+  return Effect.flatMap(viewingSettings(fallback), (settings) => settings.get);
 }

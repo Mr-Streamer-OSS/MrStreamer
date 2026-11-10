@@ -15,6 +15,7 @@ export const nl: Translation = {
   "Kids policy: enter the correct PIN.": "Kinderbeleid: voer de juiste pincode in.",
   "Kids policy: this content or action is not approved.":
     "Kinderbeleid: deze inhoud of actie is niet goedgekeurd.",
+  "A channel can't be its own fallback.": "Een zender kan niet zijn eigen reserve zijn.",
   "Kids · allowed titles only": "Kinderen · alleen toegestane titels",
   "Manage profiles": "Profielen beheren",
   PIN: "Pincode",

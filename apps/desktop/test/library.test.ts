@@ -18,6 +18,8 @@ import {
   userAgent,
 } from "./support.ts";
 import { defined } from "@mrstreamer/core/defined";
+import { fallbackAfter, type LiveChannel } from "@mrstreamer/contracts/library";
+import { RESTORE_CHANNEL } from "@mrstreamer/contracts/preferences";
 
 /** The library, settings and subscriptions on `dataDir`, as a start of the app reads them. */
 async function started(dataDir: string, fetchImpl?: typeof fetch) {
@@ -815,4 +817,148 @@ it("browses exact ordered scope with OR/AND facets, uncertain facts and main-enf
   });
 
   expect(other.channels.map((channel) => channel.id)).toEqual(["13", "15", "13", "15"]);
+});
+
+describe("a viewer's channel choices", () => {
+  const fhd = String(QUALITY_STREAM_IDS);
+  const hd = String(QUALITY_STREAM_IDS + 1);
+  const sd = String(QUALITY_STREAM_IDS + 2);
+  const names = (channels: readonly LiveChannel[]) => channels.map((channel) => channel.title);
+
+  it("shows the viewer's name and number, hides from lists only, and restores the provider's", async () => {
+    const { library, own, restart } = await connectedLibrary();
+    const before = await library.channel(own(fhd));
+    const listed = await library.channels({});
+
+    const everything = async () =>
+      library.browse({
+        scope: { kind: "all" },
+        filters: { browseTopics: [], countries: [], languages: [], subscriptions: [] },
+        visibility: "viewer",
+      });
+
+    const browsed = await everything();
+
+    // Named by one of its streams, kept by the channel's own id.
+    const renamed = await library.choose(own(sd), { name: "  Zebra Nieuws ", number: 7 });
+
+    expect(renamed).toMatchObject({
+      ...own(fhd),
+      name: before.name,
+      title: "Zebra Nieuws",
+      number: 7,
+      variants: before.variants,
+      choices: { name: "Zebra Nieuws", number: 7 },
+      provided: { title: "Kwaliteit 1", number: before.number },
+    });
+    expect(names(await library.channels({ query: "zebra" }))).toEqual(["Zebra Nieuws"]);
+    expect((await (await restart()).channel(own(hd))).title).toBe("Zebra Nieuws");
+
+    await library.choose(own(fhd), { hidden: true });
+    const all = await library.channels({});
+
+    expect(all).toHaveLength(listed.length - 1);
+    expect(all.some((channel) => channel.id === fhd)).toBe(false);
+    expect(await library.channels({ query: "zebra" })).toEqual([]);
+    expect(await library.channels({ query: "kwaliteit" })).toEqual([]);
+    expect(
+      (
+        await library.browse({
+          scope: { kind: "channels", channels: [own(fhd)] },
+          filters: { browseTopics: [], countries: [], languages: [], subscriptions: [] },
+          visibility: "viewer",
+        })
+      ).channels,
+    ).toEqual([]);
+    expect((await everything()).total).toBe(browsed.total - 1);
+    // Asked for by id, as playback, favourites and undoing it ask, it is there.
+    expect(await library.channel(own(fhd))).toMatchObject({ choices: { hidden: true } });
+    expect(names(await library.channels({ channels: [own(hd)] }))).toEqual(["Zebra Nieuws"]);
+    expect(await library.chosen()).toMatchObject([
+      {
+        choices: { channel: own(fhd), name: "Zebra Nieuws", number: 7, hidden: true },
+        channel: { ...own(fhd), title: "Zebra Nieuws" },
+      },
+    ]);
+
+    // The provider's own name restores it, as does undoing every choice.
+    expect(await library.choose(own(fhd), { name: "Kwaliteit 1" })).not.toHaveProperty(
+      "choices.name",
+    );
+    const restored = await library.choose(own(fhd), RESTORE_CHANNEL);
+
+    expect(restored).toEqual(before);
+    expect(await library.chosen()).toEqual([]);
+    expect(await library.channels({})).toEqual(listed);
+    expect(await (await restart()).channel(own(fhd))).toEqual(before);
+  });
+
+  it("remembers the tracks picked for a channel alone", async () => {
+    const { library, own, restart } = await connectedLibrary();
+    const audio = { id: 257, language: "nl" };
+
+    await library.choose(own(fhd), { audio, subtitles: "off" });
+
+    expect((await (await restart()).channel(own(sd))).choices).toEqual({ audio, subtitles: "off" });
+    expect((await library.choose(own(fhd), { audio: null })).choices).toEqual({ subtitles: "off" });
+    expect((await library.choose(own(fhd), { subtitles: null })).choices).toBeUndefined();
+    expect(await library.chosen()).toEqual([]);
+  });
+
+  it("falls back only to other channels the viewer named and sees, and stops at a refusal", async () => {
+    const [first, second] = [
+      await fakeProvider({ channels: 300 }),
+      await fakeProvider({ channels: 200 }),
+    ];
+
+    const { library, subscriptions } = await started(await tempDir());
+    const a = (await subscriptions.add(demoLogin(first))).id;
+    const b = (await subscriptions.add(demoLogin(second))).id;
+    const of = (subscriptionId: string, id: string) => ({ subscriptionId, id });
+
+    await expect(
+      library.choose(of(a, fhd), { fallbacks: [of(b, fhd), of(a, sd)] }),
+    ).rejects.toMatchObject({ error: { kind: "invalid-input" } });
+    await expect(
+      library.choose(of(a, fhd), { fallbacks: [of(b, "999999")] }),
+    ).rejects.toMatchObject({ error: { kind: "channel-not-found", channelId: "999999" } });
+    expect(await library.chosen()).toEqual([]);
+
+    // The same channel named by two of its streams is one fallback, by its own id.
+    const channel = await library.choose(of(a, fhd), {
+      fallbacks: [of(b, hd), of(b, sd), of(b, "1000")],
+    });
+
+    expect(channel.choices).toEqual({ fallbacks: [of(b, fhd), of(b, "1000")] });
+    // Not a name: "Kwaliteit 1" of another subscription that wasn't named plays nowhere here.
+    expect((await library.channel(of(b, fhd))).choices).toBeUndefined();
+
+    const unavailable = { kind: "stream", failure: { kind: "unavailable", status: 404 } } as const;
+    const refused = { kind: "stream", failure: { kind: "refused", status: 429 } } as const;
+
+    expect(fallbackAfter(channel, unavailable, [])).toEqual(of(b, fhd));
+    expect(fallbackAfter(channel, unavailable, [of(b, fhd)])).toEqual(of(b, "1000"));
+    expect(fallbackAfter(channel, unavailable, [of(b, fhd), of(b, "1000")])).toBeNull();
+    expect(fallbackAfter(channel, refused, [])).toBeNull();
+    expect(fallbackAfter(channel, { kind: "invalid-login" }, [])).toBeNull();
+
+    // Fallbacks of a subscription that went are not offered.
+    await subscriptions.remove(b);
+
+    expect((await library.channel(of(a, fhd))).choices).toBeUndefined();
+  });
+
+  it("offers no fallback the viewer may not see now", async () => {
+    const { library, settings, own } = await connectedLibrary(300, true);
+
+    await expect(library.choose(own(fhd), { fallbacks: [own("4000")] })).rejects.toMatchObject({
+      error: { kind: "channel-not-found" },
+    });
+    await settings.update({ adultTitles: true });
+    expect((await library.choose(own(fhd), { fallbacks: [own("4000")] })).choices).toEqual({
+      fallbacks: [own("4000")],
+    });
+    await settings.update({ adultTitles: false });
+    expect((await library.channel(own(fhd))).choices).toBeUndefined();
+  });
 });

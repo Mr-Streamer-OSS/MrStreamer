@@ -18,11 +18,13 @@ import type { AppError } from "@mrstreamer/contracts/errors";
 import type {
   CatalogueStatus,
   Category,
+  ChosenChannel,
   LiveChannel,
   LiveSearchGroups,
   LiveSearchStamp,
 } from "@mrstreamer/contracts/library";
-import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
+import type { ChannelChoices, ChannelChoicesChange } from "@mrstreamer/contracts/preferences";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { adultIn, isAdultCategory } from "@mrstreamer/core/adult";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
 import {
@@ -56,7 +58,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { t } from "@mrstreamer/core/i18n";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
-import { Settings, viewingPreferences } from "./preferences.ts";
+import { Settings, viewingPreferences, viewingSettings } from "./preferences.ts";
 import {
   sameSource,
   Subscriptions,
@@ -232,6 +234,17 @@ export class Library extends Context.Service<
      */
     channel(channel: OwnedId): Effect.Effect<LiveChannel, Failed>;
     /**
+     * The viewer's channel choices with their channels, for undoing them: those of channels the
+     * viewer may see now, and of those their subscription's catalogue no longer lists.
+     */
+    readonly chosen: Effect.Effect<readonly ChosenChannel[], Failed>;
+    /**
+     * Changes the viewer's choices for a channel the viewer sees, named by its id or any of its
+     * streams', and answers with the channel as it shows now. Fallbacks must name other channels
+     * the viewer sees, or it fails with `channel-not-found` or `invalid-input` and changes nothing.
+     */
+    choose(channel: OwnedId, change: ChannelChoicesChange): Effect.Effect<LiveChannel, Failed>;
+    /**
      * Finds a subscription's channels by their id or any of their streams', in its catalogue in
      * memory or on disk. Never fetches one: before the first, and for a subscription that isn't
      * saved, it finds none. It looks in the catalogue kept as each id is asked for, so a refresh
@@ -372,6 +385,14 @@ function make(options: LibraryOptions) {
         failedAt: failure?.at ?? null,
       };
     };
+
+    /** The viewer's channel choices as they apply to `lists`. */
+    const ownOf = (lists: Combined) =>
+      Effect.gen(function* () {
+        const viewer = yield* viewingSettings(settings);
+
+        return ownView(yield* viewer.channelChoices, lists);
+      });
 
     /** Whether Live TV's lists show channels for adults. */
     const adults = Effect.map(
@@ -673,51 +694,117 @@ function make(options: LibraryOptions) {
       categories: Effect.map(visible, ({ lists }) => lists.categories),
 
       browse: (query: LiveBrowseQuery) =>
-        Effect.map(visible, ({ lists, search }) =>
-          browse(query.visibility === "ordinary" ? search : lists, query),
-        ),
+        Effect.gen(function* () {
+          const { lists, search } = yield* visible;
+
+          return browse(
+            query.visibility === "ordinary" ? search : lists,
+            query,
+            yield* ownOf(lists),
+          );
+        }),
 
       searchGroups: Effect.map(visible, ({ search }) => searchGroupCache(search.channels).groups),
 
       channels: (filter: ChannelFilter) =>
-        Effect.map(visible, ({ lists, search: searched }) => {
+        Effect.gen(function* () {
+          const { lists, search: searched } = yield* visible;
+          const own = yield* ownOf(lists);
           const query = normalize(filter.query ?? "");
 
-          if (filter.channels) {
-            // Those of a subscription that isn't saved are in no catalogue, whatever their ids.
-            const byId = new Map(lists.members.map((each) => [each.subscriptionId, each.byId]));
+          // Those of a subscription that isn't saved are in no catalogue, whatever their ids.
+          const asked = filter.channels?.flatMap((ref) => channelIn(lists, ref) ?? []);
 
-            const found = filter.channels.flatMap(
-              ({ subscriptionId, id }) => byId.get(subscriptionId)?.get(id) ?? [],
-            );
+          // Lists leave the viewer's hidden channels out; channels asked for by id are there.
+          if (asked && !query) return own.all(plainChannels([...new Set(asked)].map(lists.shown)));
 
-            if (query)
-              return stampSearchGroups(
-                matchingSearchGroups(searchIndex(searched.channels), found)
+          if (asked)
+            return own.listed(
+              stampSearchGroups(
+                matchingSearchGroups(searchIndex(searched.channels), asked)
                   .slice(0, SEARCH_LIMIT)
                   .flatMap((group) => group.copies),
                 searched.channels,
-              );
+              ),
+            );
 
-            return plainChannels([...new Set(found)].map(lists.shown));
+          if (query) {
+            const results = search(searched.channels, filter.query ?? "");
+            const named = own.named(filter.query ?? "", searched, results);
+
+            return own.listed(
+              named.length > 0
+                ? [...stampSearchGroups(named, searched.channels), ...results]
+                : results,
+            );
           }
 
-          if (query) return search(searched.channels, filter.query ?? "");
+          if (!filter.category) return own.listed(plainChannels(lists.channels));
 
-          if (!filter.category) return plainChannels(lists.channels);
-
-          return plainChannels(lists.byCategory.get(ownedKey(filter.category)) ?? []);
+          return own.listed(plainChannels(lists.byCategory.get(ownedKey(filter.category)) ?? []));
         }),
 
       channel: (channel: OwnedId) =>
-        Effect.flatMap(memberOf(channel.subscriptionId), ({ member, lists }) => {
+        Effect.gen(function* () {
+          const { member, lists } = yield* memberOf(channel.subscriptionId);
           const found = member.byId.get(channel.id);
 
-          return found
-            ? Effect.succeed(lists.shown(found))
-            : Effect.fail(
-                new Failed({ error: { kind: "channel-not-found", channelId: channel.id } }),
-              );
+          if (!found)
+            return yield* new Failed({
+              error: { kind: "channel-not-found", channelId: channel.id },
+            });
+
+          return (yield* ownOf(lists)).shown(lists.shown(found));
+        }),
+
+      chosen: Effect.gen(function* () {
+        const { lists } = yield* visible;
+        const choices = yield* (yield* viewingSettings(settings)).channelChoices;
+        const own = ownView(choices, lists);
+
+        return choices.flatMap((choice): ChosenChannel[] => {
+          const { subscriptionId, id } = choice.channel;
+          const member = lists.members.find((each) => each.subscriptionId === subscriptionId);
+
+          // Until its catalogue is read, or while its subscription isn't saved, nothing is known.
+          if (!member) return [];
+          const found = member.byId.get(id);
+
+          if (found) return [{ choices: choice, channel: own.shown(lists.shown(found)) }];
+
+          // Listed, but not for this viewer now: for adults while they are off, or not approved.
+          if (catalogues.get(subscriptionId)?.byId.has(id)) return [];
+
+          return [{ choices: choice, channel: null }];
+        });
+      }),
+
+      choose: (channel: OwnedId, change: ChannelChoicesChange) =>
+        Effect.gen(function* () {
+          const { member, lists } = yield* memberOf(channel.subscriptionId);
+          const found = member.byId.get(channel.id);
+
+          if (!found)
+            return yield* new Failed({
+              error: { kind: "channel-not-found", channelId: channel.id },
+            });
+
+          const fallbacks =
+            change.fallbacks && (yield* fallbacksOf(change.fallbacks, found, lists));
+
+          const viewer = yield* viewingSettings(settings);
+          const mine = (choice: ChannelChoices) => isChoiceFor(choice, found);
+
+          const after = yield* viewer.changeChannelChoices((choices) => {
+            const next = changedChoices(choices.find(mine), found, {
+              ...change,
+              ...defined({ fallbacks }),
+            });
+
+            return [...choices.filter((choice) => !mine(choice)), ...(next ? [next] : [])];
+          });
+
+          return ownView(after, lists).shown(lists.shown(found));
         }),
 
       lookup: (subscriptionId: string) =>
@@ -1103,10 +1190,10 @@ function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
   return index;
 }
 
-function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
+function browse(lists: Combined, query: LiveBrowseQuery, own: OwnView): LiveBrowseResult {
   const { scope, filters } = query;
 
-  const channels =
+  const scoped =
     scope.kind === "all"
       ? lists.channels
       : scope.kind === "category"
@@ -1123,6 +1210,9 @@ function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
               }),
             ),
           ];
+
+  // Counted as the viewer's lists show them, without their hidden channels.
+  const channels = own.listed(scoped);
 
   const facets = {
     browseTopics: new Map<string, number>(),
@@ -1210,6 +1300,194 @@ function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
       subscriptions: counted(facets.subscriptions),
     },
   };
+}
+
+/** The viewer's channel choices applied to the channels of one `Combined`. */
+interface OwnView {
+  /** The channel with what the viewer chose for it: their name and number, fallbacks to play. */
+  readonly shown: (channel: LiveChannel) => LiveChannel;
+  /** `channels` each `shown`: the same array when the viewer chose nothing for any. */
+  readonly all: (channels: readonly LiveChannel[]) => readonly LiveChannel[];
+  /** `channels` as lists show them: `all`, without the channels the viewer hid. */
+  readonly listed: (channels: readonly LiveChannel[]) => readonly LiveChannel[];
+  /**
+   * The channels of `within` whose name the viewer gave holds every word of `query`, and which
+   * `results` don't have: search's index knows only the provider's names.
+   */
+  readonly named: (
+    query: string,
+    within: Combined,
+    results: readonly LiveChannel[],
+  ) => readonly LiveChannel[];
+}
+
+/** The channel `choice` is for: it names the channel's id or one of its streams'. */
+function isChoiceFor(choice: ChannelChoices, channel: LiveChannel): boolean {
+  const { subscriptionId, id } = choice.channel;
+
+  return (
+    subscriptionId === channel.subscriptionId &&
+    (id === channel.id || channel.variants.some((variant) => variant.id === id))
+  );
+}
+
+/** A channel of `lists` by its id or any of its streams'. */
+function channelIn(lists: Combined, { subscriptionId, id }: OwnedId): LiveChannel | undefined {
+  return lists.members.find((each) => each.subscriptionId === subscriptionId)?.byId.get(id);
+}
+
+function ownView(choices: readonly ChannelChoices[], lists: Combined): OwnView {
+  const byKey = new Map(choices.map((choice) => [ownedKey(choice.channel), choice]));
+
+  const choiceOf = (channel: LiveChannel) =>
+    byKey.get(ownedKey(channel)) ??
+    channel.variants
+      .map((variant) =>
+        byKey.get(ownedKey({ subscriptionId: channel.subscriptionId, id: variant.id })),
+      )
+      .find((choice) => choice !== undefined);
+
+  const shown = (channel: LiveChannel): LiveChannel => {
+    const choice = choiceOf(channel);
+
+    if (!choice) return channel;
+    const { name, number, hidden, audio, subtitles } = choice;
+
+    // Only fallbacks the viewer may play now: listed, shown to them and not this channel itself.
+    const fallbacks = (choice.fallbacks ?? []).flatMap((ref) => {
+      const found = channelIn(lists, ref);
+
+      return found && !sameOwned(found, channel) ? [ownedId(found)] : [];
+    });
+
+    const choices = {
+      ...defined({ name, number, hidden, audio, subtitles }),
+      ...(fallbacks.length > 0 && { fallbacks }),
+    };
+
+    if (Object.keys(choices).length === 0) return channel;
+    const renamed = choices.name !== undefined || choices.number !== undefined;
+
+    return {
+      ...channel,
+      title: choices.name ?? channel.title,
+      number: choices.number ?? channel.number,
+      choices,
+      ...(renamed && { provided: { title: channel.title, number: channel.number } }),
+    };
+  };
+
+  const all = (channels: readonly LiveChannel[]) => {
+    if (byKey.size === 0) return channels;
+    const each = channels.map(shown);
+
+    return each.some((channel, at) => channel !== channels[at]) ? each : channels;
+  };
+
+  const listed = (channels: readonly LiveChannel[]) => {
+    const each = all(channels);
+
+    return each === channels || !each.some((channel) => channel.choices?.hidden)
+      ? each
+      : each.filter((channel) => !channel.choices?.hidden);
+  };
+
+  return {
+    shown,
+    all,
+    listed,
+    named: (query, within, results) => {
+      const words = normalize(query).split(" ").filter(Boolean);
+
+      return choices.flatMap((choice) => {
+        const name = choice.name && normalize(choice.name);
+
+        if (!name || !words.every((word) => name.includes(word))) return [];
+        const found = channelIn(within, choice.channel);
+
+        return found && !results.some((each) => sameOwned(each, found))
+          ? [within.shown(found)]
+          : [];
+      });
+    },
+  };
+}
+
+/**
+ * The fallbacks `refs` name, each by its channel's own id and once, or a failure when one isn't
+ * a channel of `lists` or is `channel` itself.
+ */
+function fallbacksOf(refs: readonly OwnedId[], channel: LiveChannel, lists: Combined) {
+  return Effect.gen(function* () {
+    const fallbacks: OwnedId[] = [];
+
+    for (const ref of refs) {
+      const found = channelIn(lists, ref);
+
+      if (!found)
+        return yield* new Failed({ error: { kind: "channel-not-found", channelId: ref.id } });
+
+      if (sameOwned(found, channel))
+        return yield* new Failed({
+          error: { kind: "invalid-input", detail: t("A channel can't be its own fallback.") },
+        });
+
+      if (!fallbacks.some((each) => sameOwned(each, found))) fallbacks.push(ownedId(found));
+    }
+
+    return fallbacks;
+  });
+}
+
+/**
+ * `previous` with `change` made to it for `channel`, by the channel's own id, or null when
+ * nothing is left chosen. Keys a later release added stay.
+ */
+function changedChoices(
+  previous: ChannelChoices | undefined,
+  channel: LiveChannel,
+  change: ChannelChoicesChange,
+): ChannelChoices | null {
+  const {
+    channel: _channel,
+    name: _name,
+    number: _number,
+    hidden: _hidden,
+    fallbacks: _fallbacks,
+    audio: _audio,
+    subtitles: _subtitles,
+    ...later
+  } = previous ?? { channel };
+
+  /** What `change` asks of `key`, null restoring it, or what `previous` had when it asks nothing. */
+  const field = <V>(
+    key: keyof ChannelChoicesChange,
+    asked: V | null | undefined,
+    before: V | undefined,
+  ) => (key in change ? (asked ?? undefined) : before);
+
+  const name = change.name?.trim();
+
+  const chosen = defined({
+    name: field("name", name && name !== channel.title ? name : null, previous?.name),
+    number: field(
+      "number",
+      change.number !== channel.number ? change.number : null,
+      previous?.number,
+    ),
+    hidden: field("hidden", change.hidden ? (true as const) : null, previous?.hidden),
+    fallbacks: field(
+      "fallbacks",
+      change.fallbacks?.length ? change.fallbacks : null,
+      previous?.fallbacks,
+    ),
+    audio: field("audio", change.audio, previous?.audio),
+    subtitles: field("subtitles", change.subtitles, previous?.subtitles),
+  });
+
+  return Object.keys(chosen).length > 0 || Object.keys(later).length > 0
+    ? { ...later, ...chosen, channel: ownedId(channel) }
+    : null;
 }
 
 /** Rebuild from admitted provider streams before deriving names, groups, guide IDs or facets. */

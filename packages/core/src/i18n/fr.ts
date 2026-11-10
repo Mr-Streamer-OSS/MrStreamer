@@ -15,6 +15,8 @@ export const fr: Translation = {
   "Kids policy: enter the correct PIN.": "Restrictions enfants : saisissez le bon code PIN.",
   "Kids policy: this content or action is not approved.":
     "Restrictions enfants : ce contenu ou cette action ne sont pas autorisés.",
+  "A channel can't be its own fallback.":
+    "Une chaîne ne peut pas être sa propre chaîne de secours.",
   "Kids · allowed titles only": "Enfants · titres autorisés uniquement",
   "Manage profiles": "Gérer les profils",
   PIN: "Code PIN",

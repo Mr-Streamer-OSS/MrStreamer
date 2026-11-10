@@ -1,7 +1,8 @@
 // The library model: how the app sees content, independent of the provider that supplied it.
 import type { AppError } from "./errors.ts";
-import type { OwnedId } from "./subscription.ts";
+import { sameOwned, type OwnedId } from "./subscription.ts";
 import type { BrowseMetadata } from "./live-browse.ts";
+import type { ChannelChoices } from "./preferences.ts";
 
 /**
  * A live TV channel: the provider's streams of one channel, one per quality or backup. Most have
@@ -51,6 +52,55 @@ export interface LiveChannel {
   readonly searchIdentity?: LiveSearchIdentity;
   /** Response-only full-catalogue group and source order. Never stored or used for playback. */
   readonly searchGroup?: LiveSearchStamp;
+  /**
+   * What the active viewer chose for it, when they chose anything (`ChannelChoices`). Its
+   * `fallbacks` are only those the viewer may play now, in their order. `title` and `number`
+   * already show the viewer's name and number.
+   */
+  readonly choices?: Omit<ChannelChoices, "channel">;
+  /** The provider's title and number, while the viewer's name or number shows instead. */
+  readonly provided?: { readonly title: string; readonly number: number | null };
+}
+
+/** A viewer's channel choices with the channel they are for, as Live TV lists it now. */
+export interface ChosenChannel {
+  readonly choices: ChannelChoices;
+  /** Null once its subscription's catalogue no longer lists it. */
+  readonly channel: LiveChannel | null;
+}
+
+/**
+ * The fallback channel to play after `channel` failed with `error`, having tried those in `tried`
+ * already: the first of its fallbacks not tried. Null when it names none left, and for a refusal,
+ * a rate limit or anything else another source can't help with, after which nothing more is tried.
+ */
+export function fallbackAfter(
+  channel: LiveChannel,
+  error: AppError,
+  tried: readonly OwnedId[],
+): OwnedId | null {
+  if (!fallsBack(error)) return null;
+
+  return (
+    channel.choices?.fallbacks?.find(
+      (fallback) => !tried.some((each) => sameOwned(each, fallback)),
+    ) ?? null
+  );
+}
+
+/** A stream that didn't come, a channel or subscription that isn't there now, or a provider out of reach. */
+function fallsBack(error: AppError): boolean {
+  switch (error.kind) {
+    case "stream":
+      // 401, 403, 429 and other refusals stop: the provider has said no, or asked to wait.
+      return error.failure.kind !== "refused";
+    case "channel-not-found":
+    case "no-subscription":
+    case "unreachable":
+      return true;
+    default:
+      return false;
+  }
 }
 
 /** Full-catalogue display decision for one owned channel. */

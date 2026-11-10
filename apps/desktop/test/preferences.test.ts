@@ -6,7 +6,11 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Preferences, SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
+import {
+  Preferences,
+  rememberedTrack,
+  SubscriptionPreferences,
+} from "@mrstreamer/contracts/preferences";
 import { ipcInputs } from "@mrstreamer/contracts/ipc";
 import { profileDirectory } from "../src/main/platform/profile-store.ts";
 import { Settings } from "../src/main/services/preferences.ts";
@@ -933,3 +937,124 @@ it.each(["general", "added"] as const)(
     ).toMatchObject(expected);
   },
 );
+
+describe("channel choices", () => {
+  const of = (subscriptionId: string, id: string) => ({ subscriptionId, id });
+
+  it("keeps what this release can't read, and forgets a subscription's channels and fallbacks to them when it goes", async () => {
+    const { dataDir, subscriptions, id } = await connected();
+    const other = (await subscriptions.add(demoLogin(await fakeProvider()))).id;
+    const future = { channel: of(id, "2000"), name: "Later", colour: "red" };
+    const unreadable = { channel: of(id, "2001"), number: "seven" };
+
+    await writeFile(
+      join(dataDir, "preferences.json"),
+      JSON.stringify({
+        volume: 1,
+        muted: false,
+        lastChannelId: null,
+        lastCategoryId: null,
+        channelChoices: [future, unreadable],
+      }),
+    );
+    const restarted = await settingsIn(dataDir);
+
+    expect(await restarted.channelChoices()).toEqual([future]);
+    expect(await restarted.get()).not.toHaveProperty("channelChoices");
+
+    const mine = { channel: of(id, "1000"), hidden: true as const };
+    const theirs = { channel: of(other, "1000"), name: "Mine", fallbacks: [of(id, "1000")] };
+    const both = { channel: of(other, "1001"), fallbacks: [of(id, "1001"), of(other, "1002")] };
+
+    expect(
+      await restarted.changeChannelChoices((choices) => [...choices, mine, theirs, both]),
+    ).toEqual([future, mine, theirs, both]);
+    expect((await stored(dataDir)) as { channelChoices: unknown }).toMatchObject({
+      channelChoices: [future, mine, theirs, both, unreadable],
+    });
+
+    const gone = await savedAs(subscriptions, id);
+    await subscriptions.remove(id);
+    await Effect.runPromise(await restarted.prepareForget(gone));
+
+    // The removed subscription's are gone, its future entry included; what can't be read stays.
+    const kept = [
+      { channel: of(other, "1000"), name: "Mine" },
+      { channel: of(other, "1001"), fallbacks: [of(other, "1002")] },
+    ];
+
+    expect(await restarted.channelChoices()).toEqual(kept);
+    expect(await (await settingsIn(dataDir)).channelChoices()).toEqual(kept);
+    expect((await stored(dataDir)) as { channelChoices: unknown }).toMatchObject({
+      channelChoices: [...kept, unreadable],
+    });
+  });
+
+  it("can't be changed through what is left at a subscription", async () => {
+    const { dataDir, settings, id } = await connected();
+    const mine = [{ channel: of(id, "1000"), hidden: true as const }];
+    await settings.changeChannelChoices(() => mine);
+
+    // As a window's request arrives: the schema keeps keys it doesn't declare.
+    const request = ipcInputs["subscription.updatePreferences"]()({
+      subscriptionId: id,
+      patch: { lastChannelId: "1000", channelChoices: [], interfaceLanguage: "nl" },
+    });
+
+    if (request instanceof type.errors) throw new Error(request.summary);
+    await settings.updateSubscription(id, request.patch);
+
+    expect(await settings.channelChoices()).toEqual(mine);
+    expect(await (await settingsIn(dataDir)).channelChoices()).toEqual(mine);
+    expect(await settings.interfaceLanguage()).toBeUndefined();
+    expect((await settings.ofSubscription(id)).lastChannelId).toBe("1000");
+  });
+
+  it("belongs to the profile that made it", async () => {
+    const { dataDir, settings, id } = await connected();
+    const consent = { read: Effect.succeed(true), write: () => Effect.void };
+
+    const profile = await promised(
+      runtimeFor(
+        Settings.profileLayer(dataDir, "kids-room", consent).pipe(
+          Layer.provide(
+            Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+          ),
+        ),
+      ),
+      Settings,
+    );
+
+    await profile.changeChannelChoices(() => [{ channel: of(id, "1000"), name: "Theirs" }]);
+
+    expect(await settings.channelChoices()).toEqual([]);
+    expect(await profile.channelChoices()).toEqual([{ channel: of(id, "1000"), name: "Theirs" }]);
+    expect(
+      JSON.parse(
+        await readFile(join(profileDirectory(dataDir, "kids-room"), "preferences.json"), "utf8"),
+      ),
+    ).toMatchObject({
+      channelChoices: [{ channel: of(id, "1000"), name: "Theirs" }],
+    });
+  });
+
+  it("finds a remembered track by its id while it keeps its language, else by its language, else none", () => {
+    const tracks = [
+      { id: 257, language: "nl", label: "Nederlands" },
+      { id: 258, language: "en", label: "English" },
+      { id: 259, language: "en", label: "English · AD" },
+    ];
+
+    expect(rememberedTrack(tracks, { id: 259, language: "en" })).toBe(tracks[2]);
+    expect(rememberedTrack(tracks, { id: 300, language: "en" })).toBe(tracks[1]);
+    expect(rememberedTrack(tracks, { id: 257, language: "fr" })).toBeNull();
+    expect(rememberedTrack(tracks, { id: 300, language: null })).toBeNull();
+
+    const pages = [
+      { id: 600, page: 888, language: "nl" },
+      { id: 600, page: 889, language: "nl" },
+    ];
+
+    expect(rememberedTrack(pages, { id: 600, page: 889, language: "nl" })).toBe(pages[1]);
+  });
+});
