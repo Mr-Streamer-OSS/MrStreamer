@@ -56,14 +56,18 @@ import { subscriptionHandlers } from "./handlers/subscriptions.ts";
 import { libraryHandlers } from "./handlers/library.ts";
 import { guideHandlers } from "./handlers/guide.ts";
 import { titleHandlers } from "./handlers/titles.ts";
-import { playbackHandlers } from "./handlers/playback.ts";
+import { playbackHandlers, publishCopyChange } from "./handlers/playback.ts";
 import { subtitleHandlers } from "./handlers/subtitles.ts";
 import { outputHandlers } from "./handlers/output.ts";
 import { viewingHandlers } from "./handlers/viewing.ts";
 import { customListHandlers } from "./handlers/custom-lists.ts";
 import { collectionsHandlers } from "./handlers/collections.ts";
 import { downloadHandlers } from "./handlers/downloads.ts";
-import { recordingHandlers } from "./handlers/recordings.ts";
+import {
+  recordingHandlers,
+  recordingResume,
+  publishRecordingProgress,
+} from "./handlers/recordings.ts";
 import { profileHandlers } from "./handlers/profiles.ts";
 import { reminderHandlers } from "./handlers/reminders.ts";
 import { analyticsHandlers } from "./handlers/analytics.ts";
@@ -1138,6 +1142,26 @@ async function start(): Promise<void> {
     (list) => list,
     (list, viewer) => (viewer.kids ? [] : list),
   );
+  runtime.runFork(
+    Stream.runForEach(recordings.progressChanges, (change) =>
+      Effect.gen(function* () {
+        const admission = yield* profileSessions.admit;
+        yield* publishRecordingProgress(admission, change, () => {
+          if (mainWindow) emit(mainWindow.webContents, "recordings.resumeChanged", null);
+        });
+      }).pipe(Effect.catchTag("Failed", () => Effect.void)),
+    ),
+  );
+  runtime.runFork(
+    Stream.runForEach(playback.copyChanged, (sessionId) =>
+      Effect.gen(function* () {
+        const admission = yield* profileSessions.admit;
+        yield* publishCopyChange(playback, admission, sessionId, (id) => {
+          if (mainWindow) emit(mainWindow.webContents, "playback.copyChanged", { sessionId: id });
+        });
+      }).pipe(Effect.catchTag("Failed", () => Effect.void)),
+    ),
+  );
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
@@ -1493,6 +1517,7 @@ async function start(): Promise<void> {
           ...viewingHandlers({ viewing: scoped.viewing, settings: scoped.settings }),
           ...customListHandlers({ customLists: scoped.lists }),
           ...collectionsHandlers({ collections: scoped.collections, current: admission.current }),
+          "recordings.resume": () => recordingResume(recordings, admission.owner),
           ...playbackHandlers({
             playback,
             coordination,
@@ -1504,6 +1529,7 @@ async function start(): Promise<void> {
             settings: scoped.settings,
             analytics,
             profiles: { active: Effect.succeed(admission.owner) },
+            current: admission.current,
           }),
           ...outputHandlers({
             output,

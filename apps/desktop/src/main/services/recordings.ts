@@ -48,6 +48,7 @@ import { isDeepStrictEqual } from "node:util";
 import type {
   ConnectionHolder,
   Recording,
+  RecordingResumeList,
   RecordingConnections,
   RecordingCapacity,
   RecordingCut,
@@ -73,7 +74,7 @@ import {
 import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
-import { Failed } from "@mrstreamer/core/failure";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { t, type PlainKey } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
@@ -83,6 +84,12 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import {
+  indexRecording,
+  recordingFile,
+  type RecordingFile,
+  type RecordingExtent,
+} from "../playback/file-source.ts";
 import { SavedSubtitles, subtitlesOfCopy } from "../platform/saved-subtitles.ts";
 import { CaptureFailure, startCapture, type CaptureEnd } from "../recordings/capture.ts";
 import {
@@ -236,7 +243,9 @@ export class Recordings extends Context.Service<
      * has that id. Fails, listing it as missing, when its file went.
      */
     copy(id: string, owner?: ActiveProfile): Effect.Effect<LocalCopy | null, Failed>;
-    /** Keeps how far an ended recording played. */
+    /** Main-only owner-bound projection; callers must authorize every exact recording row. */
+    resume(owner?: ActiveProfile): Effect.Effect<RecordingResumeList, Failed>;
+    /** Keeps how far a retained recording played, including one still capturing. */
     recordProgress(
       id: string,
       position: number,
@@ -275,7 +284,9 @@ export class Recordings extends Context.Service<
       readonly scheduled: boolean;
       readonly unsaved: boolean;
     }>;
-    /** The list after each change, and as recordings grow, about once a second. */
+    /** Main-only invalidation after a personal save, retaining its original owner and recording. */
+    readonly progressChanges: Stream.Stream<{ readonly owner: ActiveProfile; readonly id: string }>;
+    /** Inventory after each change and as recordings grow, about once a second; no personal progress. */
     readonly changes: Stream.Stream<readonly Recording[]>;
     /** Lists saved rules; a refused startup inventory stays refused until the next start. */
     readonly rules: Effect.Effect<readonly RecordingRule[], Failed>;
@@ -384,6 +395,7 @@ function make(deps: RecordingsDeps) {
         position: number;
         duration: number;
         retryAt: number;
+        watchedAt: number;
       }
     >();
 
@@ -398,6 +410,12 @@ function make(deps: RecordingsDeps) {
     const root = join(deps.dataDir, "recordings");
     const path = join(root, "recordings.json");
     const storagePath = join(root, "storage.json");
+
+    const progressChanges = yield* PubSub.unbounded<{
+      readonly owner: ActiveProfile;
+      readonly id: string;
+    }>();
+
     const changes = yield* PubSub.sliding<readonly Recording[]>(4);
     /** Asks the schedules to be checked: a recording started or ended, or the lists changed. */
     const wakes = yield* Queue.sliding<void>(1);
@@ -421,6 +439,7 @@ function make(deps: RecordingsDeps) {
         );
 
     const records = new Map<string, StoredRecording>();
+    const recordingFiles = new Map<string, RecordingFile>();
     /**
      * New recordings still starting, written to recordings.json from before they capture, so a
      * crash meanwhile leaves one that goes on when the app runs again. Nothing else here sees them
@@ -546,6 +565,7 @@ function make(deps: RecordingsDeps) {
 
         if (failed) {
           records.delete(record.id);
+          recordingFiles.delete(record.id);
           failedFolders.set(record.id, folderOf(record));
 
           return;
@@ -616,6 +636,7 @@ function make(deps: RecordingsDeps) {
      */
     const forgetStart = (record: StoredRecording) => {
       records.delete(record.id);
+      recordingFiles.delete(record.id);
       failedFolders.set(record.id, folderOf(record));
       unsaved.recordings = true;
     };
@@ -775,7 +796,25 @@ function make(deps: RecordingsDeps) {
         .toSorted((a, b) => b.start - a.start),
     );
 
-    const publish = Effect.flatMap(shown, (list) => PubSub.publish(changes, list));
+    const fileListeners = new Set<() => void>();
+    let filesClosed = false;
+
+    const notifyFiles = () => {
+      for (const listener of fileListeners) listener();
+    };
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        filesClosed = true;
+        recordingFiles.clear();
+        notifyFiles();
+      }),
+    );
+
+    const publish = Effect.andThen(
+      Effect.sync(notifyFiles),
+      Effect.flatMap(shown, (list) => PubSub.publish(changes, list)),
+    );
 
     /** Looks for gone files again, telling the window when that changed what it lists. */
     const lookAgain = Effect.gen(function* () {
@@ -789,6 +828,7 @@ function make(deps: RecordingsDeps) {
     let pending: NodeJS.Timeout | null = null;
 
     const grew = () => {
+      notifyFiles();
       pending ??= setTimeout(() => {
         pending = null;
         Effect.runFork(publish);
@@ -2158,9 +2198,11 @@ function make(deps: RecordingsDeps) {
       late: ScheduleMiss | null,
     ): NonNullable<StoredRecording["scheduled"]> => {
       const owed = owedOf(schedule, occurrence);
+      const rule = ruleOf(schedule.id);
 
       return {
         schedule: schedule.id,
+        ...(rule && { rule }),
         from: occurrence.start,
         ...(owed > occurrence.start && { owed }),
         late,
@@ -2410,11 +2452,19 @@ function make(deps: RecordingsDeps) {
         }
 
         const saved = yield* Effect.result(
-          progress.owner.write("recording", progress.id, progress.position, progress.duration),
+          progress.owner.write(
+            "recording",
+            progress.id,
+            progress.position,
+            progress.duration,
+            progress.watchedAt,
+          ),
         );
 
-        if (saved._tag === "Success" && pendingProgress.get(id) === progress)
+        if (saved._tag === "Success" && pendingProgress.get(id) === progress) {
           pendingProgress.delete(id);
+          yield* PubSub.publish(progressChanges, { owner: progress.owner.owner, id: progress.id });
+        }
       }
 
       const paused = yield* resumeDue(Date.now());
@@ -2832,6 +2882,124 @@ function make(deps: RecordingsDeps) {
         }),
       );
 
+    /**
+     * A recording's own file as it is written: committed extent, status and gaps, indexed for its
+     * program and media time. Fails when it is unknown or missed.
+     */
+    const recordingSource = (id: string) =>
+      Effect.gen(function* () {
+        yield* usable;
+        const record = records.get(id);
+
+        if (!record || record.status.kind === "missed")
+          return yield* new Failed({
+            error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
+          });
+        const cached = recordingFiles.get(id);
+
+        if (cached) {
+          yield* Effect.tryPromise({ try: (signal) => cached.read(signal), catch: failedWith });
+
+          return cached;
+        }
+
+        const path = fileOf(record);
+        let previous: RecordingExtent | undefined;
+
+        const readCurrent = async (signal?: AbortSignal): Promise<RecordingExtent> => {
+          signal?.throwIfAborted();
+
+          if (filesClosed) throw new Error("Recording owner closed.");
+          const beforeRecord = records.get(id);
+          const beforeCapture = active.get(id);
+          const committed = beforeCapture?.bytes() ?? beforeRecord?.bytes;
+          const found = await stat(path, { bigint: true });
+          signal?.throwIfAborted();
+          const current = records.get(id);
+
+          // A settled writer must not publish its final status with an earlier byte snapshot.
+          if (current !== beforeRecord || active.get(id) !== beforeCapture)
+            return readCurrent(signal);
+
+          if (!current || current.status.kind === "missed" || missing.has(id))
+            throw new Error("Recording is unavailable.");
+          const capture = active.get(id);
+          const bytes = committed ?? current.bytes;
+
+          if (!found.isFile() || found.size < bytes)
+            throw new Error("Recording file is missing, replaced or truncated.");
+
+          const status =
+            isLive(current) && !capture
+              ? { kind: "paused" as const, why: openGap(current)?.why ?? ("away" as const) }
+              : current.status;
+
+          const facts = {
+            bytes,
+            mediaRevision: current.gaps?.length ?? 0,
+            device: found.dev.toString(),
+            inode: found.ino.toString(),
+            status,
+            final: !isLive(current) && !capture,
+            duration: null,
+            seekable: [],
+            gaps: current.gaps ?? [],
+          };
+
+          const revision =
+            previous && isDeepStrictEqual({ ...previous, revision: 0 }, { ...facts, revision: 0 })
+              ? previous.revision
+              : (previous?.revision ?? -1) + 1;
+
+          previous = { ...facts, revision };
+
+          return previous;
+        };
+
+        // Assign revisions in observation order, including reads made by EOF waiters.
+        let tail = Promise.resolve();
+
+        const read = (signal?: AbortSignal) => {
+          const next = tail.then(() => readCurrent(signal));
+          tail = next.then(
+            () => undefined,
+            () => undefined,
+          );
+
+          return next;
+        };
+
+        const source: RecordingFile = {
+          read,
+          wait: async (revision, signal) => {
+            for (;;) {
+              signal.throwIfAborted();
+              // Subscribe before reading: an append during stat cannot fall between check and wait.
+              const change = Promise.withResolvers<void>();
+              const wake = () => change.resolve();
+              fileListeners.add(wake);
+              signal.addEventListener("abort", wake, { once: true });
+
+              try {
+                const next = await read(signal);
+
+                if (next.revision > revision) return next;
+                await change.promise;
+              } finally {
+                fileListeners.delete(wake);
+                signal.removeEventListener("abort", wake);
+              }
+            }
+          },
+        };
+
+        const file = indexRecording(path, recordingFile(path, source));
+        recordingFiles.set(id, file);
+        yield* Effect.tryPromise({ try: (signal) => file.read(signal), catch: failedWith });
+
+        return file;
+      });
+
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
       connections: (
@@ -2995,6 +3163,7 @@ function make(deps: RecordingsDeps) {
               }),
           });
           records.delete(id);
+          recordingFiles.delete(id);
           const written = yield* Effect.result(save);
 
           if (written._tag === "Failure") {
@@ -3019,11 +3188,6 @@ function make(deps: RecordingsDeps) {
 
           if (!record || record.status.kind === "missed") return null;
 
-          if (isLive(record))
-            return yield* new Failed({
-              error: { kind: "unexpected", detail: t("It is still recording.") },
-            });
-
           // Its file may have gone since the list was read: the list says so at once.
           const there = yield* Effect.promise(() =>
             stat(fileOf(record)).then(
@@ -3044,15 +3208,68 @@ function make(deps: RecordingsDeps) {
           }
 
           if (missing.delete(id)) yield* publish;
+          // One still recording plays as it grows, once its own index has read its program.
+          const growing = isLive(record) ? yield* recordingSource(id) : undefined;
+
+          if (
+            growing &&
+            !(yield* Effect.tryPromise({
+              try: (signal) => growing.read(signal),
+              catch: failedWith,
+            })).layout
+          )
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: t("It is still recording.") },
+            });
 
           return {
             id,
+            kind: "recording",
             owner: owner.owner,
             path: fileOf(record),
             container: "ts",
             title: { kind: "movie", id },
             progress: yield* owner.read("recording", id, record.progress ?? null),
+            ...(growing && { recording: growing }),
           } satisfies LocalCopy;
+        }),
+      resume: (captured?: ActiveProfile) =>
+        Effect.gen(function* () {
+          const owner = captured ? personal.of(captured) : yield* personal.admit;
+          yield* usable;
+          const positions = yield* owner.recordings;
+          yield* lookAgain;
+
+          // Use inventory identities, never the provider catalogue or a title-name match.
+          // File failures omit the copy rather than promise playback; no growing-edge completion heuristic.
+          const present = new Set(
+            yield* Effect.promise(() =>
+              Promise.all(
+                positions.map(async ({ id }) => {
+                  const record = records.get(id);
+
+                  if (!record || record.status.kind === "missed") return null;
+
+                  return stat(fileOf(record)).then(
+                    (file) => (file.isFile() && file.size > 0 ? id : null),
+                    () => null,
+                  );
+                }),
+              ),
+            ),
+          );
+
+          const inventory = new Map((yield* shown).map((recording) => [recording.id, recording]));
+          const items: RecordingResumeList["items"][number][] = [];
+
+          for (const { id, position, duration, at } of positions) {
+            const recording = inventory.get(id);
+
+            if (recording && present.has(id))
+              items.push({ recording, progress: { position, duration, at } });
+          }
+
+          return { owner: owner.owner, items };
         }),
       recordProgress: (id: string, position: number, duration: number, captured?: ActiveProfile) =>
         Effect.gen(function* () {
@@ -3060,19 +3277,30 @@ function make(deps: RecordingsDeps) {
           yield* usable;
           const record = records.get(id);
 
-          if (!record || record.status.kind === "missed" || isLive(record))
+          if (!record || record.status.kind === "missed")
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("This recording is no longer there.") },
             });
           const key = JSON.stringify([owner.owner.id, id]);
-          const progress = { id, owner, position, duration, retryAt: Date.now() + RETRY_MS };
+          const watchedAt = Date.now();
+
+          const progress = {
+            id,
+            owner,
+            position,
+            duration,
+            watchedAt,
+            retryAt: watchedAt + RETRY_MS,
+          };
+
           pendingProgress.set(key, progress);
-          yield* owner.write("recording", id, position, duration).pipe(
+          yield* owner.write("recording", id, position, duration, watchedAt).pipe(
             Effect.tap(() =>
               Effect.sync(() => {
                 if (pendingProgress.get(key) === progress) pendingProgress.delete(key);
               }),
             ),
+            Effect.tap(() => PubSub.publish(progressChanges, { owner: owner.owner, id })),
             Effect.onError(() => wake),
           );
         }),
@@ -3170,6 +3398,7 @@ function make(deps: RecordingsDeps) {
 
         return (yield* unkept).length === 0;
       }),
+      progressChanges: Stream.fromPubSub(progressChanges),
       changes: Stream.fromPubSub(changes),
       rules: scheduling(
         Effect.andThen(

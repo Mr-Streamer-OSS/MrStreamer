@@ -4,8 +4,10 @@ import { useMemo, type ReactNode } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { seriesOf, type Title, type TitleKind } from "@mrstreamer/contracts/ondemand";
+import type { Recording } from "@mrstreamer/contracts/recordings";
+import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { hasTitles, ownedId, ownedKey, sameOwned } from "@mrstreamer/contracts/subscription";
-import { formatNumber, t } from "@mrstreamer/core/i18n";
+import { formatDate, formatNumber, t } from "@mrstreamer/core/i18n";
 import { openDetails, openView, type ChannelList } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo, hueOf } from "../../components/ChannelLogo.tsx";
@@ -39,6 +41,8 @@ import {
   movieNow,
   playTitle,
   pickedVersion,
+  timeLeftOf,
+  type ContinueEntry,
 } from "../../lib/titles.ts";
 import { useFit } from "../../lib/use-fit.ts";
 import { usePreviewWaits } from "../../player/output.ts";
@@ -51,6 +55,17 @@ import { listTitle, useHomeDiscovery, useListChannels, useShowList } from "../li
 import { PAGE } from "../titles/CollectionGrid.tsx";
 import { openCollection } from "../titles/TitlesPage.tsx";
 import { HomeTitle } from "./HomeTitle.tsx";
+import {
+  isLive,
+  outcome,
+  placeText,
+  playRecording,
+  resumes,
+  settledPlace,
+  useRecordingResume,
+  useRecordings,
+  type RecordingPlace,
+} from "../recordings/recordings.ts";
 import { kindLabel } from "../../lib/watchlist.ts";
 import { SavedTile, openSaved } from "../watchlist/SavedTile.tsx";
 
@@ -146,6 +161,8 @@ export function HomeScreen({ active }: { active: boolean }) {
   }).data;
 
   const continuing = useContinueWatching(undefined, allowed("continue"));
+  const recordingPlaces = useRecordingResume(allowed("continue"));
+  const recordingList = useRecordings().data;
   const resume = useResume();
   const removal = useRemoveFromContinue();
   const playing = notForAdults(usePlayer((state) => state.channel));
@@ -237,7 +254,16 @@ export function HomeScreen({ active }: { active: boolean }) {
       ),
     );
 
-  const entries = continuing.entries.slice(0, columns);
+  // Recordings this viewer is part way through, among the online titles by when each was played.
+  const continued = continueRow(
+    continuing.entries,
+    recordingPlaces.data?.items ?? [],
+    recordingList,
+    viewing.data,
+  );
+
+  const entries = continued.slice(0, columns);
+  const recordingsUnread = recordingPlaces.isError;
   const compact = (count: number) => (count <= 3 ? Math.min(3, posters) : undefined);
 
   const channelSections = {
@@ -259,15 +285,17 @@ export function HomeScreen({ active }: { active: boolean }) {
   };
 
   const content: Record<HomeRowId, ReactNode> = {
-    continue: entries.length > 0 && (
+    continue: (entries.length > 0 || recordingsUnread) && (
       <div>
         <Section
           title={t("Continue watching")}
           tileRem={TILE_REM}
-          compact={compact(continuing.entries.length)}
+          compact={compact(continued.length)}
         >
           {entries.map((entry) =>
-            continuing.entries.length <= 3 ? (
+            entry.kind === "recording" ? (
+              <RecordingEntry key={entry.recording.id} {...entry} brief={continued.length <= 3} />
+            ) : continued.length <= 3 ? (
               <HomeTitle
                 key={entry.key}
                 name={entry.title.title}
@@ -296,6 +324,17 @@ export function HomeScreen({ active }: { active: boolean }) {
         </Section>
         {removal.error && (
           <p className="mt-3 text-sm text-destructive">{describeError(appError(removal.error))}</p>
+        )}
+        {recordingsUnread && (
+          <p role="alert" className="mt-3 flex items-baseline gap-3 text-sm text-destructive">
+            {t("Your place in some recordings couldn't be read.")}
+            <button
+              onClick={() => void recordingPlaces.refetch()}
+              className="text-foreground underline underline-offset-4 outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t("Try again")}
+            </button>
+          </p>
         )}
       </div>
     ),
@@ -780,5 +819,125 @@ function Tile({
           .join(" · ")}
       </div>
     </button>
+  );
+}
+
+/** An entry in Continue watching: an online title, or a recording on this computer. */
+type Continued =
+  | (ContinueEntry & { readonly kind: "title" })
+  | {
+      readonly kind: "recording";
+      /** As the recordings list has it now, else as this viewer's places last named it. */
+      readonly recording: Recording;
+      readonly place: RecordingPlace;
+    };
+
+/**
+ * Continue watching with this viewer's recordings in it: those part way through, and those whose
+ * file went, which say so. Each goes by when it was last played, latest first; places saved
+ * before recordings kept that time go last. A recording keeps its own place, never an online
+ * title's.
+ */
+function continueRow(
+  online: readonly ContinueEntry[],
+  places: readonly { readonly recording: Recording; readonly progress: RecordingPlace }[],
+  list: readonly Recording[] | undefined,
+  viewing: Viewing | undefined,
+): readonly Continued[] {
+  const recordings = places.flatMap(({ recording: kept, progress }) => {
+    const recording = list?.find((each) => each.id === kept.id) ?? kept;
+    const gone = recording.status.kind === "missing";
+
+    return gone || resumes(recording, progress)
+      ? [{ kind: "recording" as const, recording, place: progress, at: progress.at ?? -Infinity }]
+      : [];
+  });
+
+  const titles = online.map((entry) => ({
+    ...entry,
+    kind: "title" as const,
+    at: playedAt(entry, viewing),
+  }));
+
+  return [...titles, ...recordings]
+    .toSorted((a, b) => b.at - a.at)
+    .map(({ at: _at, ...entry }) => entry);
+}
+
+/**
+ * When an online entry was last played or marked, from the viewing record it came from: a movie's
+ * own progress, else the latest play or mark of the series version it goes on in.
+ */
+function playedAt(entry: ContinueEntry, viewing: Viewing | undefined): number {
+  if (entry.progress) return entry.progress.at;
+
+  const times = [
+    ...(viewing?.continueWatching ?? []).flatMap((item) =>
+      item.title.kind === "episode" && sameOwned(seriesOf(item.title), entry.version)
+        ? [item.at]
+        : [],
+    ),
+    ...(viewing?.marked ?? []).flatMap((mark) =>
+      sameOwned(mark.series, entry.version) ? [mark.at] : [],
+    ),
+  ];
+
+  return Math.max(-Infinity, ...times);
+}
+
+/**
+ * A recording in Continue watching: its title, then that it records with where this viewer is,
+ * or its day, how it ended and the time left, or that its file is gone, which opens Recordings.
+ */
+function RecordingEntry({
+  recording,
+  place,
+  brief,
+}: {
+  recording: Recording;
+  place: RecordingPlace;
+  brief: boolean;
+}) {
+  const now = useNow();
+  const gone = recording.status.kind === "missing";
+  const day = formatDate(recording.start, "weekdayDay");
+
+  const line = gone
+    ? [day, t("No longer there")].join(" · ")
+    : isLive(recording)
+      ? [outcome(recording, now).word, placeText(recording, place)].filter(Boolean).join(" · ")
+      : [
+          day,
+          outcome(recording, now).word,
+          (settledPlace(recording, place) &&
+            place.duration > 0 &&
+            timeLeftOf({ ...place, finished: false })) ||
+            placeText(recording, place),
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+  // A place saved while it recorded was against what it had then: no bar says how far through.
+  const done =
+    settledPlace(recording, place) && !gone && place.duration > 0
+      ? Math.min(1, place.position / place.duration)
+      : null;
+
+  const play = gone ? () => openView("recordings") : () => playRecording(recording);
+
+  return brief ? (
+    <HomeTitle
+      name={recording.title}
+      artworkUrl={null}
+      line={[line, recording.channelName].join(" · ")}
+      still
+      done={done}
+      resumes
+      unavailable={gone}
+      onPlay={gone ? undefined : play}
+      onOpen={() => openView("recordings")}
+    />
+  ) : (
+    <StillTile artworkUrl={null} name={recording.title} line={line} done={done} onPlay={play} />
   );
 }

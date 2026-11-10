@@ -1,6 +1,7 @@
 // Recordings as the window sees them: local copies Mr. Streamer captured from a live channel
 // while it ran. The main process keeps each one's record and file; paths, addresses and logins
 // stay there. Times are epoch milliseconds, as the guide's.
+import type { ActiveProfile } from "./profiles.ts";
 import { type } from "arktype";
 import { lazy } from "./lazy.ts";
 import type { OwnedId } from "./subscription.ts";
@@ -87,6 +88,8 @@ export interface Recording {
    */
   readonly scheduled?: {
     readonly schedule: string;
+    /** Rule identity captured at creation; absent for older or manual recordings. */
+    readonly rule?: string;
     readonly from: number;
     readonly owed?: number;
     readonly late: ScheduleMiss | null;
@@ -104,6 +107,21 @@ export interface Recording {
    * remains, else it is cut short by the quit.
    */
   readonly unsaved?: boolean;
+}
+
+/** Personal recording positions joined to retained local inventory, including zero. */
+export interface RecordingResumeList {
+  readonly owner: ActiveProfile;
+  readonly items: readonly {
+    readonly recording: Recording;
+    readonly progress: {
+      readonly position: number;
+      /** Zero means unknown length, never watched. */
+      readonly duration: number;
+      /** User-write time in epoch milliseconds; null for legacy seeds. */
+      readonly at: number | null;
+    };
+  }[];
 }
 
 /** Where recordings go and the room they may take, as Settings shows and changes them. */

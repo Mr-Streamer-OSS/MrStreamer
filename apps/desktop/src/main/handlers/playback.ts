@@ -1,5 +1,7 @@
 import type { PaneRefusal } from "@mrstreamer/contracts/playback";
 import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
+import type { ProfileAdmission } from "../services/profiles.ts";
+import { allowsApproval } from "../services/profile-policy.ts";
 import type { Profiles } from "../platform/profile-store.ts";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { Failed } from "@mrstreamer/core/failure";
@@ -22,6 +24,46 @@ import type { Analytics } from "../analytics/service.ts";
 // sessions never enter this record, and a new viewer cannot inspect the previous viewer's session.
 const playerSessions = new WeakMap<Playback["Service"], { id: string; owner: ActiveProfile }>();
 
+/** Resolve only the successful public open and the copy identity stored by Playback. */
+function playerCopyState(
+  playback: Playback["Service"],
+  owner: ActiveProfile,
+  sessionId: string,
+  current: Effect.Effect<void, Failed> = Effect.void,
+) {
+  return Effect.gen(function* () {
+    const registered = playerSessions.get(playback);
+
+    if (registered?.id !== sessionId || !sameProfile(registered.owner, owner)) return null;
+    const state = yield* playback.copyState(sessionId, current);
+
+    return playerSessions.get(playback) === registered &&
+      state?.sessionId === sessionId &&
+      state.owner &&
+      sameProfile(state.owner, owner)
+      ? state
+      : null;
+  });
+}
+
+/** Publish inside the admission, after resolving the live session and its exact local approval. */
+export function publishCopyChange(
+  playback: Playback["Service"],
+  admission: ProfileAdmission,
+  sessionId: string,
+  publish: (sessionId: string) => void,
+) {
+  return admission.run(
+    Effect.gen(function* () {
+      yield* admission.current;
+      const state = yield* playerCopyState(playback, admission.owner, sessionId, admission.current);
+
+      if (state && allowsApproval(admission.approved, { kind: state.kind, id: state.copy }))
+        publish(sessionId);
+    }),
+  );
+}
+
 export function playbackHandlers({
   playback,
   coordination,
@@ -33,9 +75,11 @@ export function playbackHandlers({
   settings,
   analytics,
   profiles,
+  current = Effect.void,
 }: {
   /** Whose viewing an open belongs to: the admitted owner, or the active one. */
   readonly profiles: Pick<Profiles["Service"], "active">;
+  readonly current?: Effect.Effect<void, Failed>;
   readonly playback: Playback["Service"];
   readonly coordination: Pick<PlaybackCoordination["Service"], "begin" | "passed">;
   readonly library: Pick<Library["Service"], "channel">;
@@ -347,6 +391,10 @@ export function playbackHandlers({
     "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
     "playback.closeAll": () =>
       Effect.andThen(coordination.begin, Effect.as(playback.closeAll, null)),
+    "playback.copyState": ({ sessionId }) =>
+      Effect.flatMap(profiles.active, (owner) =>
+        playerCopyState(playback, owner, sessionId, current),
+      ),
     "playback.diagnostic": ({ sessionId }) => inspect(sessionId, playback.diagnostic(sessionId)),
     "playback.failure": ({ sessionId, selector }) =>
       inspect(sessionId, playback.failure(sessionId, selector)),

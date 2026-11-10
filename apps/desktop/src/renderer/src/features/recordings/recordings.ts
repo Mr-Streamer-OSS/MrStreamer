@@ -1,18 +1,24 @@
 // Recordings as the window reads them. The main process keeps each one's record and file and says
 // when any changes (`recordings.changed`), about once a second while one records, so the list is
-// read once and then follows those events, as the schedules do (./schedules.ts). An ended
-// recording plays like a downloaded copy.
+// read once and then follows those events, as the schedules do (./schedules.ts). Where each
+// viewer got to in a recording is theirs alone (`recordings.resume`), read again when main says it
+// changed (`recordings.resumeChanged`), never on the list's own changes. A recording plays like a
+// downloaded copy, also while it records.
 import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import type {
   Recording,
   RecordingGap,
   RecordingGapReason,
   RecordingLimits,
+  RecordingResumeList,
+  RecordingRule,
+  ScheduledRecording,
   ScheduleMiss,
 } from "@mrstreamer/contracts/recordings";
 import { create } from "zustand";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { currentLanguage, formatDate, t } from "@mrstreamer/core/i18n";
+import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { useUi } from "../../app/ui-store.ts";
 import { call, listen } from "../../lib/ipc.ts";
 import { titlePlayer } from "../../player/title-player.ts";
@@ -24,6 +30,70 @@ const recordingsQuery = () =>
     queryFn: () => call("recordings.list"),
     staleTime: Infinity,
   });
+
+/**
+ * The active profile's places in recordings. `call` refuses an answer for a profile no longer
+ * active, and a profile switch clears the cache (profiles.ts).
+ */
+const resumeQuery = () =>
+  queryOptions({
+    queryKey: ["recordings", "resume"],
+    queryFn: () => call("recordings.resume"),
+    staleTime: Infinity,
+  });
+
+/** One recording's place for this viewer, as `recordings.resume` gave it. */
+export type RecordingPlace = RecordingResumeList["items"][number]["progress"];
+
+/**
+ * This viewer's places in recordings, by recording id, and the recordings they name: also one the
+ * list no longer has. A read that failed stays a failure, with its places unknown, not empty.
+ */
+export function useRecordingResume(enabled = true) {
+  return useQuery({ ...resumeQuery(), select: placesOf, enabled });
+}
+
+function placesOf(list: RecordingResumeList) {
+  return {
+    places: new Map(list.items.map((item) => [item.recording.id, item.progress] as const)),
+    items: list.items,
+  };
+}
+
+/**
+ * Whether `place` was saved against the recording's length as it ended: after it ended, or before
+ * places kept their time, which only an ended recording had. One saved while it recorded was
+ * saved against what it had so far, which says nothing of what is left.
+ */
+export function settledPlace(recording: Recording, place: RecordingPlace): boolean {
+  return (
+    !isLive(recording) &&
+    (place.at === null || (recording.ended !== null && place.at >= recording.ended))
+  );
+}
+
+/**
+ * How far this viewer got, in words for the library: "at 31 min", "at 20 s" short of a minute, or
+ * "watched" once a place saved after it ended is in its credits.
+ */
+export function placeText(recording: Recording, place: RecordingPlace | undefined): string | null {
+  if (!place || place.position <= 0) return null;
+
+  if (watched(recording, place)) return t("watched");
+  const seconds = Math.floor(place.position);
+
+  return seconds < 60
+    ? t("at {seconds} s", { seconds })
+    : t("at {minutes} min", { minutes: Math.floor(seconds / 60) });
+}
+
+const watched = (recording: Recording, place: RecordingPlace) =>
+  settledPlace(recording, place) && isFinished(place.position, place.duration);
+
+/** Whether Play goes on from a place: one with a position, not watched to its credits. */
+export function resumes(recording: Recording, place: RecordingPlace | undefined): boolean {
+  return !!place && place.position > 0 && !watched(recording, place);
+}
 
 /**
  * Keeps the recordings and the schedules current from main's events, and the previews of plans
@@ -56,10 +126,102 @@ export function syncRecordings(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["rules", "preview"] });
   });
 
+  // Carries no rows: main says this viewer's places changed, so they are read again.
+  const stopResume = listen("recordings.resumeChanged", () => {
+    void client.invalidateQueries({ queryKey: resumeQuery().queryKey, exact: true });
+  });
+
   return () => {
     stopRecordings();
     stopSchedules();
+    stopResume();
   };
+}
+
+/** Recordings of one programme followed by a rule, or of one repeating schedule. */
+export interface RecordingGroup {
+  readonly key: string;
+  readonly name: string;
+  /** The rule that records them, while it is kept; null once stopped, or for a schedule's. */
+  readonly rule: RecordingRule | null;
+  /** Newest first, as the list has them. */
+  readonly recordings: readonly Recording[];
+}
+
+/**
+ * Recordings by what they were saved with: a rule's id, else a schedule's id two or more of them
+ * share. The rest, manual ones and those made before recordings kept their rule, are `other`.
+ * A group's name is its rule's or schedule's title while kept, else its newest recording's, so a
+ * stopped rule or a channel gone keeps its group. Groups go by name.
+ */
+export function recordingGroups(
+  recordings: readonly Recording[],
+  rules: readonly RecordingRule[],
+  schedules: readonly ScheduledRecording[],
+): { readonly groups: readonly RecordingGroup[]; readonly other: readonly Recording[] } {
+  const shared = new Map<string, number>();
+
+  for (const { scheduled } of recordings) {
+    if (scheduled && scheduled.rule === undefined)
+      shared.set(scheduled.schedule, (shared.get(scheduled.schedule) ?? 0) + 1);
+  }
+
+  const keyOf = ({ scheduled }: Recording): string | null =>
+    scheduled?.rule !== undefined
+      ? `rule:${scheduled.rule}`
+      : scheduled && (shared.get(scheduled.schedule) ?? 0) > 1
+        ? `schedule:${scheduled.schedule}`
+        : null;
+
+  const byKey = new Map<string, Recording[]>();
+  const other: Recording[] = [];
+
+  for (const recording of recordings) {
+    const key = keyOf(recording);
+
+    if (key === null) other.push(recording);
+    else byKey.set(key, [...(byKey.get(key) ?? []), recording]);
+  }
+
+  const groups = [...byKey].map(([key, members]): RecordingGroup => {
+    const { scheduled } = members[0]!;
+    const rule = rules.find((each) => each.id === scheduled?.rule) ?? null;
+
+    const schedule = rule
+      ? undefined
+      : schedules.find((each) => each.id === scheduled?.schedule && scheduled?.rule === undefined);
+
+    return {
+      key,
+      name: rule?.plan.title ?? schedule?.plan.title ?? members[0]!.title,
+      rule,
+      recordings: members,
+    };
+  });
+
+  return {
+    groups: groups.toSorted((a, b) =>
+      a.name.localeCompare(b.name, currentLanguage().locale, { sensitivity: "base" }),
+    ),
+    other,
+  };
+}
+
+/** Whether `query` is in a recording's title or channel name, case and accents aside. */
+export function matchesRecording(recording: Recording, query: string): boolean {
+  const fold = (text: string) =>
+    text
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLocaleLowerCase(currentLanguage().locale);
+
+  const wanted = fold(query.trim());
+
+  return (
+    wanted === "" ||
+    fold(recording.title).includes(wanted) ||
+    fold(recording.channelName).includes(wanted)
+  );
 }
 
 export function useRecordings() {
@@ -164,9 +326,10 @@ export function useRecordingOf(channel: OwnedId): Recording | null {
 }
 
 /**
- * Plays an ended recording over everything, from where it was left, through the title player's
- * copy path: main opens it by id from this computer, and Recordings keeps where it got to. It has
- * no title of the provider's, so it plays as a movie would, with nothing after it.
+ * Plays a recording over everything, from where this viewer left it, through the title player's
+ * copy path: main opens it by id from this computer, also while it records, and Recordings keeps
+ * where it got to. It has no title of the provider's, so it plays as a movie would, with nothing
+ * after it.
  */
 export function playRecording(recording: Recording): void {
   useUi.setState({ playingTitle: true, searchOpen: false, settings: null });

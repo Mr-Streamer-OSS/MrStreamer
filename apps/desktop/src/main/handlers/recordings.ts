@@ -1,3 +1,6 @@
+import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
+import type { ProfileAdmission } from "../services/profiles.ts";
+import { allowsApproval } from "../services/profile-policy.ts";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { Failed } from "@mrstreamer/core/failure";
 import { t } from "@mrstreamer/core/i18n";
@@ -7,6 +10,41 @@ import type { Library } from "../services/library.ts";
 import type { Settings } from "../services/preferences.ts";
 import type { Recordings } from "../services/recordings.ts";
 import { streamsOf } from "./streams.ts";
+
+/** Read only for the captured admission, including the returned projection's owner. */
+export function recordingResume(
+  recordings: Pick<Recordings["Service"], "resume">,
+  owner: ActiveProfile,
+) {
+  return Effect.gen(function* () {
+    const result = yield* recordings.resume(owner);
+
+    if (!sameProfile(result.owner, owner))
+      return yield* new Failed({
+        error: { kind: "unexpected", detail: t("Viewing profile changed; retry this request.") },
+      });
+
+    return result;
+  });
+}
+
+export function publishRecordingProgress(
+  admission: ProfileAdmission,
+  change: { readonly owner: ActiveProfile; readonly id: string },
+  publish: () => void,
+) {
+  return admission.run(
+    Effect.gen(function* () {
+      if (
+        !sameProfile(admission.owner, change.owner) ||
+        !allowsApproval(admission.approved, { kind: "recording", id: change.id })
+      )
+        return;
+      yield* admission.current;
+      publish();
+    }),
+  );
+}
 
 /**
  * The window's recordings methods. `chooseFolder` asks the viewer for a folder, answering null when
@@ -45,6 +83,14 @@ export function recordingHandlers({
   readonly openFolder: (folder: string) => Promise<void>;
 }): HandlersFor<"recordings"> {
   return {
+    // Personal: the admitted window's handlers replace this with `recordingResume` for its owner
+    // (index.ts). Without an admission, there is no owner to read for.
+    "recordings.resume": () =>
+      Effect.fail(
+        new Failed({
+          error: { kind: "unexpected", detail: t("Viewing profile changed; retry this request.") },
+        }),
+      ),
     "recordings.list": () => recordings.list,
     "recordings.connections": ({ subscriptionId, channel: named }) =>
       Effect.gen(function* () {

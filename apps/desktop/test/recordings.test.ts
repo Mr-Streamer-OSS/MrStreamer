@@ -4,6 +4,7 @@ import { type as arkType } from "arktype";
 // what was written.
 import { DatabaseSync, constants as sqlite } from "node:sqlite";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { createServer, get as httpGet, type IncomingMessage } from "node:http";
 import {
@@ -16,6 +17,7 @@ import {
   rm,
   stat,
   symlink,
+  truncate,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -25,6 +27,9 @@ import { DEFAULT_SUBTITLE_TIMING } from "@mrstreamer/contracts/online-subtitles"
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Guide } from "@mrstreamer/core/guide/service";
+import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
+import { readFeedLine } from "@mrstreamer/core/subtitles/feed";
+import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
@@ -74,14 +79,14 @@ const RELEASE = {
   page: "https://example.test/releases/v0.3.0",
 };
 
-/** The app's services on `dataDir`, as one start of the app has them. */
-async function app(dataDir: string, secrets = testSecrets) {
+/** The app's services on `dataDir`, as one start of the app has them, with `ffprobe` as its tool. */
+async function app(dataDir: string, secrets = testSecrets, ffprobe = "ffprobe") {
   const runtime = runtimeFor(
     mainLayer({
       ...testConfig(dataDir),
       secrets,
       ffmpeg: "ffmpeg",
-      ffprobe: "ffprobe",
+      ffprobe,
       // A picture for every artwork address, so a download needs no network.
       downloads: {
         fetch: async () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47])),
@@ -105,7 +110,7 @@ async function app(dataDir: string, secrets = testSecrets) {
 }
 
 /** A connected subscription of a live fake provider, its channels loaded. */
-async function connected(options: FakeProviderOptions = {}) {
+async function connected(options: FakeProviderOptions = {}, ffprobe?: string) {
   const provider = await fakeProvider({
     live: true,
     maxConnections: 1,
@@ -114,7 +119,7 @@ async function connected(options: FakeProviderOptions = {}) {
   });
 
   const dataDir = await tempDir();
-  const started = await app(dataDir);
+  const started = await app(dataDir, testSecrets, ffprobe);
   const { id: subscriptionId } = await started.subscriptions.add(demoLogin(provider));
   await started.library.refresh(subscriptionId);
 
@@ -148,6 +153,216 @@ async function allClosed(provider: { activeStreams(): number }) {
       (open) => open === 0,
     )) === 0
   );
+}
+
+/** ffprobe's CSV lines for `entries` of `input`, read on standard input. */
+function mediaProbe(input: Buffer, entries: readonly string[]): string[] {
+  const result = spawnSync(
+    "ffprobe",
+    ["-v", "error", ...entries, "-of", "csv=p=0", "-i", "pipe:0"],
+    { input, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  expect(result.status).toBe(0);
+
+  // Frame entries end with an empty field.
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim().replace(/,$/, ""))
+    .filter(Boolean);
+}
+
+/** The MD5 of each packet's data ffmpeg writes from `input` with `options`, in order. */
+function packets(input: Buffer, options: readonly string[]): string[] {
+  const result = spawnSync(
+    "ffmpeg",
+    ["-v", "error", "-i", "pipe:0", ...options, "-f", "framemd5", "-"],
+    { input, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  expect(result.status).toBe(0);
+
+  return (
+    result.stdout
+      .split("\n")
+      .filter((line) => /^\d/.test(line))
+      // stream, dts, pts, duration, size, then the data's hash; side data may follow.
+      .map((line) => line.split(",")[5]!.trim())
+  );
+}
+
+/** The byte of the PAT before the picture at `pts` (1/90000 s) on PID 0x100, with no other picture between. */
+function tableBefore(input: Uint8Array, pts: number): number {
+  let pat = -1;
+
+  for (let offset = 0; offset + 188 <= input.length; offset += 188) {
+    const pid = ((input[offset + 1]! & 31) << 8) | input[offset + 2]!;
+    const start = (input[offset + 1]! & 64) !== 0;
+
+    if (pid === 0 && start) pat = offset;
+
+    if (pid !== 0x100 || !start) continue;
+    const pes = offset + ((input[offset + 3]! >> 4) & 2 ? 5 + input[offset + 4]! : 4);
+
+    const time =
+      (input[pes + 9]! & 14) * 2 ** 29 +
+      input[pes + 10]! * 2 ** 22 +
+      (input[pes + 11]! & 254) * 2 ** 14 +
+      input[pes + 12]! * 128 +
+      (input[pes + 13]! >> 1);
+
+    if (time === pts) return pat;
+    pat = -1;
+  }
+
+  throw new Error(`No table before PTS ${pts}`);
+}
+
+/**
+ * A recording that carries on in `remuxed` from the picture at `pts`: `recorded` up to the table
+ * before that picture, then `remuxed` from its own table there. One multiplex carries on its
+ * continuity counters across a new table.
+ */
+function splicedAt(recorded: Buffer, remuxed: Buffer, pts: number) {
+  const before = recorded.subarray(0, tableBefore(recorded, pts));
+  const after = Buffer.from(remuxed.subarray(tableBefore(remuxed, pts)));
+  const counters = new Map<number, number>();
+
+  for (const [input, carry] of [
+    [before, false],
+    [after, true],
+  ] as const) {
+    for (let offset = 0; offset + 188 <= input.length; offset += 188) {
+      const pid = ((input[offset + 1]! & 31) << 8) | input[offset + 2]!;
+
+      if (!((input[offset + 3]! >> 4) & 1)) continue;
+      const last = counters.get(pid);
+      const next = carry && last !== undefined ? (last + 1) & 15 : input[offset + 3]! & 15;
+
+      if (carry) input[offset + 3] = (input[offset + 3]! & 0xf0) | next;
+      counters.set(pid, next);
+    }
+  }
+
+  return { before, after };
+}
+
+/**
+ * A copy session's feed of subtitle track `track` from 0, as the player reads it: its status, and
+ * each packet it sends with what the player's decoder for its codec makes of it.
+ */
+async function subtitleFeed(url: string, track: number) {
+  const leaving = new AbortController();
+
+  const response = await fetch(`${url}?only=subtitles&start=0&subtitle=${track}`, {
+    signal: leaving.signal,
+  });
+
+  const codec = response.headers.get("x-codec");
+  const decoder = codec ? subtitleDecoder(codec as SubtitleCodec, null) : null;
+
+  const sent: {
+    readonly at: number;
+    readonly data: Buffer;
+    readonly change: SubtitleChange | null;
+  }[] = [];
+
+  const reading = (async () => {
+    const text = new TextDecoder();
+    let pending = "";
+
+    for await (const chunk of response.body ?? []) {
+      pending += text.decode(chunk, { stream: true });
+      const parts = pending.split("\n");
+      pending = parts.pop() ?? "";
+
+      for (const part of parts) {
+        const line = readFeedLine(part);
+
+        if (!line || !("data" in line)) continue;
+        const data = Buffer.from(line.data, "base64");
+        sent.push({ at: line.at, data, change: decoder?.push(data, line.at) ?? null });
+      }
+    }
+  })().catch(() => {});
+
+  return {
+    status: response.status,
+    sent,
+    close: async () => {
+      leaving.abort();
+      await reading;
+    },
+  };
+}
+
+/**
+ * A recording of the tracks channel that has captured `before` so far, and its copy session,
+ * opened while it records. `more` has the provider carry on with more bytes and waits until the
+ * recording holds them; `end` closes the session and stops the recording.
+ */
+async function growingCopy(before: Buffer, ffprobe?: string) {
+  const output = Promise.withResolvers<Writable>();
+
+  const started = await connected(
+    {
+      streams: (_source, out) => {
+        out.write(before);
+        output.resolve(out);
+      },
+    },
+    ffprobe,
+  );
+
+  const { recordings, playback } = started;
+  const recording = await recordings.start(started.channel(TRACKS), Date.now() + 60_000, {});
+
+  if (recording.kind !== "started") throw new Error("Recording did not start");
+  const id = recording.recording.id;
+  const source = (await recordings.copy(id))!.recording!;
+  let total = before.length;
+
+  const captured = () =>
+    until(
+      () => source.read(AbortSignal.timeout(5000)),
+      (current) => current.bytes === total,
+      5000,
+    );
+
+  await captured();
+  const file = await fileOf(started.dataDir, recording.recording);
+
+  const copy = await playback.openCopy(
+    {
+      id,
+      kind: "recording",
+      path: file.path,
+      container: "ts",
+      title: { kind: "movie", id },
+      progress: null,
+      recording: source,
+    },
+    ["h264", "aac"],
+  );
+
+  return {
+    ...started,
+    id,
+    source,
+    path: file.path,
+    copy,
+    more: async (bytes: Buffer) => {
+      total += bytes.length;
+      (await output.promise).write(bytes);
+      await captured();
+
+      return (await readFile(file.path)).subarray(0, total);
+    },
+    end: async () => {
+      await playback.closeCopy(id);
+      await recordings.stop(id);
+    },
+  };
 }
 
 /** The one recording's file in its folder. */
@@ -2178,6 +2393,189 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(existsSync(join(dataDir, "recordings", "mine"))).toBe(true);
   });
 
+  describe("active recording progress", () => {
+    async function started() {
+      const provider = await fakeProvider({ live: true, streams: looping });
+      const dataDir = await tempDir();
+
+      const runtime = runtimeFor(
+        mainLayer({
+          ...testConfig(dataDir),
+          ffmpeg: "ffmpeg",
+          ffprobe: "ffprobe",
+          profiles: {
+            consent: { read: Effect.succeed(true), write: () => Effect.void },
+            stopInteractive: () => Effect.void,
+          },
+        }),
+      );
+
+      onTestFinished(() => runtime.dispose());
+      const subscriptions = await promised(runtime, Subscriptions);
+      const library = await promised(runtime, Library);
+      const recordings = await promised(runtime, Recordings);
+      const profiles = await promised(runtime, ProfileSessions);
+      const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+      await library.refresh(subscriptionId);
+      const source = provider.catalogue.channels.find((each) => each.name === TRACKS);
+
+      if (!source) throw new Error("No channel");
+
+      const answer = await recordings.start(
+        { subscriptionId, id: String(source.streamId) },
+        Date.now() + 120_000,
+        {},
+      );
+
+      if (answer.kind !== "started") throw new Error("Not started");
+      const { id } = answer.recording;
+      expect(
+        (
+          await until(
+            recordings.list,
+            ([each]) => each?.status.kind === "recording" && each.bytes > 0,
+          )
+        )[0]?.status.kind,
+      ).toBe("recording");
+
+      return { dataDir, runtime, recordings, profiles, id };
+    }
+
+    it("saves and retries active progress for its captured profile after switching, without opening the copy", async () => {
+      const { dataDir, runtime, recordings, profiles, id } = await started();
+      const original = await profiles.active();
+      await recordings.recordProgress(id, 9, 90);
+      const created = await profiles.create("Other viewer");
+      const captured = await profiles.switch(created.id);
+      await recordings.recordProgress(id, 11, 90, captured);
+      await profiles.switch(original.id);
+      // Its copy, admitted while it records, carries the captured viewer's own progress.
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 11,
+        duration: 90,
+      });
+      const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+      try {
+        lock.exec("begin immediate");
+        await expect(recordings.recordProgress(id, 42, 90, captured)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+      } finally {
+        if (lock.isTransaction) lock.exec("rollback");
+        lock.close();
+      }
+
+      const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_001);
+
+      try {
+        await recordings.check();
+      } finally {
+        clock.mockRestore();
+      }
+
+      expect((await recordings.list())[0]?.status.kind).toBe("recording");
+      await recordings.stop(id);
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 42,
+        duration: 90,
+      });
+      expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+      await runtime.dispose();
+      const restarted = await app(dataDir);
+      onTestFinished(restarted.quit);
+      expect((await restarted.recordings.copy(id, captured))?.progress).toEqual({
+        position: 42,
+        duration: 90,
+      });
+      expect((await restarted.recordings.copy(id))?.progress).toEqual({
+        position: 9,
+        duration: 90,
+      });
+    });
+    it("retires an active recording's retained retry after owner deletion without recreating progress", async () => {
+      const { dataDir, recordings, profiles, id } = await started();
+      const original = await profiles.active();
+      await recordings.recordProgress(id, 9, 90, original);
+      const created = await profiles.create("Leaving viewer");
+      const captured = await profiles.switch(created.id);
+      await recordings.recordProgress(id, 11, 90, captured);
+      await profiles.switch(original.id);
+      const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+      try {
+        lock.exec("begin immediate");
+        await expect(recordings.recordProgress(id, 55, 90, captured)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+      } finally {
+        if (lock.isTransaction) lock.exec("rollback");
+        lock.close();
+      }
+
+      await profiles.remove(captured.id);
+      expect((await profiles.list()).some((each) => each.id === captured.id)).toBe(false);
+      // Observe SQLite's public boundary: a retired retry neither writes nor checks its owner again.
+      let registryReads = 0;
+      let progressWrites = 0;
+      const connections = new Set<DatabaseSync>();
+      const prepare = DatabaseSync.prototype.prepare;
+
+      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+        this: DatabaseSync,
+        sql: string,
+      ) {
+        connections.add(this);
+        this.setAuthorizer((action, table) => {
+          if (action === sqlite.SQLITE_READ && table === "profiles") registryReads++;
+
+          if (
+            table === "profile_copy_progress" &&
+            (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+          )
+            progressWrites++;
+
+          return sqlite.SQLITE_OK;
+        });
+
+        return prepare.call(this, sql);
+      });
+
+      const restore = () => {
+        adapter.mockRestore();
+
+        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
+      };
+
+      onTestFinished(restore);
+      let now = Date.now();
+
+      for (const first of [true, false]) {
+        now += 10_001;
+        const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+        try {
+          await recordings.check();
+        } finally {
+          clock.mockRestore();
+        }
+
+        if (first) expect(registryReads).toBeGreaterThan(0);
+        else expect(registryReads).toBe(0);
+        expect(progressWrites).toBe(0);
+        registryReads = 0;
+      }
+
+      restore();
+      expect((await recordings.list())[0]?.status.kind).toBe("recording");
+      await recordings.stop(id);
+      await expect(recordings.copy(id, captured)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
+    });
+  });
+
   it("keeps personal progress while inventory writes fail, and lists a missing copy before playback", async () => {
     const { dataDir, channel, recordings, quit } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
@@ -2499,6 +2897,218 @@ describe.skipIf(!hasTools)("recordings", () => {
       position: 42,
       duration: 90,
     });
+  });
+
+  it("projects retained recording identity and independent captured-owner resume after provider removal and restart", async () => {
+    const provider = await fakeProvider({ live: true });
+    const dataDir = await tempDir();
+
+    const config = {
+      ...testConfig(dataDir),
+      ffmpeg: "ffmpeg",
+      ffprobe: "ffprobe",
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    };
+
+    const runtime = runtimeFor(mainLayer(config));
+    onTestFinished(() => runtime.dispose());
+    const recordings = await promised(runtime, Recordings);
+    const subscriptions = await promised(runtime, Subscriptions);
+    const library = await promised(runtime, Library);
+    const roster = await promised(runtime, Roster);
+    const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+    await library.refresh(subscriptionId);
+    const source = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+    const channel = () => ({ subscriptionId, id: String(source.streamId) });
+    const profiles = await promised(runtime, ProfileSessions);
+    const original = await profiles.active();
+    const made = await profiles.create("Resume viewer");
+    const other = await profiles.switch(made.id);
+    await profiles.switch(original.id);
+    const started = await recordings.start(channel(), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Not started");
+    const { id } = started.recording;
+    await recordings.recordProgress(id, 0, 90, original);
+    await recordings.recordProgress(id, 42, 90, other);
+    expect((await recordings.resume(original)).items).toMatchObject([
+      {
+        recording: { id, channel: channel(), status: { kind: "recording" } },
+        progress: { position: 0, duration: 90, at: expect.any(Number) },
+      },
+    ]);
+    await roster.remove(subscriptionId, true);
+    await runtime.dispose();
+    const restarted = runtimeFor(mainLayer(config));
+    onTestFinished(() => restarted.dispose());
+    const again = { recordings: await promised(restarted, Recordings), runtime: restarted };
+    expect((await again.recordings.resume(original)).items).toMatchObject([
+      { recording: { id, channel: channel() }, progress: { position: 0, duration: 90 } },
+    ]);
+    expect((await again.recordings.resume(other)).items).toMatchObject([
+      { recording: { id }, progress: { position: 42, duration: 90 } },
+    ]);
+    const current = await promised(again.runtime, ProfileSessions);
+    await current.remove(other.id);
+    await expect(again.recordings.resume(other)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    await rm((await again.recordings.copy(id, original))!.path);
+    expect((await again.recordings.resume(original)).items).toEqual([]);
+  });
+
+  it("migrates legacy resume times as unknown, keeps seeds and zero, and orders exact ids deterministically", async () => {
+    const dataDir = await tempDir();
+
+    const ids = [
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+      "00000000-0000-4000-8000-000000000003",
+      "00000000-0000-4000-8000-000000000004",
+    ];
+
+    const records = ids.map((id) => ({
+      id,
+      file: "a.ts",
+      channel: { subscriptionId: "gone", id: "1" },
+      channelName: "Gone",
+      title: "Same title",
+      start: 1000,
+      stop: 2000,
+      ended: 2000,
+      bytes: 100,
+      status: { kind: "complete" },
+      progress: { position: 33, duration: 90 },
+    }));
+
+    for (const id of ids) {
+      await mkdir(join(dataDir, "recordings", id), { recursive: true });
+      await writeFile(join(dataDir, "recordings", id, "a.ts"), fixture("h264-aac.mpegts"));
+    }
+
+    await writeFile(
+      join(dataDir, "recordings", "recordings.json"),
+      JSON.stringify({ version: 1, recordings: records }),
+    );
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    db.exec(
+      "create table profile_copy_progress (profile_id text not null, kind text not null, copy_id text not null, position real, duration real, primary key (profile_id, kind, copy_id))",
+    );
+    db.prepare("insert into profile_copy_progress values ('default', 'recording', ?, 33, 90)").run(
+      ids[0]!,
+    );
+    db.prepare(
+      "insert into profile_copy_progress values ('default', 'recording', ?, null, null)",
+    ).run(ids[3]!);
+    db.close();
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    // Enumeration does not turn legacy inventory into a playback write.
+    const migrationLock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      migrationLock.exec("begin immediate");
+      await expect(recordings.resume()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    } finally {
+      migrationLock.exec("rollback");
+      migrationLock.close();
+    }
+
+    expect((await recordings.resume()).items.map(({ recording }) => recording.id)).toEqual([
+      ids[0],
+    ]);
+
+    for (const id of ids.toReversed())
+      expect((await recordings.copy(id))?.progress).toEqual(
+        id === ids[3] ? null : { position: 33, duration: 90 },
+      );
+    expect(
+      (await recordings.resume()).items.map(({ recording, progress }) => [
+        recording.id,
+        progress.at,
+      ]),
+    ).toEqual(ids.slice(0, 3).map((id) => [id, null]));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+    try {
+      await recordings.recordProgress(ids[2]!, 0, 90);
+      await recordings.recordProgress(ids[1]!, 120, 90);
+    } finally {
+      clock.mockRestore();
+    }
+
+    expect(
+      (await recordings.resume()).items.map(({ recording, progress }) => [
+        recording.id,
+        progress.position,
+        progress.at,
+      ]),
+    ).toEqual([
+      [ids[1], 90, now],
+      [ids[2], 0, now],
+      [ids[0], 33, null],
+    ]);
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      lock.exec("alter table profile_copy_progress rename to unavailable_progress");
+      await expect(recordings.resume()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    } finally {
+      lock.exec("alter table unavailable_progress rename to profile_copy_progress");
+      lock.close();
+    }
+
+    expect((await recordings.resume()).items).toHaveLength(3);
+  });
+
+  it("retains the user's watch time when a failed recording save retries after a newer write", async () => {
+    const { dataDir, recordings, channel } = await connected();
+    const ids: string[] = [];
+
+    for (let i = 0; i < 2; i++) {
+      const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+      if (started.kind !== "started") throw new Error("Not started");
+      ids.push(started.recording.id);
+      await recordings.stop(started.recording.id);
+    }
+
+    await recordings.recordProgress(ids[0]!, 1, 90);
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+    try {
+      lock.exec("begin immediate");
+      await expect(recordings.recordProgress(ids[0]!, 42, 90)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      lock.exec("rollback");
+      clock.mockReturnValue(now + 1);
+      await recordings.recordProgress(ids[1]!, 0, 90);
+      clock.mockReturnValue(now + 10_001);
+      await recordings.check();
+    } finally {
+      clock.mockRestore();
+
+      if (lock.isTransaction) lock.exec("rollback");
+      lock.close();
+    }
+
+    expect(
+      (await recordings.resume()).items.map(({ recording, progress }) => [
+        recording.id,
+        progress.position,
+        progress.at,
+      ]),
+    ).toEqual([
+      [ids[1], 0, now + 1],
+      [ids[0], 42, now],
+    ]);
   });
 
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {
@@ -3984,6 +4594,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]?.channel).toEqual(channel(GUIDED));
     expect(captured[0]?.scheduled?.schedule).not.toBe(low.id);
+    expect(captured[0]?.scheduled?.rule).toBe(saved.id);
+    await recordings.recordProgress(captured[0]!.id, 0, 90);
     await guide.refresh(subscriptionId);
     await recordings.check();
     await recordings.check();
@@ -3995,6 +4607,15 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await quit();
     const restarted = await app(dataDir);
     expect(await restarted.recordings.rules()).toEqual([]);
+    expect((await restarted.recordings.resume()).items).toMatchObject([
+      {
+        recording: {
+          id: captured[0]!.id,
+          scheduled: { schedule: captured[0]!.scheduled!.schedule, rule: saved.id },
+        },
+        progress: { position: 0, duration: 90 },
+      },
+    ]);
   });
 
   it("previews partial and missed padded rule opportunities without preempting active viewers or captures", async () => {
@@ -5212,3 +5833,1007 @@ describe("recording slot times", () => {
     });
   });
 });
+
+it("publishes recording progress invalidations for the original owner on immediate and retry success only", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  onTestFinished(() => runtime.dispose());
+  const provider = await fakeProvider({ live: true });
+  const subscriptions = await promised(runtime, Subscriptions);
+  const library = await promised(runtime, Library);
+  const recordings = await promised(runtime, Recordings);
+  const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+  await library.refresh(subscriptionId);
+  const source = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+
+  const answer = await recordings.start(
+    { subscriptionId, id: String(source.streamId) },
+    Date.now() + 60_000,
+    {},
+  );
+
+  if (answer.kind !== "started") throw new Error("Not started");
+  const { id } = answer.recording;
+  const profiles = await promised(runtime, ProfileSessions);
+  const original = await profiles.active();
+  const other = await profiles.create("Other", original);
+  const captured = await profiles.switch(other.id, original);
+  const service = await runtime.runPromise(Recordings);
+  const changes = await collect(runtime, service.progressChanges);
+  await recordings.recordProgress(id, 11, 90, captured);
+  await vi.waitFor(() => expect(changes).toEqual([{ owner: captured, id }]));
+  const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+  onTestFinished(() => db.close());
+  db.exec("begin immediate");
+
+  try {
+    await expect(recordings.recordProgress(id, 42, 90, captured)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    expect(changes).toHaveLength(1);
+  } finally {
+    db.exec("rollback");
+  }
+
+  await profiles.switch(original.id, captured);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_001);
+
+  try {
+    await recordings.check();
+  } finally {
+    clock.mockRestore();
+  }
+
+  await vi.waitFor(() =>
+    expect(changes).toEqual([
+      { owner: captured, id },
+      { owner: captured, id },
+    ]),
+  );
+  db.exec("begin immediate");
+
+  try {
+    await expect(recordings.recordProgress(id, 55, 90, captured)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+  } finally {
+    db.exec("rollback");
+  }
+
+  const current = await profiles.active();
+  await profiles.remove(captured.id, current);
+  const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20_002);
+
+  try {
+    await recordings.check();
+  } finally {
+    later.mockRestore();
+  }
+
+  expect(changes).toHaveLength(2);
+});
+
+describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
+  it("refuses recording media time when every captured PAT carries a transport error", async () => {
+    const bytes = Buffer.from(fixture(TRACKS_FIXTURE));
+    let damaged = 0;
+
+    // Damage table transport headers only; retain the recorded picture, sound and clocks.
+    for (let offset = 0; offset + 188 <= bytes.length; offset += 188) {
+      if (bytes[offset] !== 0x47) throw new Error("Fixture is not packet aligned");
+      const pid = ((bytes[offset + 1]! & 31) << 8) | bytes[offset + 2]!;
+
+      if (pid !== 0) continue;
+      bytes[offset + 1] = bytes[offset + 1]! | 0x80;
+      damaged++;
+    }
+
+    if (!damaged) throw new Error("Fixture has no PAT packets to damage");
+
+    const { recordings, channel, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+
+    try {
+      await expect(recordings.copy(id)).rejects.toBeTruthy();
+      expect(provider.streamRequests()).toBe(1);
+    } finally {
+      await recordings.stop(id);
+    }
+  });
+
+  it("follows committed appends, pause and final settlement without another provider read", async () => {
+    const output = Promise.withResolvers<Writable>();
+    const bytes = fixture(TRACKS_FIXTURE);
+    const split = Math.floor(bytes.length / 188 / 2) * 188;
+
+    const { recordings, provider, channel, playback, dataDir } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes.subarray(0, split));
+        output.resolve(out);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    expect(started.kind).toBe("started");
+
+    if (started.kind !== "started") return;
+    const id = started.recording.id;
+    // Its program is read, so its copy plays while it records.
+    expect(await recordings.copy(id)).toMatchObject({ id, kind: "recording" });
+    const source = (await recordings.copy(id))!.recording!;
+    const first = await source.read();
+    expect(first).toMatchObject({
+      bytes: split,
+      final: false,
+      status: { kind: "recording" },
+      seekable: [],
+      gaps: [],
+    });
+    expect(first.layout?.layout.audio).toHaveLength(2);
+    expect(first.duration).toBeGreaterThan(0);
+    const file = await fileOf(dataDir, started.recording);
+
+    const activeSession = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    expect(activeSession.audio).toHaveLength(2);
+    const appended = source.wait(first.revision, AbortSignal.timeout(5000));
+    (await output.promise).write(bytes.subarray(split));
+    const next = await appended;
+    expect(next.bytes).toBe(bytes.length);
+    expect(next.duration).toBeGreaterThan(first.duration!);
+    expect((await playback.copyState(activeSession.sessionId))?.recording?.duration).toBe(
+      next.duration,
+    );
+    await playback.closeCopy(id);
+    expect((await source.read()).final).toBe(false);
+    expect(provider.streamRequests()).toBe(1);
+    const paused = source.wait(next.revision, AbortSignal.timeout(5000));
+    await recordings.suspend();
+    expect(await paused).toMatchObject({ final: false, status: { kind: "paused" } });
+    const atPause = await source.read();
+    const abort = new AbortController();
+    const cancelled = source.wait(atPause.revision, abort.signal);
+    abort.abort();
+    await expect(cancelled).rejects.toBeTruthy();
+    await recordings.stop(id);
+    const final = await source.read();
+    expect(final).toMatchObject({ final: true, status: { kind: "stopped" }, bytes: bytes.length });
+    const row = (await recordings.list()).find((row) => row.id === id);
+    expect(row).toBeDefined();
+    expect(final.gaps).toEqual(row?.gaps ?? []);
+
+    const session = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    const state = await playback.copyState(session.sessionId);
+    expect(state?.audio).toHaveLength(2);
+    expect(final.duration).toBeNull();
+    expect(state?.recording).toMatchObject({ final: true, duration: null, seekable: [] });
+    expect(state?.recording).not.toHaveProperty("layout");
+    await playback.closeCopy(id);
+    expect((await source.read()).final).toBe(true);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("refuses stale session track indexes after an actual captured layout change", async () => {
+    const { id, copy, source, more, playback, recordings, provider } = await growingCopy(
+      fixture(TRACKS_FIXTURE),
+    );
+
+    expect(copy.audio).toHaveLength(2);
+    await more(fixture("h264-aac.mpegts"));
+    const next = await source.read();
+    expect(next.layout?.layout.audio).toHaveLength(1);
+    expect(next.duration).toBeNull();
+    await expect(playback.copyState(copy.sessionId)).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Recording track layout changed." },
+    });
+    await playback.closeCopy(id);
+    expect((await source.read()).final).toBe(false);
+    expect(provider.streamRequests()).toBe(1);
+    await recordings.stop(id);
+  });
+
+  it("refuses a nonzero recording seek without verified session media coverage", async () => {
+    const bytes = Buffer.from(fixture(TRACKS_FIXTURE));
+    let tables = 0;
+    let damaged = 0;
+
+    // The first table opens the copy on its tracks. Every later PAT carries a transport error,
+    // so the recorded program cannot be verified as one continuous stream after it.
+    for (let offset = 0; offset + 188 <= bytes.length; offset += 188) {
+      if (bytes[offset] !== 0x47) throw new Error("Fixture is not packet aligned");
+      const pid = ((bytes[offset + 1]! & 31) << 8) | bytes[offset + 2]!;
+
+      if (pid !== 0 || tables++ === 0) continue;
+      bytes[offset + 1] = bytes[offset + 1]! | 0x80;
+      damaged++;
+    }
+
+    if (!damaged) throw new Error("Fixture has only one PAT packet");
+
+    // Opened only once every recorded byte has been read, so no shorter clean prefix answers.
+    const { id, copy, source, playback, recordings, provider } = await growingCopy(bytes);
+    const response = await fetch(copy.url + "?start=1", { signal: AbortSignal.timeout(1500) });
+
+    try {
+      expect(response.status).toBe(416);
+    } finally {
+      await response.body?.cancel();
+    }
+
+    expect((await source.read()).final).toBe(false);
+    await playback.closeCopy(id);
+    expect(provider.streamRequests()).toBe(1);
+    await recordings.stop(id);
+  });
+
+  it("plays an active recording from the keyframe before a nonzero position, on the file's own clock", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+    const { id, copy, source, path, recordings, provider, end } = await growingCopy(bytes);
+    const extent = await source.read();
+    expect(extent).toMatchObject({ bytes: bytes.length, final: false });
+    // What the recorder wrote, read back from its file while it still records.
+    const recorded = (await readFile(path)).subarray(0, extent.bytes);
+    expect(recorded.length).toBe(extent.bytes);
+
+    // A digest of the first picture ffmpeg decodes from `input`, or of the first at or after
+    // `pts` (1/90000 s) on the input's own clock: decoding, not packet flags, names a picture.
+    const picture = (input: Buffer, pts?: number) => {
+      const result = spawnSync(
+        "ffmpeg",
+        [
+          ...["-v", "error", "-copyts", "-i", "pipe:0", "-map", "0:v:0"],
+          ...(pts === undefined ? [] : ["-vf", `select=gte(pts\\,${pts})`]),
+          ...["-frames:v", "1", "-f", "framemd5", "-"],
+        ],
+        { input, encoding: "utf8" },
+      );
+
+      expect(result.status).toBe(0);
+
+      return /^0,.*,\s*([0-9a-f]{32})$/m.exec(result.stdout)?.[1];
+    };
+
+    // Measured on this fixture with trace_headers: PTS 216000 (2.4 s) carries SPS, PPS and an
+    // IDR slice. The file's first picture, at 1.4 s, is the IDR before it, which a run that
+    // ignored the position would start with.
+    const keyframe = picture(recorded, 216_000);
+    expect(keyframe).toMatch(/^[0-9a-f]{32}$/);
+    expect(keyframe).not.toBe(picture(recorded));
+    const origin = Number(mediaProbe(recorded, ["-show_entries", "format=start_time"])[0]);
+
+    // 1.1 s on the recording's clock is 2.48 s on the file's, between its keyframes at 2.4 and
+    // 3.4 s: the picture starts at the one before it, as a title's does.
+    const response = await fetch(copy.url + "?start=1.1", { signal: AbortSignal.timeout(4000) });
+
+    try {
+      expect(response.status).toBe(200);
+      expect((await source.read()).final).toBe(false);
+      expect(Number(response.headers.get("x-start")) + origin).toBeCloseTo(2.4, 3);
+      // The run follows the file while it records, and ends with it.
+      await recordings.stop(id);
+      expect(picture(Buffer.from(await response.arrayBuffer()))).toBe(keyframe);
+    } finally {
+      await response.body?.cancel().catch(() => {});
+      await end();
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("reports an active recording's seek range from its first decodable picture to its last", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+    const { copy, path, playback, end } = await growingCopy(bytes);
+    const recorded = (await readFile(path)).subarray(0, bytes.length);
+    const probe = (entries: readonly string[]) => mediaProbe(recorded, entries);
+    const origin = Number(probe(["-show_entries", "format=start_time"])[0]);
+
+    // ffprobe decodes the first picture a fresh decoder shows; packets name the last.
+    const first = Number(probe(["-select_streams", "v:0", "-show_entries", "frame=pts_time"])[0]);
+
+    const last = Math.max(
+      ...probe(["-select_streams", "v:0", "-show_entries", "packet=pts_time"]).map(Number),
+    );
+
+    try {
+      const seekable = (await playback.copyState(copy.sessionId))?.recording?.seekable;
+      expect(seekable).toHaveLength(1);
+      expect(seekable?.[0]?.from).toBeCloseTo(first - origin, 6);
+      expect(seekable?.[0]?.to).toBeCloseTo(last - origin, 6);
+
+      // Every sound track has that range, and none of it holds with a subtitle chosen.
+      expect((await playback.copyState(copy.sessionId))?.recording).toMatchObject({
+        audioSeekable: [],
+        subtitleSeek: false,
+      });
+
+      const subtitled = await fetch(
+        `${copy.url}?start=1.1&subtitle=${copy.subtitles[0]?.id ?? -1}`,
+        { signal: AbortSignal.timeout(4000) },
+      );
+
+      try {
+        expect(copy.subtitles.length).toBeGreaterThan(0);
+        expect(subtitled.status).toBe(416);
+      } finally {
+        await subtitled.body?.cancel().catch(() => {});
+      }
+    } finally {
+      await end();
+    }
+  });
+
+  it("plays the chosen sound track of an active recording from a nonzero position, by its own packets", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+    const { id, copy, path, recordings, end } = await growingCopy(bytes);
+    const recorded = (await readFile(path)).subarray(0, bytes.length);
+    expect(copy.audio).toHaveLength(2);
+    const [other, chosen] = copy.audio.map((track) => track.id);
+
+    // Which transport stream each listed track is, as ffprobe names it in the recorded bytes.
+    const pids = new Map(
+      mediaProbe(recorded, ["-show_entries", "stream=index,id"]).map((line) => {
+        const [index, pid] = line.split(",");
+
+        return [Number(index), pid] as const;
+      }),
+    );
+
+    // The compressed sound packets of one transport stream, as a run copies them into MP4.
+    const run = (pid: string | undefined) =>
+      packets(recorded, ["-map", `0:i:${pid}`, "-c", "copy", "-bsf:a", "aac_adtstoasc"]).join();
+
+    const response = await fetch(`${copy.url}?start=1.1&audio=${chosen}`, {
+      signal: AbortSignal.timeout(4000),
+    });
+
+    try {
+      expect(response.status).toBe(200);
+      await recordings.stop(id);
+
+      const returned = packets(Buffer.from(await response.arrayBuffer()), [
+        "-map",
+        "0:a:0",
+        "-c",
+        "copy",
+      ]);
+
+      // Tracks can share packets, as both open with the same silent frames: the whole returned
+      // run tells them apart.
+      expect(returned.length).toBeGreaterThan(0);
+      expect(run(pids.get(chosen!))).toContain(returned.join());
+      expect(run(pids.get(other!))).not.toContain(returned.join());
+    } finally {
+      await response.body?.cancel().catch(() => {});
+      await end();
+    }
+  });
+
+  it("refreshes an active recording's tracks when its program table changes on the same clock, by each track's own PID", async () => {
+    const recorded = fixture(TRACKS_FIXTURE);
+
+    // The same programme as a provider could carry it on after a new table: Dutch sound moves
+    // ahead of English, English moves to another PID, and the subtitles go. ffmpeg keeps the
+    // recorded clock and repeats its tables before each picture.
+    const remux = spawnSync(
+      "ffmpeg",
+      [
+        ...["-v", "error", "-copyts", "-i", "pipe:0", "-map", "0:0", "-map", "0:2", "-map", "0:1"],
+        ...["-c", "copy", "-streamid", "0:0x100", "-streamid", "1:0x102", "-streamid", "2:0x105"],
+        ...["-mpegts_copyts", "1", "-mpegts_flags", "+pat_pmt_at_frames", "-f", "mpegts", "-"],
+      ],
+      { input: recorded, maxBuffer: 16 * 1024 * 1024 },
+    );
+
+    expect(remux.status).toBe(0);
+
+    // Measured with trace_headers: PTS 306000 (3.4 s) is an IDR with SPS and PPS in both.
+    const { before, after } = splicedAt(recorded, remux.stdout, 306_000);
+    const bytes = Buffer.concat([before, after]);
+    const { id, copy, more, end, playback, recordings, provider } = await growingCopy(before);
+    expect(copy.audio.map((track) => track.language)).toEqual(["en", "nl"]);
+    const [english, dutch] = copy.audio.map((track) => track.id);
+    expect(copy.subtitles.map((track) => track.format)).toEqual([
+      "picture",
+      "teletext",
+      "captions",
+    ]);
+    const subtitle = copy.subtitles.find((track) => track.format === "picture")?.id;
+
+    try {
+      const written = await more(after);
+      expect(written.equals(bytes)).toBe(true);
+      const probe = (entries: readonly string[]) => mediaProbe(written, entries);
+      const origin = Number(probe(["-show_entries", "format=start_time"])[0]);
+      const first = Number(probe(["-select_streams", "v:0", "-show_entries", "frame=pts_time"])[0]);
+
+      const last = Math.max(
+        ...probe(["-select_streams", "v:0", "-show_entries", "packet=pts_time"]).map(Number),
+      );
+
+      const state = await playback.copyState(copy.sessionId);
+      // Dutch is the same track on its PID; the English on a new PID is a new one.
+      expect(state?.audio.map((track) => track.language)).toEqual(["nl", "en"]);
+      const [kept, added] = state?.audio.map((track) => track.id) ?? [];
+      expect(kept).toBe(dutch);
+      expect(added).not.toBe(english);
+      // The DVB and teletext tracks went with the old table; captions go with the picture.
+      expect(state?.subtitles).toEqual(
+        copy.subtitles.filter((track) => track.format === "captions"),
+      );
+      expect(state?.recording).toMatchObject({ final: false, subtitleSeek: false });
+      // Dutch plays from the first picture on; the new English from the new table's.
+      expect(state?.recording?.seekable).toHaveLength(1);
+      expect(state?.recording?.seekable[0]?.from).toBeCloseTo(3.4 - origin, 6);
+      expect(state?.recording?.seekable[0]?.to).toBeCloseTo(last - origin, 6);
+      expect(state?.recording?.audioSeekable.map((track) => track.id)).toEqual([dutch]);
+      const range = state?.recording?.audioSeekable[0]?.seekable;
+      expect(range).toHaveLength(1);
+      expect(range?.[0]?.from).toBeCloseTo(first - origin, 6);
+      expect(range?.[0]?.to).toBeCloseTo(last - origin, 6);
+
+      // Tracks the program no longer has are refused, not played from another PID, and so is
+      // a position past what was captured.
+      for (const query of [
+        `audio=${english}`,
+        `start=1.1&audio=${english}`,
+        `audio=${dutch}&subtitle=${subtitle}`,
+        // Past the last picture read, nothing is captured yet.
+        `start=${(last - origin + 0.5).toFixed(3)}&audio=${dutch}`,
+      ]) {
+        const refused = await fetch(`${copy.url}?${query}`, { signal: AbortSignal.timeout(4000) });
+        await refused.body?.cancel().catch(() => {});
+        expect([query, refused.status]).toEqual([query, 416]);
+      }
+
+      // The compressed sound packets of one transport stream, as a run copies them into MP4.
+      const run = (pid: string) =>
+        packets(written, ["-map", `0:i:${pid}`, "-c", "copy", "-bsf:a", "aac_adtstoasc"]).join();
+
+      const sound = async (response: Response) =>
+        packets(Buffer.from(await response.arrayBuffer()), ["-map", "0:a:0", "-c", "copy"]).join();
+
+      // ffmpeg reads 1.5 s of a recording run's input before its first output (title.ts), more
+      // than follows the new table: the runs read the ended recording, as an open session can.
+      await recordings.stop(id);
+      expect((await playback.copyState(copy.sessionId))?.audio).toEqual(state?.audio);
+
+      // 2.2 s is 3.58 s on the file's clock, after the new table: there ffmpeg's second sound
+      // track is the English, while Dutch is the session's second.
+      const late = await fetch(`${copy.url}?start=2.2&audio=${dutch}`, {
+        signal: AbortSignal.timeout(4000),
+      });
+
+      try {
+        expect(late.status).toBe(200);
+        expect(Number(late.headers.get("x-start")) + origin).toBeCloseTo(3.4, 3);
+        const returned = await sound(late);
+        expect(returned.length).toBeGreaterThan(0);
+        expect(run("0x102")).toContain(returned);
+        expect(run("0x105")).not.toContain(returned);
+      } finally {
+        await late.body?.cancel().catch(() => {});
+      }
+
+      // From the beginning, the new English starts where the recording first had it.
+      const fresh = await fetch(`${copy.url}?audio=${added}`, {
+        signal: AbortSignal.timeout(4000),
+      });
+
+      try {
+        expect(fresh.status).toBe(200);
+        expect(Number(fresh.headers.get("x-start")) + origin).toBeCloseTo(3.4, 3);
+        const returned = await sound(fresh);
+        expect(returned.length).toBeGreaterThan(0);
+        expect(run("0x105")).toContain(returned);
+        expect(run("0x102")).not.toContain(returned);
+      } finally {
+        await fresh.body?.cancel().catch(() => {});
+      }
+    } finally {
+      await end();
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("lists a subtitle a verified new table adds by its whole identity, and plays it from where the recording first had it", async () => {
+    const recorded = fixture(TRACKS_FIXTURE);
+    const folder = await tempDir();
+    const input = join(folder, "recorded.ts");
+    await writeFile(input, recorded);
+
+    // After the new table, the DVB subtitles keep their PID but are English now, and their page
+    // shows at 4.6 s; teletext goes. Sound is rearranged as in the test above.
+    const remux = spawnSync(
+      "ffmpeg",
+      [
+        ...["-v", "error", "-copyts", "-i", input, "-itsoffset", "2.7", "-copyts", "-i", input],
+        ...["-map", "0:0", "-map", "0:2", "-map", "0:1", "-map", "1:3", "-c", "copy"],
+        ...["-streamid", "0:0x100", "-streamid", "1:0x102", "-streamid", "2:0x105"],
+        ...["-streamid", "3:0x103", "-metadata:s:3", "language=eng"],
+        ...["-mpegts_copyts", "1", "-mpegts_flags", "+pat_pmt_at_frames", "-f", "mpegts", "-"],
+      ],
+      { maxBuffer: 16 * 1024 * 1024 },
+    );
+
+    expect(remux.status).toBe(0);
+    const { before, after } = splicedAt(recorded, remux.stdout, 306_000);
+    const { copy, playback, more, end, provider, recordings, id } = await growingCopy(before);
+    const [, dutch] = copy.audio.map((track) => track.id);
+
+    expect(copy.subtitles.map((track) => [track.format, track.language])).toEqual([
+      ["picture", "nl"],
+      ["teletext", "nl"],
+      ["captions", null],
+    ]);
+    const [old, teletext] = copy.subtitles.map((track) => track.id);
+
+    try {
+      const written = await more(after);
+      const origin = Number(mediaProbe(written, ["-show_entries", "format=start_time"])[0]);
+      const state = await playback.copyState(copy.sessionId);
+
+      // The Dutch subtitles' PID now carries English ones: a new track, not the old id.
+      expect(state?.subtitles.map((track) => [track.format, track.language])).toEqual([
+        ["captions", null],
+        ["picture", "en"],
+      ]);
+      const english = state?.subtitles[1]?.id ?? -1;
+      expect(copy.subtitles.map((track) => track.id)).not.toContain(english);
+      expect(state?.recording).toMatchObject({ subtitleSeek: false });
+
+      // What the program no longer has is refused, its feed as well as its runs.
+      for (const gone of [old, teletext]) {
+        const run = await fetch(`${copy.url}?audio=${dutch}&subtitle=${gone}`, {
+          signal: AbortSignal.timeout(4000),
+        });
+
+        await run.body?.cancel().catch(() => {});
+        const feed = await subtitleFeed(copy.url, gone ?? -1);
+        await feed.close();
+        expect([gone, run.status, feed.status]).toEqual([gone, 416, 410]);
+      }
+
+      // ffmpeg reads 1.5 s of a recording run's input before its first output (title.ts).
+      await recordings.stop(id);
+      const feed = await subtitleFeed(copy.url, english);
+
+      // From the beginning, the English subtitles start where the recording first had them.
+      const run = await fetch(`${copy.url}?audio=${dutch}&subtitle=${english}`, {
+        signal: AbortSignal.timeout(4000),
+      });
+
+      try {
+        expect([run.status, feed.status]).toEqual([200, 200]);
+        expect(Number(run.headers.get("x-start")) + origin).toBeCloseTo(3.4, 3);
+        await run.arrayBuffer();
+        await until(
+          async () => feed.sent.length,
+          (count) => count > 0,
+          4000,
+        );
+
+        // The page that shows at 4.6 s on PID 0x103, decoded as the player decodes it.
+        const [page] = feed.sent;
+        expect(page?.at).toBeCloseTo(4.6 - origin, 3);
+        const screen = page?.change?.screen;
+        expect(screen?.kind === "picture" ? screen.pictures.length : 0).toBeGreaterThan(0);
+
+        // The feed sends the DVB PES payload: data identifier 0x20 0x00, the segments ffmpeg's
+        // packet holds, then the end marker 0xff.
+        expect(page?.data.subarray(0, 2).toString("hex")).toBe("2000");
+        expect(page?.data.at(-1)).toBe(0xff);
+
+        expect(packets(written, ["-map", "0:i:0x103", "-c", "copy"])).toContain(
+          createHash("md5")
+            .update(page?.data.subarray(2, -1) ?? Buffer.alloc(0))
+            .digest("hex"),
+        );
+      } finally {
+        await run.body?.cancel().catch(() => {});
+        await feed.close();
+      }
+    } finally {
+      await end();
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("does not list a subtitle a new table adds when that table took over before its first access point", async () => {
+    const recorded = fixture(TRACKS_FIXTURE);
+    const folder = await tempDir();
+    const input = join(folder, "recorded.ts");
+    await writeFile(input, recorded);
+
+    // As above, but the new table takes over one picture before the keyframe at 3.4 s: a run
+    // can't start where the English subtitles begin, and would miss what they had before.
+    const remux = spawnSync(
+      "ffmpeg",
+      [
+        ...["-v", "error", "-copyts", "-i", input, "-itsoffset", "2.7", "-copyts", "-i", input],
+        ...["-map", "0:0", "-map", "0:2", "-map", "0:1", "-map", "1:3", "-c", "copy"],
+        ...["-streamid", "0:0x100", "-streamid", "1:0x102", "-streamid", "2:0x105"],
+        ...["-streamid", "3:0x103", "-metadata:s:3", "language=eng"],
+        ...["-mpegts_copyts", "1", "-mpegts_flags", "+pat_pmt_at_frames", "-f", "mpegts", "-"],
+      ],
+      { maxBuffer: 16 * 1024 * 1024 },
+    );
+
+    expect(remux.status).toBe(0);
+    const { before, after } = splicedAt(recorded, remux.stdout, 302_400);
+    const { copy, playback, more, end } = await growingCopy(before);
+
+    try {
+      await more(after);
+      const state = await playback.copyState(copy.sessionId);
+      // The new English sound plays from the keyframe; the subtitles have no such start.
+      expect(state?.audio.map((track) => track.language)).toEqual(["nl", "en"]);
+      expect(state?.subtitles).toEqual(
+        copy.subtitles.filter((track) => track.format === "captions"),
+      );
+    } finally {
+      await end();
+    }
+  });
+
+  it("refuses a new table's tracks while its one probe fails, and describes them when asked again", async () => {
+    const recorded = fixture(TRACKS_FIXTURE);
+    const folder = await tempDir();
+
+    // ffprobe, except that its first read of a table inside the file fails. It notes each such
+    // read.
+    const ffprobe = join(folder, "ffprobe");
+    await writeFile(
+      ffprobe,
+      [
+        "#!/bin/sh",
+        'case " $* " in *" -skip_initial_bytes "*)',
+        `  echo >> "${folder}/inside"`,
+        `  [ -e "${folder}/failed" ] || { : > "${folder}/failed"; exit 1; } ;;`,
+        "esac",
+        'exec ffprobe "$@"',
+        "",
+      ].join("\n"),
+    );
+    await chmod(ffprobe, 0o755);
+
+    const inside = async () =>
+      (await readFile(join(folder, "inside"), "utf8").catch(() => "")).length;
+
+    // English sound moves to a new PID after the table at 3.4 s.
+    const remux = spawnSync(
+      "ffmpeg",
+      [
+        ...["-v", "error", "-copyts", "-i", "pipe:0", "-map", "0:0", "-map", "0:2", "-map", "0:1"],
+        ...["-c", "copy", "-streamid", "0:0x100", "-streamid", "1:0x102", "-streamid", "2:0x105"],
+        ...["-mpegts_copyts", "1", "-mpegts_flags", "+pat_pmt_at_frames", "-f", "mpegts", "-"],
+      ],
+      { input: recorded, maxBuffer: 16 * 1024 * 1024 },
+    );
+
+    expect(remux.status).toBe(0);
+    const { before, after } = splicedAt(recorded, remux.stdout, 306_000);
+    const { copy, playback, more, end } = await growingCopy(before, ffprobe);
+
+    try {
+      await more(after);
+
+      // Its tracks can't be listed yet, so the session says nothing it would have to take back.
+      await expect(playback.copyState(copy.sessionId)).rejects.toMatchObject({
+        error: { kind: "stream", failure: { diagnostic: { diagnostic_stage: "probe" } } },
+      });
+      expect(await inside()).toBe(1);
+
+      const state = await playback.copyState(copy.sessionId);
+      expect(state?.audio.map((track) => track.language)).toEqual(["nl", "en"]);
+      expect(await inside()).toBe(2);
+
+      // Once described, the table is not read again.
+      expect(await playback.copyState(copy.sessionId)).toEqual(state);
+      expect(await inside()).toBe(2);
+    } finally {
+      await end();
+    }
+  });
+
+  it("follows a recording that grows during a run from a nonzero position, and ends with it", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+    // ffmpeg reads 1.5 s of a recording run's input before its first output (title.ts), so the
+    // run starts on most of the recording and its last second comes after.
+    const split = Math.floor((bytes.length * 0.8) / 188) * 188;
+
+    const { id, copy, source, path, more, end, recordings, provider } = await growingCopy(
+      bytes.subarray(0, split),
+    );
+
+    const response = await fetch(copy.url + "?start=1.1", { signal: AbortSignal.timeout(4000) });
+
+    try {
+      expect(response.status).toBe(200);
+      expect((await source.read()).bytes).toBe(split);
+      await more(bytes.subarray(split));
+      expect((await source.read()).bytes).toBe(bytes.length);
+      await recordings.stop(id);
+      const returned = Buffer.from(await response.arrayBuffer());
+
+      const times = (input: Buffer) =>
+        mediaProbe(input, ["-select_streams", "v:0", "-show_entries", "packet=pts_time"]).map(
+          Number,
+        );
+
+      // The run's last picture is the recording's last, written after the run began.
+      expect(Math.max(...times(returned))).toBeCloseTo(
+        Math.max(...times((await readFile(path)).subarray(0, bytes.length))),
+        6,
+      );
+    } finally {
+      await response.body?.cancel().catch(() => {});
+      await end();
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("admits an active recording's copy once its program is read, and plays it from a nonzero position", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+
+    const { recordings, channel, playback, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = (await recordings.copy(id))!.recording!;
+    const signal = AbortSignal.timeout(5000);
+
+    await until(
+      () => source.read(signal),
+      (current) => current.bytes === bytes.length,
+      5000,
+    );
+
+    const copy = await recordings.copy(id);
+    expect(copy).toMatchObject({ id, kind: "recording" });
+    const session = await playback.openCopy(copy!, ["h264", "aac"]);
+
+    try {
+      expect((await playback.copyState(session.sessionId))?.recording).toMatchObject({
+        final: false,
+        seekable: [{}],
+      });
+
+      const response = await fetch(session.url + "?start=1.1", {
+        signal: AbortSignal.timeout(4000),
+      });
+
+      try {
+        expect(response.status).toBe(200);
+      } finally {
+        await response.body?.cancel().catch(() => {});
+      }
+    } finally {
+      await playback.closeCopy(id);
+      await recordings.stop(id);
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("keeps an open session's seeks after its recording stops, from the same keyframe", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+    const { id, copy, path, playback, recordings, provider } = await growingCopy(bytes);
+    const recorded = (await readFile(path)).subarray(0, bytes.length);
+    const origin = Number(mediaProbe(recorded, ["-show_entries", "format=start_time"])[0]);
+
+    // Decoded pictures: the recording's at PTS 216000 (2.4 s), its IDR before 2.478667 s.
+    const picture = (input: Buffer, options: readonly string[] = []) =>
+      packets(input, ["-copyts", "-map", "0:v:0", ...options, "-frames:v", "1"])[0];
+
+    const keyframe = picture(recorded, ["-vf", "select=gte(pts\\,216000)"]);
+
+    try {
+      await recordings.stop(id);
+      expect((await playback.copyState(copy.sessionId))?.recording).toMatchObject({
+        final: true,
+        seekable: [{}],
+      });
+
+      const response = await fetch(copy.url + "?start=1.1", { signal: AbortSignal.timeout(4000) });
+
+      try {
+        expect(response.status).toBe(200);
+        expect(Number(response.headers.get("x-start")) + origin).toBeCloseTo(2.4, 3);
+        expect(picture(Buffer.from(await response.arrayBuffer()))).toBe(keyframe);
+      } finally {
+        await response.body?.cancel().catch(() => {});
+      }
+    } finally {
+      await playback.closeCopy(id);
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("settles an open recorder session to the last sample end, without changing tracks or capture ownership", async () => {
+    const { id, copy, playback, recordings, provider } = await growingCopy(fixture(TRACKS_FIXTURE));
+
+    expect(copy.duration).toBeLessThan(4.021333);
+    await recordings.stop(id);
+
+    const states = await Promise.all(
+      Array.from({ length: 3 }, () => playback.copyState(copy.sessionId)),
+    );
+
+    for (const state of states) {
+      // The fixture's last audio sample ends after the last video PTS.
+      expect(state?.duration).toBeCloseTo(4.021333, 6);
+      expect(state?.recording).toMatchObject({ final: true, duration: state?.duration });
+      expect(state?.audio).toEqual(copy.audio);
+      expect(state?.subtitles).toEqual(copy.subtitles);
+    }
+
+    await playback.closeCopy(id);
+    expect(await playback.copyState(copy.sessionId)).toBeNull();
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("retains the recording incarnation and revision when reopened after an append", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+    const split = Math.floor((bytes.length * 0.8) / 188) * 188;
+    const { id, source, path, more, end, recordings } = await growingCopy(bytes.subarray(0, split));
+
+    try {
+      await more(bytes.subarray(split));
+      const before = await source.read();
+      const reopened = (await recordings.copy(id))!.recording!;
+      expect(await reopened.read()).toEqual(before);
+      const found = await stat(path, { bigint: true });
+      expect(before.device).toBe(found.dev.toString());
+      expect(before.inode).toBe(found.ino.toString());
+    } finally {
+      await end();
+    }
+  });
+
+  it("keeps a broken capture nonfinal until its partial end and refuses discontinuous media duration", async () => {
+    const outputs: Writable[] = [];
+    const resumes = Array.from({ length: 2 }, () => Promise.withResolvers<Writable>());
+
+    const { recordings, channel, provider } = await connected({
+      streams: (_source, out) => {
+        outputs.push(out);
+
+        // Hold reconnects until the checkpoint reader has observed the pause.
+        if (outputs.length === 1) out.write(fixture(TRACKS_FIXTURE));
+        else resumes[outputs.length - 2]!.resolve(out);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const source = (await recordings.copy(started.recording.id))!.recording!;
+    let extent = await source.read();
+    expect(extent.duration).toBeGreaterThan(0);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      outputs[attempt]!.end();
+
+      // A busy reader can observe the checkpoint after the reconnect request arrives.
+      if (attempt < 2) await resumes[attempt]!.promise;
+      extent = await source.wait(extent.revision, AbortSignal.timeout(5000));
+
+      while (extent.status.kind === "recording")
+        extent = await source.wait(extent.revision, AbortSignal.timeout(5000));
+      expect(extent.status.kind).toBe(attempt === 2 ? "partial" : "paused");
+      expect(extent.final).toBe(attempt === 2);
+
+      if (attempt < 2) {
+        const resuming = source.wait(extent.revision, AbortSignal.timeout(5000));
+        await recordings.check();
+        const output = await resumes[attempt]!.promise;
+        output.write(fixture(TRACKS_FIXTURE));
+        extent = await resuming;
+
+        while (extent.status.kind === "paused")
+          extent = await source.wait(extent.revision, AbortSignal.timeout(5000));
+        expect(extent.status.kind).toBe("recording");
+        expect(extent.duration).toBeNull();
+        expect(extent.seekable).toEqual([]);
+      }
+    }
+
+    expect(extent.status).toEqual({ kind: "partial", cut: "stream" });
+    const retained = (await recordings.list()).find((row) => row.id === started.recording.id);
+    expect(extent.gaps.length).toBeGreaterThan(0);
+    expect(extent.gaps).toEqual(retained?.gaps);
+    expect(provider.streamRequests()).toBe(3);
+  }, 60_000);
+
+  it.each(["missing", "replaced", "truncated"] as const)(
+    "refuses a %s recorder-owned file incarnation",
+    async (damage) => {
+      const { recordings, channel, dataDir } = await connected();
+      const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+      if (started.kind !== "started") throw new Error("Recording did not start");
+      const source = (await recordings.copy(started.recording.id))!.recording!;
+      await recordings.stop(started.recording.id);
+      const before = await source.read();
+      const file = await fileOf(dataDir, started.recording);
+
+      if (damage === "missing") await rm(file.path);
+
+      if (damage === "replaced") {
+        await rename(file.path, file.path + ".old");
+        await writeFile(file.path, fixture(TRACKS_FIXTURE));
+      }
+
+      if (damage === "truncated") await truncate(file.path, before.bytes - 1);
+      await expect(source.read()).rejects.toBeTruthy();
+    },
+  );
+});
+
+it.runIf(hasTools)(
+  "retains a recording checkpoint with unknown length across a fresh copy and resume read",
+  async () => {
+    const { recordings, channel } = await connected();
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    await recordings.stop(id);
+    await recordings.recordProgress(id, 115, 0);
+    expect((await recordings.copy(id))?.progress).toEqual({ position: 115, duration: 0 });
+    expect((await recordings.resume()).items).toMatchObject([
+      { recording: { id }, progress: { position: 115, duration: 0 } },
+    ]);
+  },
+);

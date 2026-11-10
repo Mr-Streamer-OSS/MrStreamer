@@ -2,6 +2,7 @@
 // provider file it was made from, but a finished copy needs no subscription: it plays from disk,
 // with its own details, artwork and progress, after its subscription expired or was removed. Media paths,
 // addresses and logins stay in the main process; artwork comes through the app's own scheme.
+import type { RecordingGap, RecordingStatus } from "./recordings.ts";
 import type { ActiveProfile } from "./profiles.ts";
 import type { AppError } from "./errors.ts";
 import type { RawTitleRef } from "./ondemand.ts";
@@ -129,8 +130,43 @@ export interface DownloadList {
   readonly ended: number;
 }
 
+/** Verified recording facts. Unknown media mapping stays null/empty, never wall-clock duration. */
+export interface RecordingCopyState {
+  readonly revision: number;
+  readonly status: RecordingStatus;
+  readonly final: boolean;
+  readonly duration: number | null;
+  readonly seekable: readonly { readonly from: number; readonly to: number }[];
+  readonly gaps: readonly RecordingGap[];
+}
+
+/**
+ * A recording's facts as one open session plays it. `seekable` is where a run without a subtitle
+ * may start other than at 0, in title seconds, with any of the session's sound tracks.
+ */
+export interface RecordingSessionState extends RecordingCopyState {
+  /**
+   * Where a run with one sound track may start instead, by `AudioTrack.id`, for each track whose
+   * range differs from `seekable`: one the recorded program added or dropped on the way. A run
+   * from 0 with a track added on the way starts where its range does.
+   */
+  readonly audioSeekable: readonly {
+    readonly id: number;
+    readonly seekable: readonly { readonly from: number; readonly to: number }[];
+  }[];
+  /** Whether those ranges hold with a subtitle chosen too; when not, a run with one starts at 0. */
+  readonly subtitleSeek: boolean;
+}
+
+/** State of one exact open copy session; authorization must use its captured owner and kind/id. */
+export type CopyState = Pick<
+  CopySession,
+  "sessionId" | "copy" | "owner" | "duration" | "audio" | "subtitles" | "recording"
+> & { readonly kind: "download" | "recording" };
+
 /** What plays a downloaded copy: like a title session, of a file on this computer. */
 export interface CopySession {
+  readonly recording?: RecordingSessionState;
   /** Captured when the copy was opened; old clients may omit it. */
   readonly owner?: ActiveProfile;
   readonly sessionId: string;
