@@ -39,6 +39,7 @@ import { settingsScenario } from "./settings.ts";
 import { controlsScenario } from "./controls.ts";
 import { backupChannel, customListSourcesScenario, customListsScenario } from "./custom-lists.ts";
 import { customListRoundTripScenario } from "./custom-lists-round-trip.ts";
+import { multiviewScenario } from "./multiview.ts";
 import { breakRewindStream, liveRewindScenario, rewindStreams } from "./live-rewind.ts";
 import { liveNamesScenario, longNamed } from "./live-names.ts";
 import { preferencesScenario } from "./preferences.ts";
@@ -84,6 +85,7 @@ const scenarios = [
   "moved-guide",
   "live-tv",
   "live-rewind",
+  "multiview",
   "live-names",
   "guides",
   "guide-labels",
@@ -138,6 +140,8 @@ function scenarioProvider(scenario: Scenario): FakeProviderOptions {
       return { guideHours: { past: 6, ahead: 24 }, channelOf: gridded };
     case "guide-grid-cells":
       return { guideHours: { past: 6, ahead: 24 }, guideLengths: [1, 2, 30], channelOf: gridded };
+    case "multiview":
+      return { maxConnections: 2, streams: rewindStreams };
     case "live-rewind":
       return {
         guideHours: { past: 1, ahead: 3 },
@@ -534,7 +538,7 @@ async function run(scenario: Scenario, prior?: string) {
         stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
       page = await connect(port);
 
-      if (scenario === "slow-catalogue") {
+      if (scenario === "slow-catalogue" || scenario === "multiview") {
         const launch = ++catalogueLaunch;
         observed["runtimeExceptions"] = runtimeExceptions;
         page.on("Runtime.exceptionThrown", (event) => runtimeExceptions.push({ launch, event }));
@@ -1371,6 +1375,24 @@ async function run(scenario: Scenario, prior?: string) {
           streams: provider!.streamRequests(),
           active: provider!.activeStreams(),
         }),
+      );
+    } else if (scenario === "multiview") {
+      await multiviewScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        () => ({ requests: provider!.streamRequests(), active: provider!.activeStreams() }),
       );
     } else if (scenario === "live-rewind") {
       await liveRewindScenario(

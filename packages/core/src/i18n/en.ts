@@ -1814,4 +1814,23 @@ export const en = {
     "Titles appear here when your sources add them.",
   "Couldn't refresh your sources. Showing matches from {time}.":
     "Couldn't refresh your sources. Showing matches from {time}.",
+  // Multiview.
+  Multiview: "Multiview",
+  "Add channel": "Add channel",
+  "In view": "In view",
+  "Only subscriptions that allow several streams": "Only subscriptions that allow several streams",
+  Layout: "Layout",
+  "Not saved": "Not saved",
+  "Save layout": "Save layout",
+  "Single view": "Single view",
+  "Replaces the saved {name}": "Replaces the saved {name}",
+  "Couldn't load layouts": "Couldn't load layouts",
+  "Couldn't check streams": "Couldn't check streams",
+  "Close {channel}": "Close {channel}",
+  "No stream free": "No stream free",
+  "All {provider} streams are in use": "All {provider} streams are in use",
+  "{used} of {limit} streams": "{used} of {limit} streams",
+  "{channel} has sound": "{channel} has sound",
+  "Couldn't close {channel}. Try again.": "Couldn't close {channel}. Try again.",
+  "Couldn't return to single view. Try again.": "Couldn't return to single view. Try again.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

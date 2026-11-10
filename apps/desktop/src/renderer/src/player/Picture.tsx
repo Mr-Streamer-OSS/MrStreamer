@@ -1,9 +1,9 @@
-// Where the picture shows. One video element comes from shared-media.ts; each place renders a
+// Where the picture shows. Single/title views share a video; a pane supplies its own. Each renders a
 // <Picture>, and the active one holds the element. Moving it uses moveBefore,
 // which keeps a playing element playing, so changing views never interrupts the stream.
 import { useLayoutEffect, useRef, type HTMLAttributes } from "react";
-import { player } from "./player.ts";
-import { subtitleLayer } from "./subtitles.ts";
+import { usePlayerVideo } from "./player.ts";
+import { subtitleLayerFor } from "./subtitles.ts";
 
 /** Holds the element while no Picture is active, so it never leaves the document. */
 let parking: HTMLDivElement | null = null;
@@ -37,21 +37,28 @@ function move(parent: Element, node: Element): void {
 
 /**
  * A place for the picture. While `active`, the video fills this element, scaled to `fit`. Only one
- * Picture should be active at a time; the one activated last holds the element.
+ * Picture per video should be active at a time; the one activated last holds that element.
  */
 export function Picture({
   active,
   fit,
+  video: suppliedVideo,
   ...props
-}: HTMLAttributes<HTMLDivElement> & { active: boolean; fit: "contain" | "cover" }) {
+}: HTMLAttributes<HTMLDivElement> & {
+  active: boolean;
+  fit: "contain" | "cover";
+  video?: HTMLVideoElement;
+}) {
+  const selectedVideo = usePlayerVideo();
+  const video = suppliedVideo ?? selectedVideo;
   const box = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const container = box.current;
 
     if (!active || !container) return;
-    const video = player.element;
     video.style.objectFit = fit;
     move(container, video);
+    const subtitleLayer = subtitleLayerFor(video);
     // Subtitles stay over the picture.
     move(container, subtitleLayer);
 
@@ -61,7 +68,7 @@ export function Picture({
       move(parkingSpot(), video);
       move(parkingSpot(), subtitleLayer);
     };
-  }, [active, fit]);
+  }, [active, fit, video]);
 
   return <div ref={box} {...props} />;
 }

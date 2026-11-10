@@ -67,15 +67,18 @@ const anyKept = (list: DownloadList) => list.items.length > 0;
  * don't fit beside those words, Downloads and Update keep their icons alone, with their words
  * on hover and focus. In `recovery`, while the viewer's profile can't load and no page is mounted,
  * the bar keeps only the brand and its drag area: nothing in it opens a page, Search or Settings.
+ * `children` are the page's own items before the notices, as the multiview's layout and streams.
  */
 export function WindowBar({
   className,
   onBack,
   recovery = false,
+  children,
 }: {
   className?: string;
   onBack?: () => void;
   recovery?: boolean;
+  children?: ReactNode;
 }) {
   const view = useUi((state) => state.view);
   // An unmapped playlist has live TV only; explicit mapping enables the title pages.
@@ -150,11 +153,17 @@ export function WindowBar({
               ? () => useUi.setState({ savedEntry: null })
               : null));
 
+  // The fold of the room the pages, or Back, stand in. Recovery shows neither, so nothing folds.
+  const shownFold = recovery ? "none" : back ? backFold : fold;
+
   return (
     <BarFrame className={className}>
-      <Brand />
+      <Brand folded={shownFold === "brand"} />
       {recovery ? null : back ? (
-        <div ref={backRoom} className="flex min-w-0 flex-1 overflow-hidden">
+        // Back's room starts at Back's width. The items beside it shrink far faster, so they give
+        // way to their essentials first, as the multiview's layout and streams to their names.
+        // Only then does Back's room run short, which folds the notices to their icons (`backFold`).
+        <div ref={backRoom} className="flex min-w-0 flex-auto overflow-hidden">
           <button
             onMouseDown={(event) => event.preventDefault()}
             onClick={back}
@@ -182,20 +191,21 @@ export function WindowBar({
           )}
         </nav>
       )}
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex shrink-[1000] items-center gap-1.5">
+        {!recovery && children}
         {/* Recovery keeps optional notices hidden so selection and Retry remain the focus. */}
         {!recovery && (
           <>
-            <UpdateNotice compact={(back ? backFold : fold) === "arrow"} />
+            <UpdateNotice compact={iconsOnly(shownFold)} />
             <TmdbProgress />
             {back ? (
-              <DownloadsNotice status={status} compact={backFold === "arrow"} />
+              <DownloadsNotice status={status} compact={iconsOnly(backFold)} />
             ) : folded && shown.some((entry) => entry.view === "downloads") ? (
               <DownloadsNotice
                 status={status}
                 page
                 current={view === "downloads"}
-                compact={fold === "arrow"}
+                compact={iconsOnly(fold)}
               />
             ) : (
               view !== "downloads" && <DownloadsNotice status={status} />
@@ -262,11 +272,15 @@ export function BarFrame({
   );
 }
 
-export function Brand() {
+/**
+ * The logo and the app's name. `folded`, where the bar is short of room for its controls, leaves
+ * the logo alone on screen; the name stays for screen readers, as the logo itself says nothing.
+ */
+export function Brand({ folded = false }: { folded?: boolean }) {
   return (
     <span className="mr-4 flex flex-none items-center gap-2">
       <Logo className="size-5" />
-      <b className="text-[0.9375rem] tracking-tight">mr. streamer</b>
+      <b className={cn("text-[0.9375rem] tracking-tight", folded && "sr-only")}>mr. streamer</b>
     </span>
   );
 }
@@ -303,10 +317,14 @@ export function PageButton({
 /**
  * How far the bar folds: "none" while every page's name fits; "downloads" once they don't fit
  * where the bar holds them, which puts Downloads beside Search; "arrow" once the other names
- * don't fit beside that button's words either, which leaves it its arrow alone. Back, in the
- * pages' place, folds the same way, with nothing for "downloads" to fold.
+ * don't fit beside that button's words either, which leaves it its arrow alone; "brand" once
+ * even the arrow leaves them short, which leaves the brand its logo alone. Back, in the pages'
+ * place, folds the same way, with nothing for "downloads" to fold.
  */
-type Fold = "none" | "downloads" | "arrow";
+type Fold = "none" | "downloads" | "arrow" | "brand";
+
+/** Whether the notices beside Search keep their icons alone at `fold`. */
+const iconsOnly = (fold: Fold) => fold === "arrow" || fold === "brand";
 
 /**
  * How far the pages' names fold (see `Fold`), for the bar's notice saying `words` in the interface
@@ -315,9 +333,13 @@ type Fold = "none" | "downloads" | "arrow";
  * all their names took, a little more than they need while it stands beside Search. The arrow
  * tries its words again whenever the pages' room grows, the words change or the language does, as
  * Back's name can while the words read the same, and keeps them only if the names still fit beside
- * them; the try is measured before the bar is drawn, so it shows nothing when it fails. When the
- * pages' `names` change, a page coming or going, Downloads tries its place among them the same
- * way, unless its button beside Search has the keyboard, which it would lose.
+ * them; the try is measured before the bar is drawn, so it shows nothing when it fails. The brand
+ * tries its name again the same way whenever the pages' room or the whole bar grows, or the words
+ * or language change, as the items beside Back can grow back while its room holds still, and
+ * keeps it only if Back or the names still fit beside it. When the pages' `names` change, a
+ * page coming or going, Downloads tries its place among them the same way, unless its button
+ * beside Search has the keyboard, which it would lose. Folding moves nothing that takes the
+ * keyboard: the brand's name stays in the bar for screen readers.
  */
 function useFolds(
   words: string | undefined,
@@ -326,10 +348,11 @@ function useFolds(
   names?: string,
 ): [RefCallback<HTMLElement>, Fold] {
   const [fold, setFold] = useState<Fold>("none");
-  // The room all the pages' names took when they stopped fitting, and the room the pages had
-  // beside the arrow when last measured.
+  // The room all the pages' names took when they stopped fitting, and the room the pages, and the
+  // whole bar, had beside the arrow and beside the logo when last measured.
   const needed = useRef(0);
   const besideArrow = useRef(Infinity);
+  const besideLogo = useRef({ room: Infinity, bar: Infinity });
   const measured = useRef<(again: boolean, renamed?: boolean) => void>(undefined);
 
   const ref = useCallback((element: HTMLElement | null) => {
@@ -341,6 +364,8 @@ function useFolds(
       setFold((was) => {
         const room = element.clientWidth;
         const over = element.scrollWidth > room;
+        // The whole bar's width: Back's room can hold still while the items beside it grow back.
+        const bar = element.parentElement?.clientWidth ?? 0;
         const notice = element.parentElement?.querySelector("[data-downloads-notice]");
 
         if (renamed && was !== "none" && !notice?.contains(document.activeElement)) return "none";
@@ -360,7 +385,17 @@ function useFolds(
             if (again || room > besideArrow.current) return "downloads";
             besideArrow.current = room;
 
-            return "arrow";
+            if (!over) return "arrow";
+            // Measured afresh beside the logo, as the room grows by the name it gave up.
+            besideLogo.current = { room: Infinity, bar };
+
+            return "brand";
+          case "brand":
+            if (again || room > besideLogo.current.room || bar > besideLogo.current.bar)
+              return "arrow";
+            besideLogo.current = { room, bar };
+
+            return "brand";
         }
       });
 
@@ -369,6 +404,8 @@ function useFolds(
     measure(true, true);
     const observer = new ResizeObserver(() => measure(false));
     observer.observe(element);
+
+    if (element.parentElement) observer.observe(element.parentElement);
 
     return () => {
       observer.disconnect();

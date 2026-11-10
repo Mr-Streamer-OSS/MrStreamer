@@ -2,6 +2,17 @@ import { type } from "arktype";
 import { QUALITIES, type Quality } from "./library.ts";
 import { lazy, type Infer } from "./lazy.ts";
 
+/** Only layouts this version understands can be activated; future leaves stay on disk. */
+export const MultiviewLayout = lazy(() =>
+  type({
+    name: "string > 0",
+    channels: type({ subscriptionId: "string > 0", id: "string > 0" })
+      .array()
+      .atLeastLength(2)
+      .atMostLength(4),
+  }).onDeepUndeclaredKey("reject"),
+);
+
 /**
  * Viewing preferences that survive restarts and hold whichever subscription plays. What the
  * viewer left one subscription at is `SubscriptionPreferences`. Favourites and recently watched
@@ -11,6 +22,8 @@ export const Preferences = lazy(() =>
   type({
     /** Stable Home row IDs. Unknown IDs survive an older release; absent uses defaults. */
     "homeRows?": type({ id: "string > 0", visible: "boolean" }).array(),
+    /** Named layouts contain only source-qualified channel identities, never session URLs. */
+    "multiviewLayouts?": MultiviewLayout().array(),
     /** Desktop command overrides. Missing commands use defaults; unknown IDs survive upgrades. */
     "keyboardShortcuts?": "Record<string, string[]>",
     volume: "0 <= number <= 1",

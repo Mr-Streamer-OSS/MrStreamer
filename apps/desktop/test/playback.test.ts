@@ -2,8 +2,10 @@ import { spawnSync } from "node:child_process";
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { Preferences } from "@mrstreamer/contracts/preferences";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
+import * as Effect from "effect/Effect";
 import { captureKey, FellBehind, LiveCaptures } from "../src/main/playback/live-capture.ts";
 import { historyStore } from "../src/main/playback/live-history.ts";
 import { PlaybackCoordination } from "../src/main/services/playback-coordination.ts";
@@ -45,16 +47,21 @@ const hasFfmpeg = spawnSync(FFMPEG, ["-version"]).status === 0;
  * session ids it said that of so far. `dispose` ends it, as quitting the app does.
  */
 async function connectedPlayback(
-  options: { slotReleaseMs?: number; ffmpeg?: boolean; rewind?: boolean } = {},
+  options: {
+    slotReleaseMs?: number;
+    ffmpeg?: boolean;
+    rewind?: boolean;
+    maxConnections?: number;
+  } = {},
 ) {
   const provider = await fakeProvider({
-    maxConnections: 1,
+    maxConnections: options.maxConnections ?? 1,
     slotReleaseMs: options.slotReleaseMs ?? 0,
   });
 
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: options.ffmpeg ? FFMPEG : null }).pipe(
-      Layer.provide(PlaybackCoordination.layer),
+      Layer.provideMerge(PlaybackCoordination.layer),
       Layer.provide(
         options.rewind
           ? LiveCaptures.layer({ folder: await tempDir(), keepFree: 0 }).pipe(
@@ -87,7 +94,16 @@ async function connectedPlayback(
     dispose: () => runtime.dispose(),
   };
 
-  return { provider, playback, service, subscriptionId, tracksChanged };
+  return {
+    runtime,
+    provider,
+    playback,
+    service,
+    subscriptionId,
+    tracksChanged,
+    subscriptions,
+    coordination: await promised(runtime, PlaybackCoordination),
+  };
 }
 
 /** Ids of channels that stream without end. */
@@ -2180,5 +2196,589 @@ describe.skipIf(!hasFfmpeg)("live history", () => {
 
     expect(Number.parseInt(result.stdout, 10)).toBeGreaterThan(0);
     await history.close();
+  });
+});
+
+describe("pane playback", () => {
+  const owner = { id: "default", revision: 1 };
+
+  it("validates saved layouts as two to four source identities", () => {
+    const channel = { subscriptionId: "source", id: "channel" };
+
+    const layout = (count: number) => ({
+      volume: 1,
+      muted: false,
+      multiviewLayouts: [
+        { name: "Sports", channels: Array.from({ length: count }, () => channel) },
+      ],
+    });
+
+    expect(Preferences().allows(layout(2))).toBe(true);
+    expect(Preferences().allows(layout(4))).toBe(true);
+    expect(Preferences().allows(layout(1))).toBe(false);
+    expect(Preferences().allows(layout(5))).toBe(false);
+    expect(
+      Preferences().allows({
+        volume: 1,
+        muted: false,
+        multiviewLayouts: [{ name: "Sports", channels: [{ id: "channel" }, channel] }],
+      }),
+    ).toBe(false);
+  });
+
+  it("isolates a failed pane and snapshots its owner and channel", async () => {
+    const { service, provider, subscriptionId } = await connectedPlayback({ maxConnections: 2 });
+    const mutableOwner = { ...owner };
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const request = await service.beginPane("1", mutableOwner, channel);
+    mutableOwner.revision++;
+    expect(request.owner).toEqual(owner);
+    const a = await service.openPane(request, channel, LINUX);
+    channel.id = "another-channel";
+    expect(a.channel.id).not.toBe(channel.id);
+    const first = await firstBytes(a.url);
+    const failedChannel = { subscriptionId, id: channelNamed(provider, "TEST | Offline") };
+    const failedRequest = await service.beginPane("2", owner, failedChannel);
+    const b = await service.openPane(failedRequest, failedChannel, LINUX);
+    expect((await firstBytes(b.url)).status).toBe(404);
+    expect(await service.failure(b.sessionId)).toMatchObject({ kind: "unavailable" });
+    expect(await service.failure(a.sessionId)).toBeNull();
+    await service.closePane(failedRequest, failedChannel, b.sessionId);
+    expect(await service.measurement(a.sessionId)).not.toBeNull();
+    expect(provider.activeStreams()).toBe(1);
+    first.stop();
+  });
+
+  it.each([0, 1, Number.NaN])(
+    "refuses an account with %s explicit connections before opening",
+    async (maxConnections) => {
+      const { service, provider, subscriptionId, subscriptions } = await connectedPlayback({
+        maxConnections,
+      });
+
+      if (Number.isNaN(maxConnections))
+        expect((await subscriptions.list())[0]?.account.maxConnections).toBeNull();
+      const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+      expect(await service.paneCapacity(channel)).toEqual({ eligible: false });
+      const request = await service.beginPane("1", owner, channel);
+      await expect(service.openPane(request, channel, LINUX)).rejects.toMatchObject({
+        _tag: "PaneRefused",
+        reason: "ineligible",
+      });
+      expect(provider.streamRequests()).toBe(0);
+    },
+  );
+
+  it("keeps four independent panes and exact close identity, then returns to single view", async () => {
+    const { service, provider, subscriptionId } = await connectedPlayback({ maxConnections: 5 });
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const sessions = [];
+    const readers = [];
+
+    for (const pane of ["1", "2", "3", "4"] as const) {
+      const request = await service.beginPane(pane, owner, channel);
+      const session = await service.openPane(request, channel, LINUX);
+      sessions.push({ request, session });
+      readers.push(await firstBytes(session.url));
+    }
+
+    expect(provider.activeStreams()).toBe(4);
+    const first = sessions[0]!;
+    await service.closePane(
+      first.request,
+      { ...channel, subscriptionId: "another-source" },
+      first.session.sessionId,
+    );
+    await service.closePane(
+      first.request,
+      { ...channel, id: "another-channel" },
+      first.session.sessionId,
+    );
+    expect(await service.measurement(first.session.sessionId)).not.toBeNull();
+
+    const replacement = await service.openPane(
+      await service.beginPane("1", owner, channel),
+      channel,
+      LINUX,
+    );
+
+    await service.closePane(first.request, channel, first.session.sessionId);
+    expect(await service.measurement(replacement.sessionId)).not.toBeNull();
+
+    for (const each of sessions.slice(1))
+      expect(await service.measurement(each.session.sessionId)).not.toBeNull();
+    const single = await service.open(channel, LINUX);
+    expect(await service.measurement(replacement.sessionId)).toBeNull();
+
+    for (const each of sessions)
+      expect(await service.measurement(each.session.sessionId)).toBeNull();
+    expect((await firstBytes(single.url)).bytes).toBeGreaterThan(0);
+    readers.forEach((reader) => reader.stop());
+  });
+
+  it("counts recording and download leases without preempting either or closing another pane", async () => {
+    const { service, provider, subscriptionId, coordination } = await connectedPlayback({
+      maxConnections: 2,
+    });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const lease = await coordination.lend(subscriptionId);
+    expect(lease).not.toBeNull();
+    const a = await service.openPane(await service.beginPane("1", owner, channel), channel, LINUX);
+    await expect(
+      service.openPane(await service.beginPane("2", owner, channel), channel, LINUX),
+    ).rejects.toMatchObject({ _tag: "PaneRefused", reason: "capacity" });
+    expect(lease!.signal.aborted).toBe(false);
+    expect(await service.measurement(a.sessionId)).not.toBeNull();
+    lease!.release();
+    const held = await coordination.hold(subscriptionId, Effect.succeed(2), false);
+    expect(held.kind).toBe("held");
+    await expect(
+      service.openPane(await service.beginPane("2", owner, channel), channel, LINUX),
+    ).rejects.toMatchObject({ _tag: "PaneRefused", reason: "capacity" });
+    expect(await coordination.uses(subscriptionId)).toEqual(["watch", "recording"]);
+
+    if (held.kind === "held") held.held.release();
+    const b = await service.openPane(await service.beginPane("2", owner, channel), channel, LINUX);
+    expect((await firstBytes(b.url)).bytes).toBeGreaterThan(0);
+    expect(await service.measurement(a.sessionId)).not.toBeNull();
+  });
+
+  it("deduplicates actual captures shared with a recording and retains the other pane after close", async () => {
+    const { service, provider, subscriptionId, coordination, subscriptions } =
+      await connectedPlayback({ maxConnections: 2, rewind: true });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const request = await service.beginPane("1", owner, channel);
+    const a = await service.openPane(request, channel, LINUX);
+    const first = await firstBytes(a.url);
+    const b = await service.openPane(await service.beginPane("2", owner, channel), channel, LINUX);
+    const second = await firstBytes(b.url);
+    expect(provider.activeStreams()).toBe(1);
+    expect(await coordination.uses(subscriptionId)).toEqual(["watch"]);
+    expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 1 });
+    const source = await subscriptions.sourceOf(subscriptionId);
+    const upstream = await source.provider.liveStream(channel.id);
+
+    const key = captureKey({
+      subscriptionId,
+      revision: source.revision,
+      channelId: channel.id,
+      variantId: channel.id,
+      format: upstream.format,
+      url: upstream.url,
+      headers: upstream.headers ?? {},
+    });
+
+    const recording = await coordination.hold(subscriptionId, Effect.succeed(2), false, key);
+    expect(recording.kind).toBe("held");
+    expect(await coordination.uses(subscriptionId)).toEqual(["recording"]);
+    expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 1 });
+
+    if (recording.kind === "held") recording.held.release();
+    await service.closePane(request, channel, a.sessionId);
+    expect(await service.measurement(a.sessionId)).toBeNull();
+    expect(await service.timeline(b.sessionId)).not.toBeNull();
+    expect(provider.activeStreams()).toBe(1);
+    first.stop();
+    second.stop();
+  });
+
+  it("uses the admitted stream snapshot for capture sharing and delivery", async () => {
+    const { service, provider, subscriptionId, subscriptions, coordination } =
+      await connectedPlayback({ maxConnections: 2, rewind: true });
+
+    const channels = liveChannels(provider);
+    const channel = { subscriptionId, id: channels[0]! };
+    const a = await service.openPane(await service.beginPane("1", owner, channel), channel, LINUX);
+    const first = await firstBytes(a.url);
+
+    const b = await service.openPane(
+      await service.beginPane("2", owner, { subscriptionId, id: channels[1]! }),
+      { subscriptionId, id: channels[1]! },
+      LINUX,
+    );
+
+    const second = await firstBytes(b.url);
+
+    try {
+      expect(provider.activeStreams()).toBe(2);
+      const source = await subscriptions.sourceOf(subscriptionId);
+      const original = source.provider.liveStream.bind(source.provider);
+      let resolved = false;
+      vi.spyOn(source.provider, "liveStream").mockImplementation(async (...args) => {
+        const stream = await original(...args);
+        const rotated = resolved;
+        resolved = true;
+
+        return rotated
+          ? { ...stream, headers: { ...stream.headers, "X-Rotated-Session": "new" } }
+          : stream;
+      });
+
+      const c = await service.openPane(
+        await service.beginPane("3", owner, channel),
+        channel,
+        LINUX,
+      );
+
+      const third = await firstBytes(c.url);
+
+      try {
+        expect(third.status).toBe(200);
+        expect(provider.activeStreams()).toBe(2);
+        expect(await coordination.uses(subscriptionId)).toEqual(["watch", "watch"]);
+      } finally {
+        third.stop();
+      }
+    } finally {
+      first.stop();
+      second.stop();
+    }
+  });
+
+  it("cancels only the exact pending pane request and channel before it opens", async () => {
+    const { service, provider, subscriptionId, subscriptions } = await connectedPlayback({
+      maxConnections: 2,
+    });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+
+    const other = await service.openPane(
+      await service.beginPane("2", owner, channel),
+      channel,
+      LINUX,
+    );
+
+    const request = await service.beginPane("1", owner, channel);
+    const source = await subscriptions.sourceOf(subscriptionId);
+    const original = source.provider.liveStream.bind(source.provider);
+    const arrived = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    vi.spyOn(source.provider, "liveStream").mockImplementationOnce(async (...args) => {
+      arrived.resolve();
+      await release.promise;
+
+      return original(...args);
+    });
+    const opening = service.openPane(request, channel, LINUX);
+    await arrived.promise;
+    const closing = service.closePane(request, channel);
+    release.resolve();
+    await expect(opening).rejects.toMatchObject({ _tag: "PaneRefused", reason: "stale" });
+    await closing;
+    expect(await service.measurement(other.sessionId)).not.toBeNull();
+    const reader = await firstBytes(other.url);
+
+    try {
+      expect(reader.status).toBe(200);
+      expect(provider.activeStreams()).toBe(1);
+    } finally {
+      reader.stop();
+    }
+  });
+
+  it.each(["source", "channel", "request", "pane", "owner", "session"] as const)(
+    "ignores a pending close with a different %s",
+    async (mismatch) => {
+      const { service, provider, subscriptionId, subscriptions } = await connectedPlayback({
+        maxConnections: 2,
+      });
+
+      const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+      const request = await service.beginPane("1", owner, channel);
+      const source = await subscriptions.sourceOf(subscriptionId);
+      const original = source.provider.liveStream.bind(source.provider);
+      const arrived = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      vi.spyOn(source.provider, "liveStream").mockImplementationOnce(async (...args) => {
+        arrived.resolve();
+        await release.promise;
+
+        return original(...args);
+      });
+      const opening = service.openPane(request, channel, LINUX);
+      await arrived.promise;
+
+      const closing = service.closePane(
+        mismatch === "request"
+          ? { ...request }
+          : mismatch === "pane"
+            ? { ...request, paneId: "2" }
+            : mismatch === "owner"
+              ? { ...request, owner: { ...owner, revision: 2 } }
+              : request,
+        mismatch === "source"
+          ? { ...channel, subscriptionId: "another-source" }
+          : mismatch === "channel"
+            ? { ...channel, id: "another-channel" }
+            : channel,
+        mismatch === "session" ? "another-session" : undefined,
+      );
+
+      release.resolve();
+      const opened = await opening;
+      await closing;
+      const reader = await firstBytes(opened.url);
+
+      try {
+        expect(reader.status).toBe(200);
+        expect(await service.measurement(opened.sessionId)).not.toBeNull();
+        expect(provider.activeStreams()).toBe(1);
+      } finally {
+        reader.stop();
+      }
+    },
+  );
+
+  it("cancels an exact pane before open starts", async () => {
+    const { service, provider, subscriptionId } = await connectedPlayback({ maxConnections: 2 });
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const cancelled = await service.beginPane("1", owner, channel);
+    await service.closePane(cancelled, channel);
+    await expect(service.openPane(cancelled, channel, LINUX)).rejects.toMatchObject({
+      _tag: "PaneRefused",
+      reason: "stale",
+    });
+  });
+
+  it("closes an exact pane after open resolves without a consumed session reply", async () => {
+    const { service, provider, subscriptionId } = await connectedPlayback({ maxConnections: 2 });
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const request = await service.beginPane("1", owner, channel);
+    const opened = await service.openPane(request, channel, LINUX);
+    await service.closePane(request, channel);
+    expect(await service.measurement(opened.sessionId)).toBeNull();
+    const replacementRequest = await service.beginPane("1", owner, channel);
+    const replacement = await service.openPane(replacementRequest, channel, LINUX);
+    await service.closePane(request, channel);
+    expect(await service.measurement(replacement.sessionId)).not.toBeNull();
+  });
+
+  it.each(["cancel", "supersede", "epoch", "replace"] as const)(
+    "preserves the previous pane during a delayed account read on %s",
+    async (action) => {
+      const { runtime, service, provider, subscriptionId } = await connectedPlayback({
+        maxConnections: 2,
+      });
+
+      const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+
+      const previous = await service.openPane(
+        await service.beginPane("1", owner, channel),
+        channel,
+        LINUX,
+      );
+
+      const reader = await firstBytes(previous.url);
+      const accounts = await runtime.runPromise(Subscriptions);
+      const original = accounts.list;
+      const arrived = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      // Hold the account read at its service seam, then observe only playback and HTTP results.
+      Object.defineProperty(accounts, "list", {
+        configurable: true,
+        value: Effect.gen(function* () {
+          arrived.resolve();
+          yield* Effect.promise(() => release.promise);
+
+          return yield* original;
+        }),
+      });
+      const request = await service.beginPane("1", owner, channel);
+      const opening = service.openPane(request, channel, LINUX);
+
+      const outcome = (async () => {
+        try {
+          return await opening;
+        } catch (error) {
+          return error;
+        }
+      })();
+
+      let closing = Promise.resolve();
+
+      try {
+        await arrived.promise;
+        closing = action === "cancel" ? service.closePane(request, channel) : Promise.resolve();
+
+        if (action === "supersede") await service.beginPane("1", owner, channel);
+
+        if (action === "epoch") await service.begin();
+        release.resolve();
+
+        if (action === "replace") {
+          await opening;
+          expect(await service.measurement(previous.sessionId)).toBeNull();
+        } else {
+          expect(await outcome).toMatchObject({ _tag: "PaneRefused", reason: "stale" });
+          expect(await service.measurement(previous.sessionId)).not.toBeNull();
+          const continued = await firstBytes(previous.url);
+
+          try {
+            expect(continued.status).toBe(200);
+          } finally {
+            continued.stop();
+          }
+        }
+
+        await closing;
+      } finally {
+        release.resolve();
+        await outcome;
+        await closing;
+        Object.defineProperty(accounts, "list", { configurable: true, value: original });
+        reader.stop();
+      }
+    },
+  );
+
+  it("rejects stale pane requests independently, and cancels all pending requests on a global epoch", async () => {
+    const { service, provider, subscriptionId, subscriptions } = await connectedPlayback({
+      maxConnections: 3,
+    });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const first = await service.beginPane("1", owner, channel);
+    const second = await service.beginPane("2", owner, channel);
+    const b = await service.openPane(second, channel, LINUX);
+    const source = await subscriptions.sourceOf(subscriptionId);
+    const original = source.provider.liveStream.bind(source.provider);
+    const arrived = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    vi.spyOn(source.provider, "liveStream").mockImplementationOnce(async (...args) => {
+      arrived.resolve();
+      await release.promise;
+
+      return original(...args);
+    });
+    const opening = service.openPane(first, channel, LINUX);
+    await arrived.promise;
+    const latest = await service.beginPane("1", owner, channel);
+    release.resolve();
+    await expect(opening).rejects.toMatchObject({ _tag: "PaneRefused", reason: "stale" });
+    expect(await service.measurement(b.sessionId)).not.toBeNull();
+    const a = await service.openPane(latest, channel, LINUX);
+    await service.begin();
+    await expect(service.openPane(latest, channel, LINUX)).rejects.toMatchObject({
+      _tag: "PaneRefused",
+      reason: "stale",
+    });
+    expect(await service.measurement(a.sessionId)).not.toBeNull();
+  });
+
+  it("refuses pooled single accounts, another profile visit and receiver mixing", async () => {
+    const { service, provider, subscriptionId, subscriptions } = await connectedPlayback({
+      maxConnections: 2,
+    });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const a = await service.openPane(await service.beginPane("1", owner, channel), channel, LINUX);
+    const single = await fakeProvider({ maxConnections: 1 });
+    const other = await subscriptions.add(demoLogin(single));
+    await expect(
+      service.openPane(
+        await service.beginPane("2", owner, {
+          subscriptionId: other.id,
+          id: liveChannels(single)[0]!,
+        }),
+        { subscriptionId: other.id, id: liveChannels(single)[0]! },
+        LINUX,
+      ),
+    ).rejects.toMatchObject({ _tag: "PaneRefused", reason: "ineligible" });
+    await expect(
+      service.openPane(
+        await service.beginPane("2", { ...owner, revision: 2 }, channel),
+        channel,
+        LINUX,
+      ),
+    ).rejects.toMatchObject({ _tag: "PaneRefused", reason: "profile" });
+    expect(await service.measurement(a.sessionId)).not.toBeNull();
+    const receiver = await service.openReceiver(channel, { address: "127.0.0.1", decoders: LINUX });
+    expect(await service.measurement(a.sessionId)).toBeNull();
+    await expect(
+      service.openPane(await service.beginPane("1", owner, channel), channel, LINUX),
+    ).rejects.toMatchObject({ _tag: "PaneRefused", reason: "mixed" });
+    expect(await service.receiverRequests(receiver.sessionId)).not.toBeNull();
+  });
+});
+
+describe("pane transitions and observations", () => {
+  const owner = { id: "default", revision: 1 };
+  it("retains the selected live session and buffer across single and multiview", async () => {
+    const { service, provider, subscriptionId } = await connectedPlayback({
+      maxConnections: 3,
+      rewind: true,
+    });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const single = await service.open(channel, LINUX, { owner });
+    const bytes = await firstBytes(single.url);
+    const timeline = await service.timeline(single.sessionId);
+
+    expect(timeline).not.toBeNull();
+    const request = await service.beginPane("1", owner, channel);
+    expect(await service.adoptPane(request, single.sessionId)).toEqual(single);
+
+    const other = await service.openPane(
+      await service.beginPane("2", owner, channel),
+      channel,
+      LINUX,
+    );
+
+    expect(await service.singlePane(request, single.sessionId)).toEqual(single);
+    expect(await service.measurement(other.sessionId)).toBeNull();
+    expect(await service.measurement(single.sessionId)).not.toBeNull();
+    expect((await service.timeline(single.sessionId))?.start).toBe(timeline?.start);
+    expect(provider.activeStreams()).toBe(1);
+    bytes.stop();
+  });
+
+  it("rejects older renderer intent and epochs before replacing a pane request", async () => {
+    const { service, provider, subscriptionId, coordination } = await connectedPlayback({
+      maxConnections: 3,
+    });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const epoch = await coordination.current();
+    const latest = await service.beginPane("1", owner, channel, { order: 2, epoch });
+    const opened = await service.openPane(latest, channel, LINUX);
+    await expect(service.beginPane("1", owner, channel, { order: 1, epoch })).rejects.toMatchObject(
+      { _tag: "PaneRefused", reason: "stale" },
+    );
+    expect(await service.measurement(opened.sessionId)).not.toBeNull();
+    await coordination.begin();
+    await expect(service.beginPane("1", owner, channel, { order: 3, epoch })).rejects.toMatchObject(
+      { _tag: "PaneRefused", reason: "stale" },
+    );
+  });
+
+  it("returns the visible pane to single view after cancelling a replacement", async () => {
+    const { service, provider, subscriptionId } = await connectedPlayback({ maxConnections: 3 });
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    const selected = await service.beginPane("1", owner, channel);
+    const session = await service.openPane(selected, channel, LINUX);
+    const replacement = await service.beginPane("1", owner, channel);
+    await service.closePane(replacement, channel);
+    expect(await service.singlePane(selected, session.sessionId)).toEqual(session);
+    expect(await service.measurement(session.sessionId)).not.toBeNull();
+  });
+
+  it("reports actual download and recording use without reserving capacity", async () => {
+    const { service, provider, subscriptionId, coordination } = await connectedPlayback({
+      maxConnections: 2,
+    });
+
+    const channel = { subscriptionId, id: liveChannels(provider)[0]! };
+    expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 0 });
+    const lease = await coordination.lend(subscriptionId);
+    expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 1 });
+    lease!.release();
+    const held = await coordination.hold(subscriptionId, Effect.succeed(2), false);
+    expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 1 });
+
+    if (held.kind === "held") held.held.release();
+    expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 0 });
+    expect(provider.streamRequests()).toBe(0);
   });
 });

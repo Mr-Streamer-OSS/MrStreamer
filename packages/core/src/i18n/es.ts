@@ -1943,4 +1943,25 @@ export const es: Translation = {
     "Los títulos aparecen aquí cuando tus fuentes los añaden.",
   "Couldn't refresh your sources. Showing matches from {time}.":
     "No se pudieron actualizar tus fuentes. Se muestran coincidencias de las {time}.",
+  // Multiview.
+  Multiview: "Multivista",
+  "Add channel": "Añadir canal",
+  "In view": "En pantalla",
+  "Only subscriptions that allow several streams":
+    "Solo suscripciones que permiten varias emisiones",
+  Layout: "Diseño",
+  "Not saved": "Sin guardar",
+  "Save layout": "Guardar diseño",
+  "Single view": "Vista única",
+  "Replaces the saved {name}": "Sustituye el diseño guardado {name}",
+  "Couldn't load layouts": "No se pudieron cargar los diseños",
+  "Couldn't check streams": "No se pudieron comprobar las emisiones",
+  "Close {channel}": "Cerrar {channel}",
+  "No stream free": "Ninguna emisión libre",
+  "All {provider} streams are in use": "Todas las emisiones de {provider} están en uso",
+  "{used} of {limit} streams": "{used} de {limit} emisiones",
+  "{channel} has sound": "{channel} tiene sonido",
+  "Couldn't close {channel}. Try again.": "No se pudo cerrar {channel}. Inténtalo de nuevo.",
+  "Couldn't return to single view. Try again.":
+    "No se pudo volver a la vista única. Inténtalo de nuevo.",
 };
