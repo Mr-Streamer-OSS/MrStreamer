@@ -163,7 +163,7 @@ function OnlineHistory({
               ? nameOf(row.version.subscriptionId)
               : null
           }
-          onRemove={() => removal.mutate(row.title)}
+          onRemove={() => removal.mutate(historyTitle(row))}
         />
       ))}
       {failed && (
@@ -232,6 +232,14 @@ function standingOf(entry: HistoryEntry): {
   };
 }
 
+/** History actions address the exact version represented by this row. */
+function historyTitle({ title, version }: Listed) {
+  return {
+    ...title,
+    versions: title.versions.filter((each) => ownedKey(each) === ownedKey(version)),
+  };
+}
+
 /**
  * An online entry: the row opens its details, and the three dots beside it mark it or take it out
  * of Continue watching. A film is marked in its own subscription's versions, a series as a whole
@@ -250,7 +258,7 @@ function HistoryRow({
   source: string | null;
   onRemove: () => void;
 }) {
-  const listed = useInContinueWatching(title);
+  const listed = useInContinueWatching(historyTitle({ entry, title, version }));
   const { text, done } = standingOf(entry);
 
   // A film's watched state is its mark's, else its play's; a series' needs its episodes, which
