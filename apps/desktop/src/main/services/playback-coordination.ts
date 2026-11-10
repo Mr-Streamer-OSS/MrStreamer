@@ -45,6 +45,15 @@ export class PlaybackCoordination extends Context.Service<
   {
     /** Starts the viewer's next play or stop request, across all subscriptions and outputs. */
     readonly begin: Effect.Effect<number>;
+    /** Read the global playback epoch without superseding other panes. */
+    readonly current: Effect.Effect<number>;
+    /** Under `exclusive`, check capacity without reclaiming or reserving another owner's work. */
+    admitsPane(
+      subscriptionId: string,
+      limit: number,
+      joining: readonly string[],
+      replacing?: string,
+    ): Effect.Effect<boolean>;
     passed(turn: number): Effect.Effect<boolean>;
     whileAsked(turn: number | undefined): Effect.Effect<void, Failed>;
     /** Serializes an open, rejecting stale requests before they close or open anything. */
@@ -141,12 +150,14 @@ export class PlaybackCoordination extends Context.Service<
         );
 
       /** One use per connection: a recording's, when one reads it, else Watch's. */
-      const usesOf = (subscriptionId: string): ConnectionUse[] => {
+      const usesOf = (subscriptionId: string, excluding?: string): ConnectionUse[] => {
         const recording = recorded(subscriptionId);
 
         const watching = new Set(
-          [...sessions.values()].flatMap((each) =>
-            each.subscriptionId === subscriptionId && !recording.has(each.connection)
+          [...sessions].flatMap(([id, each]) =>
+            id !== excluding &&
+            each.subscriptionId === subscriptionId &&
+            !recording.has(each.connection)
               ? [each.connection]
               : [],
           ),
@@ -193,6 +204,18 @@ export class PlaybackCoordination extends Context.Service<
 
       return {
         begin: Effect.sync(() => ++turns),
+        current: Effect.sync(() => turns),
+        admitsPane: (
+          subscriptionId: string,
+          limit: number,
+          joining: readonly string[],
+          replacing?: string,
+        ) =>
+          Effect.sync(
+            () =>
+              joining.some((key) => read(subscriptionId, key)) ||
+              usesOf(subscriptionId, replacing).length < limit,
+          ),
         passed: (turn: number) => Effect.sync(() => turn !== turns),
         whileAsked,
         inTurn: <A, R>(turn: number | undefined, open: Effect.Effect<A, Failed, R>) =>

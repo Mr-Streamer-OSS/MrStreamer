@@ -1,3 +1,5 @@
+import { Playback, CurrentPaneArrival, type PaneArrival } from "./services/playback.ts";
+import { Profiles } from "./platform/profile-store.ts";
 import { allowsApproval, visibleDownloads, visibleOutput } from "./services/profile-policy.ts";
 import { defined } from "@mrstreamer/core/defined";
 import { t } from "@mrstreamer/core/i18n";
@@ -20,6 +22,7 @@ import { type } from "arktype";
 import type { Result } from "@mrstreamer/contracts/errors";
 import {
   ipcInputs,
+  PaneIntent,
   type IpcEvent,
   type IpcEvents,
   type IpcInput,
@@ -216,6 +219,31 @@ export function registerIpc(
       }
 
       let work = Effect.gen(function* () {
+        let arrival: PaneArrival | undefined;
+
+        // Only validated mutations record arrival metadata. Admission still owns every result.
+        const paneMutations = [
+          "playback.openPane",
+          "playback.adoptPane",
+          "playback.singlePane",
+          "playback.closePane",
+        ] as const satisfies readonly IpcMethod[];
+
+        if (paneMutations.some((entry) => entry === method)) {
+          const playback = yield* Effect.serviceOption(Playback);
+          const profiles = yield* Effect.serviceOption(Profiles);
+
+          if (playback._tag === "None" || profiles._tag === "None" || !personal)
+            return yield* new Failed({
+              error: { kind: "invalid-input", detail: "Pane admission is unavailable." },
+            });
+          const owner = yield* profiles.value.active;
+          const pane = PaneIntent(input);
+
+          if (!(pane instanceof type.errors) && expected && sameProfile(expected, owner))
+            arrival = yield* playback.value.arrivePane(pane.paneId, owner, frame, pane.order);
+        }
+
         if (!personal || !ownedByProfile(method)) return yield* handler(input, frame);
         const admitted = yield* personal.admit(expected);
 
@@ -225,10 +253,12 @@ export function registerIpc(
           method
         ] as typeof handler;
 
-        const start = Effect.andThen(
+        let start = Effect.andThen(
           admitted.current,
           Effect.suspend(() => selected(input, frame)),
         );
+
+        if (arrival) start = Effect.provideService(start, CurrentPaneArrival, arrival);
 
         // These household writes serialize with removal, which drains personal permits.
         // Capture the admitted context under a short permit, then release it before that write lock.
@@ -602,6 +632,33 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
       Effect.map(handlers["recordings.list"](input, frame), (rows) =>
         rows.filter((row) => copy("recording", row.id)),
       ),
+    "playback.openPane": (input, frame) =>
+      online("channel", input.channel) &&
+      (input.variant === undefined || online("channel", { ...input.channel, id: input.variant }))
+        ? handlers["playback.openPane"](input, frame)
+        : denied(),
+    "playback.adoptPane": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.adoptPane"](input, frame) : denied(),
+    "playback.singlePane": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.singlePane"](input, frame) : denied(),
+    "playback.closePane": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.closePane"](input, frame) : denied(),
+    "playback.paneTimeline": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.paneTimeline"](input, frame) : denied(),
+    "playback.paneSeek": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.paneSeek"](input, frame) : denied(),
+    "playback.paneTracks": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.paneTracks"](input, frame) : denied(),
+    "playback.panePlaying": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.panePlaying"](input, frame) : denied(),
+    "playback.paneFailure": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.paneFailure"](input, frame) : denied(),
+    "playback.paneDiagnostic": (input, frame) =>
+      online("channel", input.channel)
+        ? handlers["playback.paneDiagnostic"](input, frame)
+        : denied(),
+    "playback.paneCapacity": (input, frame) =>
+      online("channel", input.channel) ? handlers["playback.paneCapacity"](input, frame) : denied(),
     "playback.open": (input, frame) =>
       online("channel", input.channel) &&
       (!input.variant ||

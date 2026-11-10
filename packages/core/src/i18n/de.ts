@@ -1889,4 +1889,24 @@ export const de: Translation = {
     "Titel erscheinen hier, wenn deine Quellen sie hinzufügen.",
   "Couldn't refresh your sources. Showing matches from {time}.":
     "Quellen konnten nicht aktualisiert werden. Treffer von {time} werden gezeigt.",
+  // Multiview.
+  Multiview: "Multiview",
+  "Add channel": "Sender hinzufügen",
+  "In view": "Im Bild",
+  "Only subscriptions that allow several streams": "Nur Abonnements, die mehrere Streams erlauben",
+  Layout: "Layout",
+  "Not saved": "Nicht gespeichert",
+  "Save layout": "Layout speichern",
+  "Single view": "Einzelansicht",
+  "Replaces the saved {name}": "Ersetzt das gespeicherte {name}",
+  "Couldn't load layouts": "Layouts konnten nicht geladen werden",
+  "Couldn't check streams": "Streams konnten nicht geprüft werden",
+  "Close {channel}": "{channel} schließen",
+  "No stream free": "Kein Stream frei",
+  "All {provider} streams are in use": "Alle Streams von {provider} sind belegt",
+  "{used} of {limit} streams": "{used} von {limit} Streams",
+  "{channel} has sound": "{channel} hat Ton",
+  "Couldn't close {channel}. Try again.": "{channel} schließen fehlgeschlagen. Versuch es erneut.",
+  "Couldn't return to single view. Try again.":
+    "Zurück zur Einzelansicht fehlgeschlagen. Versuch es erneut.",
 };

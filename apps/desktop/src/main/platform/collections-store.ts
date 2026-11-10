@@ -170,33 +170,49 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
 
   reconcile();
 
+  // Rules as a write saves them: known keys only, some filter and no reversed range. Evaluation
+  // ignores what this version doesn't know, so stored rules failing this would pick more members.
+  const Rules = SmartCollectionRules()
+    .onDeepUndeclaredKey("reject")
+    .narrow(
+      ({ filters }) =>
+        Object.keys(filters).length > 0 &&
+        [filters.year, filters.runtime, filters.rating].every(
+          (range) => range?.min === undefined || range.max === undefined || range.min <= range.max,
+        ),
+    );
+
+  const StoredRules = type("string.json.parse").pipe(Rules);
+
   const lists = db.prepare("select id, name from personal_collections order by position, rowid");
+  const savedRules = db.prepare("select rules from collection_rules where collection_id = ?");
 
   const members = db.prepare(
     "select account, kind, title_id as titleId, name, year, adult from collection_members where collection_id = ? order by position, rowid",
   );
 
   const read = () =>
-    lists.all().map((raw) => {
+    lists.all().flatMap((raw) => {
       const row = Row.assert(raw);
 
-      const saved = db
-        .prepare("select rules from collection_rules where collection_id = ?")
-        .get(row.id);
+      const saved = savedRules.get(row.id);
+      const rules = saved ? StoredRules(saved.rules) : undefined;
 
-      const rules = saved
-        ? SmartCollectionRules().assert(JSON.parse(type("string").assert(saved.rules)))
-        : undefined;
+      // Withheld from reads and commands, and kept as stored: read as manual or by the filters
+      // this version knows, it would show more than its rules allow.
+      if (rules instanceof type.errors) return [];
 
-      return {
-        ...row,
-        ...defined({ rules }),
-        members: members.all(row.id).map((raw) => {
-          const member = Member.assert(raw);
+      return [
+        {
+          ...row,
+          ...defined({ rules }),
+          members: members.all(row.id).map((raw) => {
+            const member = Member.assert(raw);
 
-          return { ...member, adult: member.adult !== 0 };
-        }),
-      };
+            return { ...member, adult: member.adult !== 0 };
+          }),
+        },
+      ];
     });
 
   return {
@@ -211,17 +227,18 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
         transaction(db, () => {
           if (!current()) throw new Error("Collection admission has ended.");
 
+          const before = read();
+
           if (
             change.kind === "create" &&
             db.prepare("select 1 from collection_receipts where id = ?").get(change.id)
           ) {
-            if (!db.prepare("select 1 from personal_collections where id = ?").get(change.id))
+            if (!before.some((list) => list.id === change.id))
               throw new Failed({ error: { kind: "no-list" } });
 
             return;
           }
 
-          const before = read();
           const found = "id" in change ? before.find((list) => list.id === change.id) : undefined;
 
           if (change.kind !== "create" && change.kind !== "reorder" && !found)
@@ -231,16 +248,9 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
             throw new Error("Smart collection membership is determined by its rules.");
 
           const saveRules = (id: string, rules: SmartCollectionRules) => {
-            const parsed = SmartCollectionRules().assert(rules);
+            const parsed = Rules(rules);
 
-            if (
-              !Object.keys(parsed.filters).length ||
-              [parsed.filters.year, parsed.filters.runtime, parsed.filters.rating].some(
-                (range) =>
-                  range?.min !== undefined && range.max !== undefined && range.min > range.max,
-              )
-            )
-              throw new Error("Invalid smart collection rules.");
+            if (parsed instanceof type.errors) throw new Error("Invalid smart collection rules.");
             db.prepare(
               "insert into collection_rules values (?, ?) on conflict(collection_id) do update set rules = excluded.rules",
             ).run(id, JSON.stringify(parsed));
@@ -259,11 +269,14 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
                 throw new Error("Invalid collection name or id.");
 
               if (
-                before.some(
-                  (list) =>
-                    list.id !== change.id &&
-                    (normalize(list.name) || list.name) === (normalize(name) || name),
-                )
+                lists
+                  .all()
+                  .map((raw) => Row.assert(raw))
+                  .some(
+                    (list) =>
+                      list.id !== change.id &&
+                      (normalize(list.name) || list.name) === (normalize(name) || name),
+                  )
               )
                 throw new Failed({ error: { kind: "list-name-taken" } });
 
@@ -297,17 +310,27 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
               db.prepare("delete from collection_members where collection_id = ?").run(change.id);
               db.prepare("delete from personal_collections where id = ?").run(change.id);
               break;
-            case "reorder":
+            case "reorder": {
               exactOrder(
                 before.map((list) => list.id),
                 change.ids,
               );
-              change.ids.forEach((id, position) =>
+
+              // Move readable lists between their existing slots; withheld rows keep theirs.
+              const positions = db
+                .prepare("select id, position from personal_collections order by position, rowid")
+                .all()
+                .filter((row) => before.some((list) => list.id === row.id))
+                .map((row) => Number(row.position));
+
+              change.ids.forEach((id, index) =>
                 db
                   .prepare("update personal_collections set position = ? where id = ?")
-                  .run(position, id),
+                  .run(positions[index]!, id),
               );
               break;
+            }
+
             case "member": {
               const title = change.title;
 

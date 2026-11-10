@@ -284,3 +284,17 @@ An HLS channel has this timeline only after local codec repair converts clear mu
 ### Playback key bindings
 
 The playback keys described here are defaults. Saved keyboard overrides belong to the active viewing profile and apply to the actual player commands. A changed command no longer responds to its old default keys; reset restores them. Channel numbers, arrows, Page Up/Down, Home/End, Enter, Backspace and Escape remain fixed for channel-list navigation. Text fields and open menus keep their own keys.
+
+## Multiview
+
+_Desktop 0.0.24 development. Up to four local live channels, where your subscriptions allow several streams._
+
+While a live channel plays on this computer, open **More > Multiview**. The entry appears only when that subscription explicitly allows at least two streams. **Add channel** fills another slot from eligible subscriptions. Unknown limits and one-stream subscriptions do not qualify. Active recordings use the same provider allowance; **No stream free** leaves the other panes playing. The bar shows streams used and the account's limit. When they can't be checked, More and the bar say so and offer **Retry**.
+
+Click a pane to give it sound and the playback controls. The other panes keep playing silently. Each pane has its own rewind position, subtitles, retry and close button. **Single view** keeps the selected channel and its current paused or rewound position, and closes its peers. Closing the last pane stops playback. Multiview is for live channels on this computer, not catch-up or playback on a TV.
+
+With at least two channels open, choose **Save layout**, enter a name and **Save**. Saving the same name replaces that layout. **Layout** opens a saved set of channels; an unavailable channel leaves its slot unavailable. A layout saves channel identities, not temporary stream links or rewind positions, and survives restarting the app. If layouts cannot be read, choose **Retry**. If saving fails, the name and existing layouts stay so you can try again.
+
+Use Tab to focus the Layout control, then Enter or Space to open it. Background behind-live labels refresh from each pane’s retained timeline; a failed read keeps its last observed position.
+
+**Single view** keeps the selected pane’s paused picture and retained position. The stream count refreshes after a pane finishes opening; it reports actual provider usage.

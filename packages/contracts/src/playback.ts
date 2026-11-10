@@ -3,6 +3,28 @@ import type { TitleRef } from "./ondemand.ts";
 import type { OwnedId } from "./subscription.ts";
 import type { PlaybackDiagnostic } from "./analytics.ts";
 
+/** Stable layout slot, independent of the channel or session currently occupying it. */
+export type PaneId = "1" | "2" | "3" | "4";
+
+/** Expected pane admission refusals. Source and delivery failures remain their own errors. */
+export interface PaneRefusal {
+  readonly _tag: "PaneRefused";
+  readonly reason: "stale" | "capacity" | "ineligible" | "mixed" | "profile" | "overflow";
+}
+
+/** Current account facts only; this does not reserve or forecast a connection. */
+export type PaneCapacity =
+  | { readonly eligible: false }
+  | { readonly eligible: true; readonly limit: number; readonly used: number };
+
+/**
+ * An account's stream allowance when it explicitly allows several streams, else null. Main admits
+ * panes by it and the UI lists addable channels by it, so unknown or single-stream accounts never pool.
+ */
+export function paneStreamLimit(limit: number | null | undefined): number | null {
+  return limit != null && Number.isFinite(limit) && limit >= 2 ? limit : null;
+}
+
 /** Container formats the UI's playback engines know how to load. */
 export type StreamFormat = "mpegts" | "hls";
 

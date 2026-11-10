@@ -25,6 +25,7 @@ import { CollectionsPage } from "../../src/renderer/src/features/collections/Col
 import { TitleCollections } from "../../src/renderer/src/features/collections/TitleCollections.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
+import { collectionQueries } from "../../src/renderer/src/features/collections/collections.ts";
 import {
   CollectionMembership,
   CollectionNav,
@@ -166,6 +167,9 @@ it("creates, renames, moves and deletes collections, each once stored", async ()
   expect(document.activeElement).toBe(button("New collection"));
 
   await choose("Family night", "Rename");
+  // A fresh field selects its name, so typing replaces it.
+  expect(document.activeElement).toBe(field());
+  expect([field().selectionStart, field().selectionEnd]).toEqual([0, "Family night".length]);
   await type("Friday night", "Escape");
   expect(saved.sent.map(({ kind }) => kind)).toEqual(["create"]);
   await choose("Family night", "Rename");
@@ -386,9 +390,10 @@ function mainCollections(
   let kept = initial.map((each, index) => ({ id: `c${index}`, ...each }));
   const find = (id: string) => kept.find((each) => each.id === id);
 
-  ipc.answer("collections.list", () =>
-    kept.map(({ id, name, members }) => ({ id, name, total: members.length })),
-  );
+  const summaries = () =>
+    kept.map(({ id, name, members }) => ({ id, name, total: members.length }));
+
+  ipc.answer("collections.list", summaries);
   ipc.answer("collections.page", ({ id, offset, limit }) => {
     const members = find(id)?.members ?? [];
 
@@ -417,7 +422,7 @@ function mainCollections(
     return null;
   });
 
-  return { find };
+  return { find, summaries };
 }
 
 // happy-dom lays nothing out, and the grid draws only the rows that fit: it gets a height.
@@ -746,7 +751,11 @@ describe("a title's collections menu in its details", () => {
   it.each(["create", "member"] as const)(
     "suspends a retained title after an actual refetch error and retries its %s with fresh facts",
     async (operation) => {
-      mainCollections([{ name: "Private films", members: [] }], [{ ...film, id: "4k" }]);
+      const main = mainCollections(
+        [{ name: "Private films", members: [] }],
+        [{ ...film, id: "4k" }],
+      );
+
       const lists = ipc.hold("collections.list");
       const memberships = ipc.hold("collections.memberships");
       const client = await details();
@@ -757,21 +766,34 @@ describe("a title's collections menu in its details", () => {
         close();
       };
 
-      // Text also matches the loading placeholder; both reads must admit the real trigger.
+      // The loading placeholder shares the trigger's text; only the admitted trigger is labelled.
+      const admitted = () =>
+        document.querySelector<HTMLButtonElement>("[aria-label='Collections for Night Harbour']");
+
       await vi.waitFor(() => expect(button("Add to collection")).toBeTruthy());
       expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
+      expect(admitted()).toBeNull();
       await act(async () => button("Add to collection").click());
       expect(() => button("New collection")).toThrow();
-      await act(async () => lists.resolve([{ id: "c0", name: "Private films", total: 0 }]));
-      expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
-      await act(async () => memberships.resolve([]));
+      await act(async () => lists.resolve(main.summaries()));
       await vi.waitFor(() =>
-        expect(
-          document.querySelector("[aria-label='Collections for Night Harbour']"),
-        ).not.toBeNull(),
+        expect(client.getQueryData(collectionQueries.list().queryKey)).toEqual(main.summaries()),
       );
-      expect(button("Add to collection").hasAttribute("disabled")).toBe(false);
-      await act(async () => button("Add to collection").click());
+      // React Query hands stored data to its views on a zero-delay timer; let that render land.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
+      expect(admitted()).toBeNull();
+      await act(async () => memberships.resolve([]));
+
+      // Both reads admit the enabled trigger.
+      const trigger = await vi.waitFor(() => {
+        const found = admitted();
+        expect(found?.disabled).toBe(false);
+
+        return found!;
+      });
+
+      await act(async () => trigger.click());
       const held = ipc.hold("collections.change");
 
       if (operation === "create") {
@@ -848,6 +870,9 @@ describe("a title's collections menu in its details", () => {
       await act(async () => button("Try again").click());
       await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
       expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save.");
+
+      // The stored create disables the menu until its add is sent, so Retry takes the focus.
+      if (operation === "create") expect(document.activeElement).toBe(button("Retry"));
       expect(ipc.argsOf("collections.change")).toHaveLength(1);
       const retry = ipc.hold("collections.change");
       await act(async () => button("Retry").click());
@@ -864,10 +889,58 @@ describe("a title's collections menu in its details", () => {
         },
         present: true,
       });
+
+      // Retry leaves with its alert, so the collections button takes the focus back.
+      if (operation === "create")
+        expect(document.activeElement).toBe(
+          document.querySelector("[aria-label='Collections for Harbour restored']"),
+        );
+
       await act(async () => retry.resolve(null));
       await vi.waitFor(() => expect(document.querySelector("[role=alert]")).toBeNull());
     },
   );
+
+  it("keeps an unsent new collection name through a failed title read", async () => {
+    mainCollections([{ name: "Private films", members: [] }], [{ ...film, id: "4k" }]);
+    const client = await details();
+    const stop = syncOnDemand(client);
+    const close = unmount;
+    unmount = () => {
+      stop();
+      close();
+    };
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='Collections for Night Harbour']")).not.toBeNull(),
+    );
+    await act(async () => button("Add to collection").click());
+    const item = await vi.waitFor(() => button("New collection"));
+    await act(async () => item.click());
+    await type("Private weekend", "Shift");
+    const refused = ipc.hold("ondemand.titles");
+    const reads = ipc.argsOf("ondemand.titles").length;
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+    await vi.waitFor(() => expect(ipc.argsOf("ondemand.titles").length).toBeGreaterThan(reads));
+    await act(async () => refused.reject({ kind: "unexpected", detail: "worker unavailable" }));
+    await vi.waitFor(() => expect(button("Try again")).toBeTruthy());
+    expect(document.querySelector("input[aria-label='Collection name']")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("Private weekend");
+
+    ipc.always("ondemand.titles", [film]);
+    await act(async () => button("Try again").click());
+    await vi.waitFor(() => expect(field().value).toBe("Private weekend"));
+    // A restored name returns focused with the caret after it, to go on typing.
+    expect(document.activeElement).toBe(field());
+    expect([field().selectionStart, field().selectionEnd]).toEqual([15, 15]);
+    await type("Private weekend", "Enter");
+    await vi.waitFor(() =>
+      expect(ipc.argsOf("collections.change")[0]).toMatchObject({
+        kind: "create",
+        name: "Private weekend",
+      }),
+    );
+  });
 
   it("ticks and adds the version the details play, not the title's first", async () => {
     mainCollections(
@@ -1247,6 +1320,32 @@ it("keeps a refused rename and its exact submitted name through privacy loading"
   );
   await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(2));
   expect(ipc.argsOf("collections.change")[1]).toEqual(ipc.argsOf("collections.change")[0]);
+});
+
+it("keeps an unsent rename through privacy loading without showing it meanwhile", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  mainCollections([{ name: "Films", members: [member(kite)] }]);
+  await mountTab();
+  await row("Films");
+  await choose("Films", "Rename");
+  await type("Weekend", "Shift");
+  const list = ipc.hold("collections.list");
+  await act(async () =>
+    ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+  );
+  await vi.waitFor(() => expect(document.querySelector("input")).toBeNull());
+  expect(document.body.innerHTML).not.toContain("Weekend");
+  await act(async () => list.resolve([{ id: "c0", name: "Films", total: 1 }]));
+  await vi.waitFor(() => expect(field().value).toBe("Weekend"));
+  expect(document.activeElement).toBe(field());
+  expect([field().selectionStart, field().selectionEnd]).toEqual([7, 7]);
+  await type("Weekend", "Enter");
+  await vi.waitFor(() =>
+    expect(ipc.argsOf("collections.change")).toEqual([
+      { kind: "rename", id: "c0", name: "Weekend" },
+    ]),
+  );
 });
 
 it("forgets a restricted selection and pending refusal before it can become eligible again", async () => {
@@ -1889,16 +1988,16 @@ describe("a smart collection in the Collections tab", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(field()));
     await type("Friday films", "End");
     // Browser pointer focus transfers only if mouse-down was not prevented by the button.
-    const retry = button("Save rules");
+    const save = button("Save rules");
     await act(async () => {
       const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
-      retry.dispatchEvent(down);
+      save.dispatchEvent(down);
 
-      if (!down.defaultPrevented) retry.focus();
+      if (!down.defaultPrevented) save.focus();
     });
     expect(document.querySelector("h1")?.textContent).toBe("Friday films");
     const saving = ipc.hold("collections.change");
-    await act(async () => retry.click());
+    await act(async () => save.click());
     expect(options().disabled).toBe(true);
     expect(button("Discard").hasAttribute("disabled")).toBe(true);
     expect(ipc.argsOf("collections.change")).toEqual([first, { ...first, name: "Friday films" }]);

@@ -75,6 +75,8 @@ import {
 } from "./ondemand.ts";
 import type { OutputStatus, RemoteMedia, RemotePlayingTitle, RemoteTitle } from "./output.ts";
 import {
+  type PaneCapacity,
+  type PaneRefusal,
   CODECS,
   type ChannelTracks,
   type LivePlaying,
@@ -155,6 +157,9 @@ const searchRequest = () =>
     view: type("string").atLeastLength(1).atMostLength(128),
     id: type("string").atLeastLength(1).atMostLength(128),
   });
+
+/** Ordering metadata shared by pane mutations before asynchronous admission. */
+export const PaneIntent = type({ paneId: "'1' | '2' | '3' | '4'", order: "number.safe >= 1" });
 
 /** Input schema for every IPC method. The main process validates each call before handling it. */
 export const ipcInputs = {
@@ -415,6 +420,54 @@ export const ipcInputs = {
   /** One season of a series version, by number, asked for when the viewer opens it. */
   "ondemand.season": () => type({ series: owned(), season: "number.integer >= 0" }),
   "ondemand.titles": () => type({ kind: titleKind(), versions: owned().array() }),
+  "playback.openPane": () =>
+    PaneIntent.and({
+      channel: owned(),
+      decoders: decoders(),
+      "variant?": "string",
+      "repair?": "boolean",
+      "audio?": "number.integer >= 0",
+      "audioLanguage?": "string",
+    }),
+  "playback.adoptPane": () =>
+    PaneIntent.and({
+      channel: owned(),
+      sessionId: "string",
+    }),
+  "playback.singlePane": () =>
+    PaneIntent.and({
+      channel: owned(),
+      sessionId: "string",
+    }),
+  "playback.closePane": () =>
+    PaneIntent.and({
+      channel: owned(),
+      "sessionId?": "string",
+    }),
+  "playback.paneTimeline": () =>
+    type({ paneId: "'1' | '2' | '3' | '4'", channel: owned(), sessionId: "string" }),
+  "playback.paneTracks": () =>
+    type({ paneId: "'1' | '2' | '3' | '4'", channel: owned(), sessionId: "string" }),
+  "playback.panePlaying": () =>
+    type({ paneId: "'1' | '2' | '3' | '4'", channel: owned(), sessionId: "string" }),
+  "playback.paneFailure": () =>
+    type({
+      paneId: "'1' | '2' | '3' | '4'",
+      channel: owned(),
+      sessionId: "string",
+      "selector?": { kind: "'hls'", requestId: "string <= 256 | null" },
+    }),
+  "playback.paneDiagnostic": () =>
+    type({ paneId: "'1' | '2' | '3' | '4'", channel: owned(), sessionId: "string" }),
+  "playback.paneSeek": () =>
+    type({
+      paneId: "'1' | '2' | '3' | '4'",
+      channel: owned(),
+      sessionId: "string",
+      at: "number | null",
+      "audio?": "number.integer | null",
+    }),
+  "playback.paneCapacity": () => type({ channel: owned() }),
   "playback.open": () =>
     type({
       channel: owned(),
@@ -902,6 +955,18 @@ export interface IpcOutputs {
   "ondemand.tiles": readonly CollectionTile[];
   /** One page of a collection. */
   "ondemand.collection": CollectionPage;
+  /** Opens a channel in its pane without closing peers. */
+  "playback.openPane": StreamSession | PaneRefusal;
+  "playback.adoptPane": StreamSession | PaneRefusal;
+  "playback.singlePane": StreamSession | PaneRefusal;
+  "playback.closePane": null | PaneRefusal;
+  "playback.paneTimeline": LiveTimeline | null | PaneRefusal;
+  "playback.paneSeek": LiveTimeline | null | PaneRefusal;
+  "playback.paneTracks": ChannelTracks | null | PaneRefusal;
+  "playback.panePlaying": LivePlaying | null | PaneRefusal;
+  "playback.paneFailure": StreamFailure | null | PaneRefusal;
+  "playback.paneDiagnostic": PlaybackDiagnostic | null | PaneRefusal;
+  "playback.paneCapacity": PaneCapacity;
   /** Opens a stream for a channel and closes any stream that was open before. */
   "playback.open": StreamSession;
   /** Online subtitle preferences and which services have saved accounts, never the secrets. */

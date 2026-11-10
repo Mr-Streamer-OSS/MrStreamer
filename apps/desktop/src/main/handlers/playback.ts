@@ -1,3 +1,4 @@
+import type { PaneRefusal } from "@mrstreamer/contracts/playback";
 import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { ProfileAdmission } from "../services/profiles.ts";
 import { allowsApproval } from "../services/profile-policy.ts";
@@ -9,7 +10,7 @@ import { observeOpen } from "../analytics/playback.ts";
 import { streamsOf } from "./streams.ts";
 import * as Effect from "effect/Effect";
 import type { HandlersFor } from "../ipc.ts";
-import type { Playback } from "../services/playback.ts";
+import { CurrentPaneArrival, type Playback } from "../services/playback.ts";
 import type { PlaybackCoordination } from "../services/playback-coordination.ts";
 import type { Library } from "../services/library.ts";
 import type { OnDemand } from "../services/ondemand.ts";
@@ -98,7 +99,187 @@ export function playbackHandlers({
         : Effect.succeed(null);
     });
 
+  // Refusals are pane domain values; real policy/source/disk failures remain Failed.
+  const paneResult = <A>(work: Effect.Effect<A, Failed | PaneRefusal>) =>
+    Effect.catchTag(work, "PaneRefused", (refusal) => Effect.succeed(refusal));
+
+  const arrived = Effect.gen(function* () {
+    const arrival = yield* Effect.serviceOption(CurrentPaneArrival);
+
+    if (arrival._tag === "None")
+      return yield* Effect.fail({ _tag: "PaneRefused", reason: "stale" } satisfies PaneRefusal);
+
+    return arrival.value;
+  });
+
   return {
+    "playback.openPane": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const arrival = yield* arrived;
+          const channel = yield* library.channel(input.channel);
+          const variants = yield* streamsOf(settings, channel, input.variant);
+          const request = yield* playback.beginArrivedPane(arrival, ownedId(channel));
+
+          return yield* playback.openPane(request, ownedId(channel), input.decoders, {
+            variants,
+            repair: input.repair ?? false,
+            audio: input.audio ?? null,
+            audioLanguage: input.audioLanguage ?? null,
+          });
+        }),
+      ),
+    "playback.adoptPane": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const arrival = yield* arrived;
+          const owner = yield* profiles.active;
+          yield* library.channel(input.channel);
+          yield* playback.paneSession(input.paneId, owner, input.channel, input.sessionId, "adopt");
+          const request = yield* playback.beginArrivedPane(arrival, input.channel);
+
+          return yield* playback.adoptPane(request, input.sessionId);
+        }),
+      ),
+    "playback.singlePane": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const arrival = yield* arrived;
+          const owner = yield* profiles.active;
+
+          const request = yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "existing",
+          );
+
+          yield* playback.beginArrivedPane(arrival, input.channel);
+          const session = yield* playback.singlePane(request, input.sessionId, arrival);
+          playerSessions.set(playback, { id: session.sessionId, owner });
+
+          return session;
+        }),
+      ),
+    "playback.closePane": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const arrival = yield* arrived;
+          const owner = yield* profiles.active;
+
+          const request = yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "close",
+          );
+
+          if (yield* coordination.passed(request.epoch))
+            return yield* Effect.fail({
+              _tag: "PaneRefused",
+              reason: "stale",
+            } satisfies PaneRefusal);
+
+          yield* playback.beginArrivedPane(arrival, input.channel);
+          yield* playback.closePane(request, input.channel, input.sessionId, arrival);
+
+          return null;
+        }),
+      ),
+    "playback.paneTimeline": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const owner = yield* profiles.active;
+          yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "existing",
+          );
+
+          return yield* playback.timeline(input.sessionId);
+        }),
+      ),
+    "playback.paneSeek": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const owner = yield* profiles.active;
+          yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "existing",
+          );
+
+          return yield* playback.seekLive(input.sessionId, input.at, input.audio);
+        }),
+      ),
+    "playback.paneTracks": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const owner = yield* profiles.active;
+          yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "existing",
+          );
+
+          return yield* playback.tracks(input.sessionId);
+        }),
+      ),
+    "playback.panePlaying": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const owner = yield* profiles.active;
+          yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "existing",
+          );
+
+          return yield* playback.playing(input.sessionId);
+        }),
+      ),
+    "playback.paneFailure": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const owner = yield* profiles.active;
+          yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "existing",
+          );
+
+          return yield* playback.failure(input.sessionId, input.selector);
+        }),
+      ),
+    "playback.paneDiagnostic": (input) =>
+      paneResult(
+        Effect.gen(function* () {
+          const owner = yield* profiles.active;
+          yield* playback.paneSession(
+            input.paneId,
+            owner,
+            input.channel,
+            input.sessionId,
+            "existing",
+          );
+
+          return yield* playback.diagnostic(input.sessionId);
+        }),
+      ),
+    "playback.paneCapacity": ({ channel }) =>
+      Effect.andThen(library.channel(channel), playback.paneCapacity(channel)),
     "playback.open": (
       {
         channel: named,

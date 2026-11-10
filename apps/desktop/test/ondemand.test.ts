@@ -2,10 +2,13 @@ import { type as arkType } from "arktype";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import type * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
 import { describe, expect, inject, it, onTestFinished, vi } from "vitest";
+import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { setLanguage } from "@mrstreamer/core/i18n";
+import type { WorkerRequest } from "../src/main/ondemand/protocol.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
-import { Settings } from "../src/main/services/preferences.ts";
+import { AdmittedSettings, Settings } from "../src/main/services/preferences.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -509,6 +512,93 @@ describe("movies and series", { timeout: 20_000 }, () => {
     await expect(app.onDemand.season(app.own("80000"), 1)).rejects.toMatchObject({
       error: { kind: "no-subscription" },
     });
+  });
+
+  it("trusts the lists the worker kept once a profile switch refused a refresh's acceptance", async () => {
+    const { runtime, provider, subscriptionId } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+    await runtime.runPromise(onDemand.refresh(subscriptionId));
+    let active = true;
+    const held = provider.hold("titles");
+
+    // The window admits each request for the profile showing; switching ends that admission.
+    const refresh = runtime.runPromise(
+      onDemand.refresh(subscriptionId).pipe(
+        Effect.provideService(AdmittedSettings, {
+          owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+          settings,
+          current: () => active,
+        }),
+      ),
+    );
+
+    refresh.catch(() => {});
+    await held.arrived;
+    active = false;
+    held.release();
+    await expect(refresh).rejects.toThrow("Viewing profile changed");
+
+    const snapshot = await runtime.runPromise(onDemand.catalogueSnapshot([subscriptionId]));
+    expect(Effect.runSyncExit(snapshot.current)._tag).toBe("Success");
+  });
+
+  it("trusts only what the worker holds after it accepted lists and its answer was lost", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warning.mockRestore());
+    const config = testConfig(await tempDir());
+    let lose = false;
+
+    const runtime = runtimeFor(
+      mainLayer({
+        ...config,
+        catalogueWorker: (setup) => {
+          const worker = config.catalogueWorker(setup);
+          const lost = new Set<number>();
+          const send = worker.postMessage.bind(worker);
+          const emit = worker.emit.bind(worker);
+
+          worker.postMessage = (value: WorkerRequest, transfers) => {
+            if (lose && value.method === "finishRefresh") {
+              lose = false;
+              lost.add(value.id);
+            }
+
+            send(value, transfers);
+          };
+
+          // The worker accepts and answers; the main process receives a reply it cannot read.
+          worker.emit = (event: string | symbol, ...args: unknown[]) => {
+            const [reply] = args;
+
+            if (event !== "message" || !arkType({ id: "number" }).allows(reply))
+              return emit(event, ...args);
+
+            return lost.delete(reply.id)
+              ? emit(event, { id: reply.id, ok: true, value: "lost" })
+              : emit(event, reply);
+          };
+
+          return worker;
+        },
+      }),
+    );
+
+    const onDemand = await runtime.runPromise(OnDemand);
+    const subscriptions = await promised(runtime, Subscriptions);
+    const { id } = await subscriptions.add(demoLogin(await fakeProvider()));
+    await runtime.runPromise(onDemand.refresh(id));
+    const before = await runtime.runPromise(onDemand.catalogueSnapshot([id]));
+    lose = true;
+
+    await expect(runtime.runPromise(onDemand.refresh(id))).rejects.toMatchObject({
+      error: { detail: "Invalid catalogue reply for finishRefresh." },
+    });
+
+    // The lists the worker accepted replaced those the earlier checkpoint was taken on.
+    expect(Effect.runSyncExit(before.current)._tag).toBe("Failure");
+    const after = await runtime.runPromise(onDemand.catalogueSnapshot([id]));
+    expect(Effect.runSyncExit(after.current)._tag).toBe("Success");
   });
 
   it("finds nothing by a version that names another subscription", async () => {

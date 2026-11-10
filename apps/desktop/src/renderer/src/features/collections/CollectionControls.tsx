@@ -119,21 +119,29 @@ function useCommit(commit: CommitCollection, ready: boolean) {
 /**
  * A collection's name as a field. Enter or leaving it saves, Escape cancels, an unchanged or empty
  * name cancels. A refused save keeps the field and says so; Enter sends it again, leaving does not.
+ * `onDraft` hands each edit to the owner, which passes it back as `draft` when the field returns
+ * after unknown admission unmounted it; `initial` stays what an unchanged name is compared with.
+ * A fresh field selects its name to replace it; a returned draft puts the caret after it instead.
  */
 function NameField({
   initial,
+  draft,
   failed,
   saving,
+  onDraft,
   onSave,
   onCancel,
 }: {
   initial: string;
+  draft: string | undefined;
   saving: boolean;
   failed: string | null;
+  onDraft: (name: string) => void;
   onSave: (name: string) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState(initial);
+  const [name, setName] = useState(draft ?? initial);
+  const restored = useRef(draft !== undefined);
   const cancelled = useRef(false);
 
   const save = () => {
@@ -154,8 +162,14 @@ function NameField({
         maxLength={COLLECTION_NAME_MAX}
         aria-invalid={!!failed || undefined}
         value={name}
-        onFocus={(event) => event.currentTarget.select()}
-        onChange={(event) => setName(event.target.value)}
+        onFocus={({ currentTarget: input }) => {
+          if (restored.current) input.setSelectionRange(input.value.length, input.value.length);
+          else input.select();
+        }}
+        onChange={(event) => {
+          setName(event.target.value);
+          onDraft(event.target.value);
+        }}
         onBlur={() => {
           if (!cancelled.current && !failed) save();
         }}
@@ -190,6 +204,8 @@ interface Editing {
   readonly id: string;
   /** A new smart collection's name: it becomes a draft to give rules, not a change. */
   readonly smart?: boolean;
+  /** The field's unsent text, kept with this intent so it ends with it. */
+  readonly draft?: string;
 }
 
 /** A smart collection named but not stored yet, until its first rule is saved. */
@@ -255,6 +271,9 @@ export function CollectionNav({
     change.dismiss();
   };
 
+  // Only the shown state carries the draft: `edit` stays the intent a pending save waits on.
+  const keepDraft = (draft: string) => setEditing((current) => current && { ...current, draft });
+
   const begin = (next: Editing) => {
     change.dismiss();
     edit.current = next;
@@ -309,6 +328,8 @@ export function CollectionNav({
                     ? change.requested.name
                     : collection.name
                 }
+                draft={editing.draft}
+                onDraft={keepDraft}
                 failed={failedHere("rename")}
                 onCancel={() => close(collection.id)}
                 onSave={(name) =>
@@ -362,6 +383,8 @@ export function CollectionNav({
             {editing?.kind === "rename" && editing.id === draft.id ? (
               <NameField
                 initial={draft.name}
+                draft={editing.draft}
+                onDraft={keepDraft}
                 saving={draftSaving}
                 failed={null}
                 onCancel={() => close(draft.id)}
@@ -403,6 +426,8 @@ export function CollectionNav({
         <NameField
           saving={change.saving}
           initial={change.requested?.kind === "create" ? change.requested.name : ""}
+          draft={editing.draft}
+          onDraft={keepDraft}
           failed={failedHere("create")}
           onCancel={() => close(NEW)}
           onSave={(name) => {
@@ -639,7 +664,8 @@ export function CollectionMembership({
   const change = useCommit(commit, ready);
   // Rules decide a smart collection's members, so only manual ones are offered.
   const collections = every.filter((each) => !each.rules);
-  const [creating, setCreating] = useState<string | null>(null);
+  // The new collection's field: its id, and its unsent text while admission is unknown.
+  const [creating, setCreating] = useState<Pick<Editing, "id" | "draft"> | null>(null);
   const draft = useRef<string | null>(null);
   // A successful create is a receipt, not a successful add. Keep only its target while admission
   // is unknown; the member facts for an explicit Retry come from the current props.
@@ -654,7 +680,15 @@ export function CollectionMembership({
   current.current = { ready, title };
   const labelId = useId();
   // The button comes back after the new collection's field, and takes the focus back from it.
+  // While a stored create's add is unfinished the button is disabled, so its Retry takes it.
   const refocus = useRef(false);
+
+  const takeFocus = (node: HTMLButtonElement | null) => {
+    if (!node || !refocus.current) return;
+    refocus.current = false;
+    node.focus();
+  };
+
   const label = t("Collections for {name}", { name: title.name });
 
   const finish = () => {
@@ -707,9 +741,11 @@ export function CollectionMembership({
         <NameField
           saving={change.saving}
           initial={change.requested?.kind === "create" ? change.requested.name : ""}
+          draft={creating.draft}
+          onDraft={(name) => setCreating((current) => current && { ...current, draft: name })}
           failed={change.failed?.kind === "create" ? (change.problem?.text ?? null) : null}
           onCancel={finish}
-          onSave={(name) => void create(creating, name)}
+          onSave={(name) => void create(creating.id, name)}
         />
       </div>
     );
@@ -718,11 +754,7 @@ export function CollectionMembership({
     <div className="flex flex-col items-start gap-2">
       <Menu.Root>
         <Menu.Trigger
-          ref={(node: HTMLButtonElement | null) => {
-            if (!node || !refocus.current) return;
-            refocus.current = false;
-            node.focus();
-          }}
+          ref={created === null ? takeFocus : undefined}
           disabled={created !== null}
           aria-label={label}
           aria-labelledby={labelId}
@@ -774,7 +806,7 @@ export function CollectionMembership({
                   change.dismiss();
                   const id = crypto.randomUUID();
                   draft.current = id;
-                  setCreating(id);
+                  setCreating({ id });
                 }}
                 className={cn(menuItem, "flex h-9 items-center gap-2.5 px-2")}
               >
@@ -789,7 +821,10 @@ export function CollectionMembership({
         <p role="alert" className="flex items-baseline gap-3 text-sm">
           <span className="text-destructive">{problem?.text}</span>
           <button
+            ref={created === null ? undefined : takeFocus}
             onClick={() => {
+              // This button leaves with its alert, so the collections button takes the focus.
+              refocus.current = true;
               setCreated(null);
 
               if (problem?.retry) void change.run({ ...unfinished, title });

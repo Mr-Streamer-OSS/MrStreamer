@@ -31,6 +31,16 @@ Most channels play directly. For the rest, Mr. Streamer converts only what the p
 
 Converted channels take a moment longer to start, about a second, and use more of your computer's processor, especially when the picture is converted.
 
+## Multiview
+
+_Desktop 0.0.24 development. Independent local live pictures, one pane with sound._
+
+[Multiview](live-tv.md#multiview) opens from a live channel's **More** menu when its subscription explicitly allows several streams. Selecting a pane gives it sound and the existing transport and subtitle controls. Pausing or rewinding that pane leaves its peers playing. **Single view** keeps its picture and retained position while closing the others; each pane can also close independently. Explicit mute stays muted when selection changes.
+
+Actual provider connections, including recordings, determine whether another channel can open. A refused pane leaves the existing pictures alone. Saved layouts restore channel choices, not paused positions. Multiview plays on this computer only. Four simultaneous pictures depend on the computer's decoding capacity; native four-pane resource qualification is still pending for this development feature.
+
+Paused pictures remain visible when returning to **Single view**. Background retained timelines refresh independently, and failed reads keep their last observed bounds.
+
 ## Movies and episodes
 
 _MKV, MP4 and a few AVI. One starts about a second after you choose it._

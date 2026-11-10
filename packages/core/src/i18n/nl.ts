@@ -1870,4 +1870,25 @@ export const nl: Translation = {
     "Titels verschijnen hier zodra je bronnen ze toevoegen.",
   "Couldn't refresh your sources. Showing matches from {time}.":
     "Je bronnen vernieuwen mislukt. Overeenkomsten van {time} getoond.",
+  // Multiview.
+  Multiview: "Multiview",
+  "Add channel": "Zender toevoegen",
+  "In view": "In beeld",
+  "Only subscriptions that allow several streams":
+    "Alleen abonnementen die meerdere streams toestaan",
+  Layout: "Indeling",
+  "Not saved": "Niet bewaard",
+  "Save layout": "Indeling bewaren",
+  "Single view": "Enkel beeld",
+  "Replaces the saved {name}": "Vervangt de bewaarde {name}",
+  "Couldn't load layouts": "Indelingen konden niet worden geladen",
+  "Couldn't check streams": "Streams konden niet worden gecontroleerd",
+  "Close {channel}": "{channel} sluiten",
+  "No stream free": "Geen stream vrij",
+  "All {provider} streams are in use": "Alle streams van {provider} zijn in gebruik",
+  "{used} of {limit} streams": "{used} van {limit} streams",
+  "{channel} has sound": "{channel} heeft geluid",
+  "Couldn't close {channel}. Try again.": "{channel} sluiten mislukt. Probeer het opnieuw.",
+  "Couldn't return to single view. Try again.":
+    "Terug naar enkel beeld mislukt. Probeer het opnieuw.",
 };

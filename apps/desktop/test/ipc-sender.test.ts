@@ -250,3 +250,22 @@ describe("IPC sender ownership", () => {
     expect(await call("customLists.get", window.mainFrame)).toEqual({ ok: true, value: [] });
   });
 });
+
+it("fails a pane mutation closed when the runtime has no Playback", async () => {
+  const window = page(1);
+  const handler = vi.fn(() => Effect.succeed(null));
+  const handlers: Partial<IpcHandlers> = { "playback.closePane": handler };
+  registerIpc(Effect.runPromiseExit, handlers as IpcHandlers, (sender) => sender === window);
+  const event = { sender: window, senderFrame: window.mainFrame } as IpcMainInvokeEvent;
+  expect(
+    await boundary.get("playback.closePane")!(event, {
+      paneId: "1",
+      order: 1,
+      channel: { subscriptionId: "source", id: "100000" },
+    }),
+  ).toEqual({
+    ok: false,
+    error: { kind: "invalid-input", detail: "Pane admission is unavailable." },
+  });
+  expect(handler).not.toHaveBeenCalled();
+});
