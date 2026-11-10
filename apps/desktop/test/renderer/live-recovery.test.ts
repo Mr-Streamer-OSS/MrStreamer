@@ -21,6 +21,10 @@ import { closeWatch, openWatch, useUi } from "../../src/renderer/src/app/ui-stor
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
+import {
+  profileListQuery,
+  syncProfiles,
+} from "../../src/renderer/src/features/profiles/profiles.ts";
 
 // This computer keeps a window on top of others, so Watch has its mini player.
 await vi.hoisted(async () => {
@@ -172,10 +176,15 @@ async function watching(channel = vrt): Promise<QueryClient> {
   await act(async () => player.play(channel));
   const client = new QueryClient();
   await client.fetchQuery(queries.preferences());
+  await client.fetchQuery(profileListQuery());
+  const stopProfiles = syncProfiles(client);
   const mounted = queryView(client);
   container = mounted.container;
   await mounted.render(createElement(WatchScreen));
-  unmount = mounted.unmount;
+  unmount = async () => {
+    stopProfiles();
+    await mounted.unmount();
+  };
 
   return client;
 }
@@ -209,6 +218,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
   selectProfileOwner({ id: "default", revision: 1 });
+  ipc.always("profiles.list", [
+    { id: "default", name: "Default", deleting: false },
+    { id: "kids", name: "Kids", deleting: false, kids: true },
+  ]);
   ipc.emit("output.changed", {
     owner: profileOwner()!,
     offers: [],
@@ -941,6 +954,17 @@ describe("named channel fallbacks in Watch", () => {
     expect(ipc.argsOf("library.chosenChannels")).toEqual([]);
     expect(text()).not.toContain("Couldn't read your changed channels.");
     expect(text()).not.toContain("fallback channels");
+  });
+
+  it("loads named fallbacks for a channel opened from a cold guide-search result", async () => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(vrt);
+    client.setQueryData(queries.channel(een).queryKey, een);
+    ipc.hold("library.channel", (args) => args.channel.id === "vrt").resolve(chosen);
+    await act(async () => opened.reject({ kind: "stream", failure: noStream }));
+    await wait(1);
+
+    expect(asked().map((call) => call.channel.id)).toEqual(["vrt", "een"]);
   });
 
   it("tries only the original channel's named alternatives, then reports exhaustion", async () => {

@@ -79,7 +79,7 @@ export function fallbackAfter(
   error: AppError,
   tried: readonly OwnedId[],
 ): OwnedId | null {
-  if (!fallsBack(error)) return null;
+  if (!canFallBack(error)) return null;
 
   return (
     channel.choices?.fallbacks?.find(
@@ -89,7 +89,7 @@ export function fallbackAfter(
 }
 
 /** A stream that didn't come, a channel or subscription that isn't there now, or a provider out of reach. */
-function fallsBack(error: AppError): boolean {
+export function canFallBack(error: AppError): boolean {
   switch (error.kind) {
     case "stream":
       // 401, 403, 429 and other refusals stop: the provider has said no, or asked to wait.

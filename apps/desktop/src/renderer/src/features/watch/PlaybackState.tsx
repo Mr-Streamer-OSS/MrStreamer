@@ -1,5 +1,5 @@
 import { appError } from "../../lib/errors.ts";
-import { chosenChannelsQuery } from "../live/ChannelTable.tsx";
+import { chosenChannelsQuery, useChannelChoicesAllowed } from "../live/ChannelTable.tsx";
 // What the picture area says when there is no picture: idle, tuning, reconnecting or failed. A
 // failure says what went wrong, what was observed of it in a small line, and offers what can help
 // (see problems.ts for the words): Retry opens the same channel again in the quality it had,
@@ -22,7 +22,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { AppError } from "@mrstreamer/contracts/errors";
-import { fallbackAfter, type LiveChannel } from "@mrstreamer/contracts/library";
+import { canFallBack, fallbackAfter, type LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { openSubscription } from "../../app/ui-store.ts";
@@ -337,6 +337,7 @@ interface FallingBack {
  */
 function useFallback(channel: LiveChannel): string | null {
   const client = useQueryClient();
+  const allowed = useChannelChoicesAllowed();
   const output = useOutput((state) => state.status.output);
   const phase = usePlayer((state) => state.phase);
   const nameOf = useSubscriptionNames();
@@ -348,18 +349,15 @@ function useFallback(channel: LiveChannel): string | null {
   }, [run, current]);
 
   useEffect(() => {
-    if (phase.kind !== "failed" || output.kind !== "local") return;
+    if (!allowed || phase.kind !== "failed" || output.kind !== "local") return;
     const error = problemError(phase.problem);
 
-    if (!error) return;
+    if (!error || !canFallBack(error)) return;
 
     const chosen =
       current?.chosen ?? client.getQueryData(queries.channel(channel).queryKey) ?? channel;
 
     const tried = [...(current?.tried ?? []), ownedId(channel)];
-
-    // No named alternative means no fallback run, including for kids and refused streams.
-    if (!current && !fallbackAfter(chosen, error, tried)) return;
 
     let mine = true;
 
@@ -376,6 +374,10 @@ function useFallback(channel: LiveChannel): string | null {
       }
 
       let next = fallbackAfter(latest, error, tried);
+
+      // Search results may omit choices. Only the admitted channel read decides there are none.
+      if (!current && !next) return;
+
       let found: LiveChannel | null = null;
 
       while (next && mine && outputs.status().output.kind === "local") {
@@ -415,7 +417,7 @@ function useFallback(channel: LiveChannel): string | null {
       mine = false;
     };
     // Once per failure: the phase of each is its own.
-  }, [phase, output.kind]);
+  }, [phase, output.kind, allowed]);
 
   if (output.kind !== "local") return null;
 
