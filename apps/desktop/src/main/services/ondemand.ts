@@ -851,7 +851,18 @@ function make(deps: OnDemandDeps) {
           const lifetime = incarnation;
 
           if (keep) catalogues.set(source.id, acceptance);
-          const finished = yield* call("finishRefresh", { ...owner, keep });
+
+          const finished = yield* call("finishRefresh", { ...owner, keep }).pipe(
+            // A refusal before dispatch or the worker's own failed answer settles acceptance; a
+            // stopped worker already replaced this lifetime. Unloaded currency has the next
+            // checkpoint take the worker's status. An interrupted call may still accept: it stays pending.
+            Effect.tapError(() =>
+              Effect.sync(() => {
+                if (incarnation === lifetime && catalogues.get(source.id) === acceptance)
+                  catalogues.set(source.id, { pending: false, loaded: false });
+              }),
+            ),
+          );
 
           if (!keep) return yield* switched;
 
