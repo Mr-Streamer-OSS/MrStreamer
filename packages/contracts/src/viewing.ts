@@ -1,8 +1,9 @@
 // What the viewer keeps per account: favourite channels, the channels watched recently, how far
-// movies and episodes got, and the films and episodes marked watched or unwatched by hand. The main process
-// records them as events (see @mrstreamer/core/viewing); the UI reads this state, in which
-// everything names its subscription. It holds every saved subscription's at once: the favourites
-// in the order starred, whichever subscription each is from, and the rest by when it was watched.
+// movies and episodes got, and the films and episodes marked watched or unwatched by hand. The
+// main process records them as events (see @mrstreamer/core/viewing); the UI reads this state, in
+// which everything names its subscription. It holds every saved subscription's at once: the
+// favourites in the order starred, whichever subscription each is from, and the rest by when it
+// was watched.
 import type { TitleRef } from "./ondemand.ts";
 import type { OwnedId } from "./subscription.ts";
 

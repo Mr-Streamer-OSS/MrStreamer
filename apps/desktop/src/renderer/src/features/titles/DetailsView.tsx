@@ -1,26 +1,26 @@
 // A movie's or series' details, in a sheet over the page it was opened from, which stays in view
-// behind it: the facts, the actions, the story, the cast with their photos, and a series'
-// episodes. Resume is the main action for anything partly watched, and From the beginning plays
-// at once, without asking. Save puts the movie or the whole series on the watchlist and takes it
-// off again; it goes by the title in the lists, so it works before the details arrive. Beside it,
-// the collections menu puts the version that plays in the viewer's collections and takes it out
-// (see features/collections/TitleCollections.tsx). A title
-// with several versions plays the one picked with the arrow beside Play, else the one it was
-// opened on, as from the 4K tab, else the one that suits best; the sheet shows that version, so a
-// series lists its episodes. The versions can be of several subscriptions: the menu then names
-// each one's, and Resume goes by how far the version that plays got in its own subscription,
-// never by another's. A series opens on the season being watched, and marks the episode. Each
-// episode's row carries everything known about it, TMDB's details once the season shown has its
-// answer, and beside it the three dots that mark it watched or unwatched by hand (see
-// EpisodeMarks.tsx). A movie is marked watched or unwatched beside Play, and a series' season
-// shown or the whole series beside its season tabs, each in the subscription of the version that
-// plays, with one line saying how many episodes changed and Undo. Where a series goes on, and how each episode stands, follow one set of rules
-// (`@mrstreamer/core/viewing/episodes`), which Continue watching and the player go by too, on
-// what the viewing record says: when it can't be read, the sheet says so, names no episode to go
-// on with and shows none as watched or not. The title from the lists heads the sheet at once; the
-// rest follows when the provider answers, and TMDB's details when they arrive. A related title
-// opens its details in place of these, and Back in the sheet's top bar returns through them as
-// they stood (`openRelated` in `app/ui-store.ts`); Close and Escape return to the page.
+// behind it: the facts, the actions, the story, the cast with their photos, and a series' episodes.
+// Resume is the main action for anything partly watched, and From the beginning plays at once,
+// without asking. Save puts the movie or the whole series on the watchlist and takes it off again;
+// it goes by the title in the lists, so it works before the details arrive. Beside it, the
+// collections menu puts the version that plays in the viewer's collections and takes it out (see
+// features/collections/TitleCollections.tsx). A title with several versions plays the one picked
+// with the arrow beside Play, else the one it was opened on, as from the 4K tab, else the one that
+// suits best; the sheet shows that version, so a series lists its episodes. The versions can be of
+// several subscriptions: the menu then names each one's, and Resume goes by how far the version
+// that plays got in its own subscription, never by another's. A series opens on the season being
+// watched, and marks the episode. Each episode's row carries everything known about it, TMDB's
+// details once the season shown has its answer, and beside it the three dots that mark it watched
+// or unwatched by hand (see EpisodeMarks.tsx). A movie is marked watched or unwatched in its
+// actions, and a series' season shown or the whole series beside its season tabs, each in the
+// subscription of the version that plays, with one line saying what changed and Undo. Where a
+// series goes on, and how each episode stands, follow one set of rules
+// (`@mrstreamer/core/viewing/episodes`), which Continue watching and the player go by too, on what
+// the viewing record says: when it can't be read, the sheet says so, names no episode to go on with
+// and shows none as watched or not. The title from the lists heads the sheet at once; the rest
+// follows when the provider answers, and TMDB's details when they arrive. A related title opens its
+// details in place of these, and Back in the sheet's top bar returns through them as they stood
+// (`openRelated` in `app/ui-store.ts`); Close and Escape return to the page.
 import { Dialog } from "@base-ui/react/dialog";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Circle, CircleDashed, Play, RotateCcw } from "lucide-react";
@@ -96,7 +96,6 @@ import {
   TitleMarkNotice,
   useEpisodeMarks,
   useTitleMarks,
-  type TitleMarks,
 } from "./EpisodeMarks.tsx";
 import { RelatedTitles } from "./RelatedTitles.tsx";
 import { VersionMenu } from "./VersionMenu.tsx";
@@ -536,7 +535,10 @@ function MovieActions({
   const now = movieNow({ ...details.title, ...versions.playing }, details.backdropUrl);
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
-  const marking = useTitleMarks(revisionsOf(filmMarks.data));
+
+  const marking = useTitleMarks(
+    filmMarks.data && new Set(filmMarks.data.map((each) => each.revision)),
+  );
 
   return (
     <Actions
@@ -554,7 +556,7 @@ function MovieActions({
         // Until the marks are read, the sheet can't say which of the two the film needs.
         filmMarks.data && (
           <MarkButton
-            marks={marking}
+            busy={marking.busy}
             watched={watched}
             onMark={(next) =>
               marking.mark(film, next, {
@@ -590,25 +592,19 @@ function latestMark(marks: readonly FilmMark[] | undefined): FilmMark | null {
   return marks?.toSorted((a, b) => b.at - a.at)[0] ?? null;
 }
 
-/** The revisions of marks that stand, which an Undo goes by; undefined while unknown. */
-function revisionsOf(
-  marks: readonly { readonly revision: number }[] | undefined,
-): ReadonlySet<number> | undefined {
-  return marks && new Set(marks.map((each) => each.revision));
-}
-
 /**
  * Mark watched, or Mark unwatched once it is: never disabled, so it keeps the keyboard's focus
  * while the mark is stored, and does nothing meanwhile.
  */
 function MarkButton({
-  marks,
+  busy,
   watched,
   onMark,
   label,
   size,
 }: {
-  marks: TitleMarks;
+  /** A mark is being stored: the button takes no other meanwhile. */
+  busy: boolean;
   watched: boolean;
   onMark: (watched: boolean) => void;
   /** What the button marks, as "Mark season watched"; a film's says only "Mark watched". */
@@ -619,10 +615,10 @@ function MarkButton({
     <Button
       variant="ghost"
       size={size}
-      aria-busy={marks.busy || undefined}
-      aria-disabled={marks.busy || undefined}
+      aria-busy={busy || undefined}
+      aria-disabled={busy || undefined}
       onClick={() => {
-        if (!marks.busy) onMark(!watched);
+        if (!busy) onMark(!watched);
       }}
     >
       {watched ? <Circle /> : <Check />}
@@ -1033,8 +1029,8 @@ function Episodes({
   const seasonWatched = every(episodes);
   const seriesWatched = every(details.seasons.flatMap((each) => each.episodes));
 
+  // Only offered by a MarkButton, which takes none while a mark is stored.
   const markMany = (scope: MarkScope, watched: boolean, name: string) => {
-    if (marks.busy) return;
     setSeason(shown.number);
     bulk.mark(scope, watched, { name, episodes: true });
   };
@@ -1043,7 +1039,7 @@ function Episodes({
   const bulkMarks = stateOf && (
     <span className="flex flex-none items-center gap-1 pb-1.5">
       <MarkButton
-        marks={{ ...bulk, busy: marks.busy }}
+        busy={marks.busy}
         watched={seasonWatched}
         size="sm"
         label={{ watched: t("Mark season watched"), unwatched: t("Mark season unwatched") }}
@@ -1052,7 +1048,7 @@ function Episodes({
         }
       />
       <MarkButton
-        marks={{ ...bulk, busy: marks.busy }}
+        busy={marks.busy}
         watched={seriesWatched}
         size="sm"
         label={{ watched: t("Mark series watched"), unwatched: t("Mark series unwatched") }}

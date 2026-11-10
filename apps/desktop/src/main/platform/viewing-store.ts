@@ -2,10 +2,10 @@ import type { UsageObservers } from "../analytics/observers.ts";
 // The viewing record on disk, in the SQLite database it shares with the watchlist (database.ts):
 // the events in order, the state they add up to per account, one row per movie or episode played,
 // one per movie and per episode marked by hand and one per marked series, with the episodes it
-// listed and what its latest mark replaced, the ids of commands already done and a few markers. Every command is
-// one transaction. When the rules change (STATE_VERSION), the state is rebuilt from the events at
-// start. If the database can't open, the record reports failures and the rest of the app carries
-// on.
+// listed and what its latest mark replaced, the ids of commands already done and a few markers.
+// Every command is one transaction. When the rules change (STATE_VERSION), the state is rebuilt
+// from the events at start. If the database can't open, the record reports failures and the rest
+// of the app carries on.
 //
 // What an event does to the title rows and the marks is one function, core's `project`, run on
 // the tables as a change commits and on a rebuild's memory, so a record rebuilt from its events
@@ -665,6 +665,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   const marksOf = (account: string, keys: readonly string[]): SeriesMarks[] =>
     keys.flatMap((key) => seriesOf(account, key) ?? []);
 
+  /** The marks `marked_movies` rows keep, leaving out any missing or unreadable. */
   const filmMarks = (rows: readonly unknown[]): StoredFilmMark[] =>
     rows.flatMap((raw) => {
       const row = FilmMarkRow()(raw);
@@ -673,7 +674,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
     });
 
   const filmsOf = (account: string, movieIds: readonly string[]): StoredFilmMark[] =>
-    movieIds.flatMap((id) => filmMarks([statements.film.get(account, id)].filter(Boolean)));
+    filmMarks(movieIds.map((id) => statements.film.get(account, id)));
 
   /** The keys of the series of `account` that listed one of these versions when last marked. */
   const seriesIn = (account: string, seriesIds: readonly string[]): string[] =>
@@ -766,7 +767,10 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
   const readOne = (account: string): AccountRecord => {
     const rows = titleRows(statements.recentTitles.all(account, CONTINUE_WINDOW));
-    const films = new Map(filmMarks(statements.films.all(account)).map((m) => [m.title.id, m.at]));
+
+    const films = new Map(
+      filmMarks(statements.films.all(account)).map((mark) => [mark.title.id, mark.at]),
+    );
 
     return {
       ...listsOf(account),

@@ -16,13 +16,13 @@
 // what another build wrote for one account still reads as it wrote it.
 //
 // A film's mark is kept by each version marked, and an episode's by its series and its numbers,
-// both apart from how far any file played
-// (see ./marks.ts and ./episodes.ts). Which series that is, and which versions of it a
-// subscription lists, the lists say when the mark is made and each time it is read: the UI names
-// a version and never says what it belongs to. Where a marked series goes on is worked out each
-// time the record is read, from how it stands then and the episodes the series listed when it
-// was last marked, so it follows what a play saves afterwards and asks no provider. When the
-// app reads those episodes again for its own ends, it tells the record what they are now.
+// both apart from how far any file played (see ./marks.ts and ./episodes.ts). Which series that is,
+// and which versions of it a subscription lists, the lists say when the mark is made and each time
+// it is read: the UI names a version and never says what it belongs to. Where a marked series goes
+// on is worked out each time the record is read, from how it stands then and the episodes the
+// series listed when it was last marked, so it follows what a play saves afterwards and asks no
+// provider. When the app reads those episodes again for its own ends, it tells the record what they
+// are now.
 //
 // The app supplies five ports: which subscriptions are saved, the store, the lists kept in
 // preferences.json before the record, which the first start imports once, the catalogues'
@@ -1320,7 +1320,7 @@ function make() {
         }),
       undoMark: (commandId: string, series: OwnedId, revision: number) =>
         undoMarks(commandId, [{ kind: "series", title: series, revision }]),
-      undoMarks: (commandId: string, made: readonly MarkMade[]) => undoMarks(commandId, made),
+      undoMarks,
       markTitles: (commandId: string, scope: MarkScope, watched: boolean) =>
         scope.kind === "film"
           ? markFilm(commandId, scope.versions, watched)

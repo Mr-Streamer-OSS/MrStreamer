@@ -17,6 +17,7 @@ import { Check, ChevronLeft, Circle, Ellipsis } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Download } from "@mrstreamer/contracts/downloads";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import type { Recording } from "@mrstreamer/contracts/recordings";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { HistoryEntry } from "@mrstreamer/contracts/viewing";
 import { t } from "@mrstreamer/core/i18n";
@@ -42,7 +43,6 @@ import {
   useRecordings,
   type RecordingPlace,
 } from "../recordings/recordings.ts";
-import type { Recording } from "@mrstreamer/contracts/recordings";
 import {
   filmScope,
   MarkItem,
@@ -310,24 +310,16 @@ function HistoryRow({
               <Menu.Popup
                 className={cn(menuSurface, "w-max min-w-[15rem] max-w-[26rem] text-[0.9375rem]")}
               >
-                <MarkItem
-                  disabled={marks.busy || watched === true}
-                  source={null}
-                  onPick={() => mark(true)}
-                >
+                <MarkItem disabled={marks.busy || watched === true} onPick={() => mark(true)}>
                   <Check className="size-4 flex-none" />
                   {t("Mark watched")}
                 </MarkItem>
-                <MarkItem
-                  disabled={marks.busy || watched === false}
-                  source={null}
-                  onPick={() => mark(false)}
-                >
+                <MarkItem disabled={marks.busy || watched === false} onPick={() => mark(false)}>
                   <Circle className="size-4 flex-none" />
                   {t("Mark unwatched")}
                 </MarkItem>
                 {listed && (
-                  <MarkItem disabled={false} source={null} onPick={onRemove}>
+                  <MarkItem onPick={onRemove}>
                     <span className="size-4 flex-none" />
                     {t("Remove from Continue watching")}
                   </MarkItem>

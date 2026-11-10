@@ -3,9 +3,8 @@
 // service supplies time and ids, and the store keeps the events and the state they add up to.
 // How far movies and episodes got follows the rules in ./titles.ts, one row per title, and the
 // films and episodes marked by hand those in ./marks.ts and ./episodes.ts, one row per film and
-// episode. A state is
-// one account's, by the provider's own ids: the service says which subscription's. Several
-// accounts' lists read as one name each entry's account beside its id.
+// episode. A state is one account's, by the provider's own ids: the service says which
+// subscription's. Several accounts' lists read as one name each entry's account beside its id.
 import type { RawTitleRef } from "@mrstreamer/contracts/ondemand";
 import { RECENT_LIMIT, type EpisodeMark } from "@mrstreamer/contracts/viewing";
 

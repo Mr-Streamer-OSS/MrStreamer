@@ -229,13 +229,13 @@ export function EpisodeMenu({
 
 /** A row of a mark menu, naming the subscription the mark goes to when `source` is given. */
 export function MarkItem({
-  disabled,
-  source,
+  disabled = false,
+  source = null,
   onPick,
   children,
 }: {
-  disabled: boolean;
-  source: string | null;
+  disabled?: boolean;
+  source?: string | null;
   onPick: () => void;
   children: ReactNode;
 }) {
