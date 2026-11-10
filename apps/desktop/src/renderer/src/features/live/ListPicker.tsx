@@ -1,15 +1,27 @@
 // Shared topic rail and Provider lists picker for the guide sidebar and Watch overlay. In Live
 // TV the viewer's lists end with New list, which turns into a field in its place: Enter makes the
 // list and selects it, Escape leaves it as it was.
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+//   At its foot, Changed channels (Paper A5) opens every channel the viewer chose something for,
+// hidden ones too, each with Restore, which undoes all of it. One its provider no longer lists
+// says so. A kids profile keeps no channel choices and has none.
+import { useQuery } from "@tanstack/react-query";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
+import type { ChosenChannel } from "@mrstreamer/contracts/library";
+import { RESTORE_CHANNEL } from "@mrstreamer/contracts/preferences";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { formatNumber, t } from "@mrstreamer/core/i18n";
 import { sameList, type ChannelList } from "../../app/ui-store.ts";
 import { Input } from "../../components/ui/input.tsx";
 import { SearchField } from "../../components/ui/search-field.tsx";
 import { cn } from "../../lib/utils.ts";
+import {
+  choiceFailure,
+  chosenChannelsQuery,
+  useChannelChoicesAllowed,
+  useChooseForChannel,
+} from "./ChannelTable.tsx";
 import type { NewList } from "./custom-lists.ts";
 import { PROVIDER_LISTS, type ListPickerState } from "./lists.ts";
 
@@ -272,9 +284,116 @@ export function ListPicker({
             </Fragment>
           );
         })}
+        {group === null && query.trim() === "" && <ChangedChannels />}
       </div>
     </div>
   );
+}
+
+/**
+ * Changed channels, shut until opened. A failed read says so with Retry rather than showing
+ * none; a Restore that saved nothing keeps its row and says why.
+ */
+function ChangedChannels() {
+  const allowed = useChannelChoicesAllowed();
+  const chosen = useQuery({ ...chosenChannelsQuery(), enabled: allowed });
+  const restore = useChooseForChannel();
+  const [open, setOpen] = useState(false);
+
+  if (!allowed || (chosen.isSuccess && chosen.data.length === 0) || chosen.isPending) return null;
+
+  const failed = restore.isError ? restore.variables.channel : null;
+
+  return (
+    <div className="mt-3">
+      <button
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm text-white hover:bg-white/8 focus-visible:outline-2 focus-visible:outline-white/70 focus-visible:outline-offset-[-2px]",
+          open && "bg-white/8",
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate">{t("Changed channels")}</span>
+        {chosen.isSuccess && (
+          <span className="flex-none text-xs text-muted-foreground tabular-nums">
+            {formatNumber(chosen.data.length)}
+          </span>
+        )}
+        <ChevronDown
+          className={cn("size-3.5 flex-none text-muted-foreground", !open && "-rotate-90")}
+        />
+      </button>
+      {open && chosen.isError && (
+        <p role="alert" className="flex items-baseline gap-3 px-3 pt-1 text-xs">
+          <span className="min-w-0">{t("Couldn't read your changed channels.")}</span>
+          <button
+            onClick={() => void chosen.refetch()}
+            className="flex-none text-white underline underline-offset-4"
+          >
+            {t("Retry")}
+          </button>
+        </p>
+      )}
+      {open && chosen.isSuccess && (
+        <ul aria-label={t("Changed channels")} className="flex flex-col gap-0.5 pt-0.5">
+          {chosen.data.map((each) => {
+            const key = ownedKey(each.choices.channel);
+
+            const failure =
+              failed && ownedKey(failed) === key ? choiceFailure(restore.error) : null;
+
+            return (
+              <li key={key}>
+                <div className="flex min-h-11 items-center gap-2 rounded-lg py-1 pr-1 pl-3">
+                  <span className={cn("min-w-0 flex-1", !each.channel && "opacity-60")}>
+                    <span className="block truncate text-sm">{changedName(each)}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {changedLine(each)}
+                    </span>
+                  </span>
+                  <button
+                    aria-label={t("Restore {name}", { name: changedName(each) })}
+                    disabled={restore.isPending}
+                    onClick={() =>
+                      restore.mutate({ channel: each.choices.channel, change: RESTORE_CHANNEL })
+                    }
+                    className="h-7 flex-none rounded-full px-2.5 text-[0.8125rem] font-medium text-white hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white/70 disabled:opacity-60"
+                  >
+                    {t("Restore")}
+                  </button>
+                </div>
+                {failure && (
+                  <p role="alert" className="px-3 pb-1 text-xs text-destructive">
+                    {failure.text}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** A changed channel by the name it shows, else the one the viewer gave it, else its id. */
+function changedName({ choices, channel }: ChosenChannel): string {
+  return channel?.title ?? choices.name ?? choices.channel.id;
+}
+
+/** What the viewer changed of it: "NPO 1 HD · Hidden · 2 fallback channels", or Not listed now. */
+function changedLine({ choices, channel }: ChosenChannel): string {
+  if (!channel) return t("Not listed now");
+
+  return [
+    channel.provided?.title,
+    choices.hidden && t("Hidden"),
+    choices.fallbacks && t("{count} fallback channels", { count: choices.fallbacks.length }),
+    (choices.audio || choices.subtitles) && t("Tracks kept"),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** A stable key for a list. */

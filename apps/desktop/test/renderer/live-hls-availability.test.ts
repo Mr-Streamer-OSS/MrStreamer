@@ -21,6 +21,7 @@ vi.mock("hls.js", async (original) => {
 });
 
 const channel = (id: string): LiveChannel => ({
+  choices: {},
   subscriptionId: SUBSCRIPTION,
   id,
   name: id,

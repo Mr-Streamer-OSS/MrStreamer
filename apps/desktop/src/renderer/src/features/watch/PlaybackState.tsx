@@ -1,3 +1,5 @@
+import { appError } from "../../lib/errors.ts";
+import { chosenChannelsQuery, useChannelChoicesAllowed } from "../live/ChannelTable.tsx";
 // What the picture area says when there is no picture: idle, tuning, reconnecting or failed. A
 // failure says what went wrong, what was observed of it in a small line, and offers what can help
 // (see problems.ts for the words): Retry opens the same channel again in the quality it had,
@@ -11,18 +13,33 @@
 // it is reached again, or another in its place.
 // A failure's message closes with its cross (CloseMessage.tsx). The picture area then says
 // nothing; Watch and R still try the channel again.
+//   A channel the viewer named fallback channels for (Paper A5) plays the first one not tried
+// yet in its place when it fails for a reason another source can help with, and says which and
+// from where. A refusal or a rate limit stops there, as does the end of its fallbacks, which then
+// says that none of them played. Only the fallbacks of the channel the viewer chose count, never
+// a fallback's own. The run ends once the viewer plays anything else.
+import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { AppError } from "@mrstreamer/contracts/errors";
+import { canFallBack, fallbackAfter, type LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { openSubscription } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { outputs, useOutput, where } from "../../player/output.ts";
 import { qualityName } from "../../lib/quality.ts";
-import { subscriptionName, useChooseQuality, useSubscriptions } from "../../lib/queries.ts";
+import {
+  queries,
+  subscriptionName,
+  useChooseQuality,
+  useSubscriptionNames,
+  useSubscriptions,
+} from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
-import { player, receiverState, usePlayer } from "../../player/player.ts";
+import { player, receiverState, usePlayer, type PlaybackProblem } from "../../player/player.ts";
+import { flashNote } from "./flash-state.ts";
 import { CloseMessage, useClosed } from "./CloseMessage.tsx";
 import { PlayHere, ReceiverLine } from "./Output.tsx";
 import {
@@ -148,6 +165,7 @@ export function PlaybackState({
 }) {
   const phase = usePlayer((state) => state.phase);
   const trouble = useTrouble(channel);
+  const fallback = useFallback(channel);
   const output = useOutput((state) => state.status.output);
   const connectingFrom = useOutput((state) => state.connectingFrom);
   const closed = useClosed(phase.kind === "failed" ? phase : null);
@@ -295,12 +313,149 @@ export function PlaybackState({
         </p>
       )}
       {message.evidence && <Evidence>{message.evidence}</Evidence>}
+      {fallback && <Evidence>{fallback}</Evidence>}
       {message.actions && (
         <div className="pointer-events-auto mt-7 flex items-center gap-3">{message.actions}</div>
       )}
       {message.failure && <CloseMessage failure={message.failure} />}
     </div>
   );
+}
+
+/** A run of fallback channels: the channel the viewer chose, the one playing in its place, and those tried. */
+interface FallingBack {
+  readonly chosen: LiveChannel;
+  readonly playing: LiveChannel;
+  readonly tried: readonly OwnedId[];
+}
+
+/**
+ * Plays the next fallback channel when the one playing fails, as the channel the viewer chose
+ * names them now. Answers what the picture area says of the run: which fallback plays instead and
+ * from where while it tunes or fails, or that none played; null outside a run. A fallback that
+ * can't be read now isn't played: the failure stays, with what it offers.
+ */
+function useFallback(channel: LiveChannel): string | null {
+  const client = useQueryClient();
+  const allowed = useChannelChoicesAllowed();
+  const output = useOutput((state) => state.status.output);
+  const phase = usePlayer((state) => state.phase);
+  const nameOf = useSubscriptionNames();
+  const [run, setRun] = useState<FallingBack | null>(null);
+  const current = run && sameOwned(run.playing, channel) ? run : null;
+
+  useEffect(() => {
+    if (run && !current) setRun(null);
+  }, [run, current]);
+
+  useEffect(() => {
+    if (!allowed || phase.kind !== "failed" || output.kind !== "local") return;
+    const error = problemError(phase.problem);
+
+    if (!error || !canFallBack(error)) return;
+
+    const chosen =
+      current?.chosen ?? client.getQueryData(queries.channel(channel).queryKey) ?? channel;
+
+    const tried = [...(current?.tried ?? []), ownedId(channel)];
+
+    let mine = true;
+
+    void (async () => {
+      let latest: LiveChannel;
+
+      try {
+        latest = await client.fetchQuery(queries.channel(chosen));
+      } catch (cause) {
+        if (appError(cause).kind !== "channel-not-found") throw cause;
+        const saved = await client.fetchQuery(chosenChannelsQuery());
+        const choices = saved.find((entry) => sameOwned(entry.choices.channel, chosen))?.choices;
+        latest = { ...chosen, choices: choices ?? {} };
+      }
+
+      let next = fallbackAfter(latest, error, tried);
+
+      // Search results may omit choices. Only the admitted channel read decides there are none.
+      if (!current && !next) return;
+
+      let found: LiveChannel | null = null;
+
+      while (next && mine && outputs.status().output.kind === "local") {
+        try {
+          found = await client.fetchQuery(queries.channel(next));
+          break;
+        } catch (cause) {
+          if (appError(cause).kind !== "channel-not-found") throw cause;
+          tried.push(next);
+          next = fallbackAfter(latest, error, tried);
+        }
+      }
+
+      if (!mine || outputs.status().output.kind !== "local" || player.state().phase !== phase)
+        return;
+
+      if (!found) {
+        setRun({ chosen: latest, playing: channel, tried });
+
+        return;
+      }
+
+      setRun({ chosen: latest, playing: found, tried: [...tried, ownedId(found)] });
+      flashNote(
+        t("{channel} didn't play. {fallback} from {subscription} plays instead.", {
+          channel: latest.title,
+          fallback: found.title,
+          subscription: nameOf(found.subscriptionId) ?? "",
+        }),
+      );
+      player.play(found);
+    })().catch(() => {
+      if (mine) flashNote(t("Couldn't read your changed channels."), true);
+    });
+
+    return () => {
+      mine = false;
+    };
+    // Once per failure: the phase of each is its own.
+  }, [phase, output.kind, allowed]);
+
+  if (output.kind !== "local") return null;
+
+  if (!current || phase.kind === "playing") return null;
+
+  if (phase.kind === "failed") {
+    const error = problemError(phase.problem);
+
+    // Until the next one starts, the failure stands as it is.
+    return error && fallbackAfter(current.chosen, error, current.tried)
+      ? null
+      : t("{channel} and its fallback channels didn't play.", { channel: current.chosen.title });
+  }
+
+  if (sameOwned(current.chosen, current.playing)) return null;
+
+  return t("{channel} didn't play. Its fallback from {subscription} plays instead.", {
+    channel: current.chosen.title,
+    subscription: nameOf(current.playing.subscriptionId) ?? "",
+  });
+}
+
+/**
+ * A failure as `fallbackAfter` reads it; null for a receiver's, which another channel can't help.
+ * The status is all the player keeps of a stream the provider didn't deliver.
+ */
+function problemError(problem: PlaybackProblem): AppError | null {
+  switch (problem.kind) {
+    case "app":
+      return problem.error;
+    case "receiver":
+      return null;
+    case "network":
+    case "unsupported":
+      return { kind: "stream", failure: { kind: problem.kind, detail: "" } };
+    default:
+      return { kind: "stream", failure: problem };
+  }
 }
 
 /**

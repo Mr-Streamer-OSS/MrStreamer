@@ -1,3 +1,4 @@
+import type { TrackChoice } from "@mrstreamer/contracts/preferences";
 import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import {
   paneStreamLimit,
@@ -413,6 +414,7 @@ interface LiveSession extends SessionBase {
   audio: number | null;
   /** Without a chosen track, the language whose sound plays when the channel has it. */
   readonly audioLanguage: string | null;
+  readonly savedAudio?: TrackChoice | null;
   /** The tracks the stream carries, once it has been inspected. */
   layout: StreamLayout | null;
   /** The sound track the stream plays, by PID, once the delivery is planned. */
@@ -689,6 +691,7 @@ export class Playback extends Context.Service<
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly savedAudio?: TrackChoice | null;
       },
     ): Effect.Effect<StreamSession, Failed | PaneRefusal>;
     /** Cancel and close this exact request/channel, optionally requiring its exact session. */
@@ -737,6 +740,7 @@ export class Playback extends Context.Service<
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly savedAudio?: TrackChoice | null;
         readonly preview?: boolean;
         readonly turn?: number | undefined;
         readonly owner?: ActiveProfile | undefined;
@@ -835,6 +839,7 @@ export class Playback extends Context.Service<
         readonly variants?: readonly string[];
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly savedAudio?: TrackChoice | null;
         readonly turn?: number | undefined;
         readonly owner?: ActiveProfile | undefined;
       },
@@ -1231,8 +1236,8 @@ function make(deps: PlaybackDeps) {
           ? cleanStart(read, createCleanStart(video.pid, video.codec))
           : read;
 
-      // The track asked for, else the sound in the viewer's language, else the channel's first.
-      const chosen = liveAudio(layout, session.audio, session.audioLanguage);
+      // Explicit sound, saved sound in its language, profile language, then the channel's first.
+      const chosen = liveAudio(layout, session.audio, session.audioLanguage, session.savedAudio);
       session.playing = chosen?.pid ?? null;
 
       const conversion = layout
@@ -1420,7 +1425,13 @@ function make(deps: PlaybackDeps) {
 
           session.delivered = { ...session.delivered, variantId: variant.id };
           const layout = input.firstLayout;
-          const chosen = liveAudio(layout, session.audio, session.audioLanguage);
+
+          const chosen = liveAudio(
+            layout,
+            session.audio,
+            session.audioLanguage,
+            session.savedAudio,
+          );
 
           const plan = planConversion(
             layout,
@@ -1604,7 +1615,7 @@ function make(deps: PlaybackDeps) {
       signal: AbortSignal,
     ): AsyncGenerator<Uint8Array> {
       const first = input.firstLayout;
-      const initial = liveAudio(first, session.audio, session.audioLanguage);
+      const initial = liveAudio(first, session.audio, session.audioLanguage, session.savedAudio);
       const position = initial ? first.audio.indexOf(initial) : 0;
       const language = languageCode(initial?.language);
 
@@ -2737,6 +2748,7 @@ function make(deps: PlaybackDeps) {
         stream,
         audio: session.audio,
         audioLanguage: session.audioLanguage,
+        savedAudio: session.savedAudio ?? null,
         repair: session.repair,
         made: (run) => ({
           segments: `${base}/hls/${session.token}/${run}/%d.ts`,
@@ -4027,6 +4039,7 @@ function make(deps: PlaybackDeps) {
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly savedAudio?: TrackChoice | null;
         readonly turn?: number | undefined;
         readonly owner?: ActiveProfile | undefined;
         /** A capture of the channel the session will read, as `readingOf` found. */
@@ -4147,6 +4160,7 @@ function make(deps: PlaybackDeps) {
           repair: options.repair ?? false,
           audio: options.audio ?? null,
           audioLanguage: options.audioLanguage ?? null,
+          savedAudio: options.savedAudio ?? null,
           layout: null,
           playing: null,
           captions: [],
@@ -4724,6 +4738,7 @@ function make(deps: PlaybackDeps) {
           readonly repair?: boolean;
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
+          readonly savedAudio?: TrackChoice | null;
         } = {},
       ) =>
         Effect.suspend(() => {
@@ -4893,6 +4908,7 @@ function make(deps: PlaybackDeps) {
           readonly repair?: boolean;
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
+          readonly savedAudio?: TrackChoice | null;
           readonly preview?: boolean;
           readonly turn?: number | undefined;
           readonly owner?: ActiveProfile | undefined;
@@ -4967,6 +4983,7 @@ function make(deps: PlaybackDeps) {
           readonly variants?: readonly string[];
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
+          readonly savedAudio?: TrackChoice | null;
           readonly turn?: number | undefined;
           readonly owner?: ActiveProfile | undefined;
         } = {},

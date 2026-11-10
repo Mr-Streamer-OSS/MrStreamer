@@ -7,6 +7,7 @@ import { ipc, SUBSCRIPTION } from "./support.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ChannelTracks, SubtitleTrack } from "@mrstreamer/contracts/playback";
+import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { player, rememberSubtitles } from "../../src/renderer/src/player/player.ts";
 import { addTextCue, subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 
@@ -53,10 +54,14 @@ afterEach(() => {
 });
 
 /** Plays `id` until its picture moves and its tracks are read. */
-async function playing(id: string, tracks: ChannelTracks): Promise<void> {
+async function playing(
+  id: string,
+  tracks: ChannelTracks,
+  choices: NonNullable<LiveChannel["choices"]> = {},
+): Promise<void> {
   const opened = ipc.hold("playback.open");
   const listed = ipc.hold("playback.tracks");
-  player.play(channel(id));
+  player.play({ ...channel(id), choices });
   await vi.waitFor(() =>
     expect(ipc.argsOf("playback.open").at(-1)).toMatchObject({
       channel: { subscriptionId: SUBSCRIPTION, id },
@@ -137,4 +142,104 @@ describe("picking subtitles", () => {
       { subtitleLanguage: "off" },
     ]);
   });
+});
+
+describe("remembered channel subtitles", () => {
+  it.each(["off", { id: 999, language: "nl", page: 1 }] as const)(
+    "applies %j instead of the profile language without saving a new preference",
+    async (subtitles) => {
+      ipc.prefer({ subtitleLanguage: subtitles === "off" ? "nl" : "off" });
+      await playing("a", { ...tracksOfA, audio: [tracksOfA.audio[0]!] }, { subtitles });
+      await vi.waitFor(() =>
+        expect(player.state().subtitle?.id ?? null).toBe(subtitles === "off" ? null : 301),
+      );
+      expect(ipc.argsOf("preferences.update")).toEqual([]);
+      expect(ipc.argsOf("library.chooseForChannel")).toEqual([]);
+    },
+  );
+});
+
+it("discards a late saved subtitle list when profiles change", async () => {
+  const old = { id: "default", revision: 1 };
+  selectProfileOwner(old);
+  const opened = ipc.hold("playback.open");
+  const listed = ipc.hold("playback.tracks");
+  player.play({ ...channel("a"), choices: { subtitles: { id: 301, language: "nl", page: 1 } } });
+  await vi.waitFor(() => expect(ipc.argsOf("playback.open")).toHaveLength(1));
+  opened.resolve({
+    sessionId: "a",
+    channel: { subscriptionId: SUBSCRIPTION, id: "a" },
+    url: "http://127.0.0.1/stream/a",
+    format: "hls",
+  });
+  await vi.waitFor(() => expect(player.element.src).toContain("/stream/a"));
+  player.element.currentTime += 1;
+  await vi.advanceTimersByTimeAsync(1000);
+  await vi.waitFor(() => expect(ipc.argsOf("playback.tracks")).toHaveLength(1));
+  player.clearForProfile();
+  selectProfileOwner({ id: "other", revision: 2 });
+  listed.resolve(tracksOfA);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(player.state()).toMatchObject({ channel: null, subtitle: null, tracks: null });
+  await playing("b", tracksOfA);
+  expect(player.state().subtitle).toBeNull();
+  expect(ipc.argsOf("preferences.update")).toEqual([]);
+});
+
+it("keeps a pick from a menu already open when profile metadata arrives", async () => {
+  const { QueryClient } = await import("@tanstack/react-query");
+  const { act, createElement } = await import("react");
+  const { queryView } = await import("./mount.ts");
+  const { TrackMenus } = await import("../../src/renderer/src/features/watch/TrackMenus.tsx");
+  const { syncProfiles } = await import("../../src/renderer/src/features/profiles/profiles.ts");
+  const client = new QueryClient();
+  selectProfileOwner({ id: "default", revision: 1 });
+  const stopProfiles = syncProfiles(client);
+  const pending = ipc.hold("profiles.list");
+
+  const profiles = client.fetchQuery({
+    queryKey: ["profiles", "list"],
+    queryFn: () =>
+      import("../../src/renderer/src/lib/ipc.ts").then(({ call }) => call("profiles.list")),
+  });
+
+  await playing("a", tracksOfA);
+  const view = queryView(client);
+
+  try {
+    await view.render(
+      createElement(TrackMenus, {
+        audio: tracksOfA.audio,
+        audioId: 201,
+        subtitles: [],
+        subtitle: null,
+        open: "sound",
+        onOpenChange: () => {},
+        onAudio: (id) => player.setAudio(id),
+        onSubtitle: () => {},
+      }),
+    );
+    await act(async () => {
+      pending.resolve([{ id: "default", name: "Default", deleting: false }]);
+      await profiles;
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    await act(async () => {
+      const choice = [...document.querySelectorAll("button")].find(
+        (button) => button.textContent === "Nederlands",
+      );
+
+      expect(choice).toBeDefined();
+      choice!.click();
+    });
+    expect(ipc.argsOf("library.chooseForChannel")).toEqual([
+      {
+        channel: { subscriptionId: SUBSCRIPTION, id: "a" },
+        change: { audio: { id: 202, language: "nl" } },
+      },
+    ]);
+  } finally {
+    stopProfiles();
+    view.unmount();
+  }
 });

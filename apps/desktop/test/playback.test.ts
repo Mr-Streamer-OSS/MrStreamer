@@ -470,6 +470,55 @@ describe("playback", () => {
     await playback.dispose();
   });
 
+  it.each([
+    [{ id: 0x101, language: "nl" }, "en", 0x102],
+    [{ id: 999, language: "de" }, "nl", 0x102],
+    [{ id: 0x101, language: null }, "nl", 0x102],
+  ] as const)(
+    "restores saved sound %j before independent profile language %s",
+    async (savedAudio, audioLanguage, expected) => {
+      const { provider, playback } = await connectedPlayback();
+
+      try {
+        const session = await playback.open(
+          channelNamed(provider, "TEST | Subtitles and two sound tracks"),
+          LINUX,
+          { savedAudio, audioLanguage },
+        );
+
+        await (await fetch(session.url)).arrayBuffer();
+        expect(await playback.tracks(session.sessionId)).toMatchObject({ playing: expected });
+      } finally {
+        await playback.dispose();
+      }
+    },
+  );
+
+  it.each([
+    [{ id: 0x101, language: "nl" }, "en"],
+    [{ id: 999, language: "de" }, "nl"],
+  ] as const)(
+    "restores receiver sound %j before profile language %s",
+    async (savedAudio, audioLanguage) => {
+      const { provider, playback, subscriptionId } = await connectedPlayback({ ffmpeg: true });
+
+      try {
+        const session = await playback.openReceiver(
+          { subscriptionId, id: channelNamed(provider, "TEST | Subtitles and two sound tracks") },
+          { address: "127.0.0.1", decoders: LINUX },
+          { savedAudio, audioLanguage },
+        );
+
+        const response = await fetch(session.url);
+        expect(response.status).toBe(200);
+        await response.text();
+        expect(await playback.tracks(session.sessionId)).toMatchObject({ playing: 0x102 });
+      } finally {
+        await playback.dispose();
+      }
+    },
+  );
+
   it("names the formats of a stream it cannot convert", async () => {
     const { provider, playback } = await connectedPlayback({ ffmpeg: false });
 

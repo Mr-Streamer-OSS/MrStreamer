@@ -21,12 +21,14 @@ import type {
   RemotePlayingTitle,
   RemoteState,
 } from "@mrstreamer/contracts/output";
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { App } from "../../src/renderer/src/app/App.tsx";
 import { resetForAccount, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 import { movieNow, playTitle } from "../../src/renderer/src/lib/titles.ts";
+import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
@@ -545,4 +547,36 @@ describe("what a receiver plays as the window opens, once the viewer went on", (
       { channel: { subscriptionId: SUBSCRIPTION, id: "b" } },
     ]);
   });
+});
+
+it("leaves saved receiver sound matching to main and sends the independent profile language", async () => {
+  selectProfileOwner({ id: "default", revision: 1 });
+  await emit(connected());
+  ipc.prefer({ audioLanguage: "en" });
+  await act(async () =>
+    player.play({ ...channel("a"), choices: { audio: { id: 202, language: "nl" } } }),
+  );
+  await vi.waitFor(() =>
+    expect(ipc.argsOf("output.playChannel").at(-1)).toMatchObject({
+      audioLanguage: "en",
+    }),
+  );
+  expect(ipc.argsOf("output.playChannel").at(-1)).not.toHaveProperty("audio");
+  expect(ipc.argsOf("preferences.update")).toEqual([]);
+});
+
+it("does not send saved receiver sound after the opening profile changes during its preference read", async () => {
+  selectProfileOwner({ id: "default", revision: 1 });
+  await emit(connected());
+  const preferences = ipc.hold("preferences.get");
+  await act(async () =>
+    player.play({ ...channel("a"), choices: { audio: { id: 202, language: "nl" } } }),
+  );
+  await vi.waitFor(() => expect(ipc.argsOf("preferences.get")).toHaveLength(1));
+  selectProfileOwner({ id: "other", revision: 2 });
+  await act(async () =>
+    preferences.resolve(ipc.snapshot({ ...defaultPreferences, audioLanguage: "en" })),
+  );
+  await wait();
+  expect(ipc.argsOf("output.playChannel")).toEqual([]);
 });

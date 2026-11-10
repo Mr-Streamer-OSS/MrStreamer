@@ -86,6 +86,8 @@ import {
 } from "./playback.ts";
 import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
+import { ChannelChoicesChange } from "./preferences.ts";
+import type { ChosenChannel } from "./library.ts";
 import {
   ActiveProfileSchema,
   KidsProfilePolicySchema,
@@ -213,6 +215,10 @@ export const ipcInputs = {
   "library.channel": () => type({ channel: owned() }),
   /** Fetches one subscription's channels again. */
   "library.refresh": () => type({ subscriptionId: "string > 0" }),
+  /** The viewer's channel choices with their channels, to see and undo them. */
+  "library.chosenChannels": none,
+  /** Changes what the viewer chose for one channel; `RESTORE_CHANNEL` undoes all of it. */
+  "library.chooseForChannel": () => type({ channel: owned(), change: ChannelChoicesChange() }),
   "guide.listings": () => type({ channels: owned().array() }),
   /**
    * A channel's programmes over [from, until), at most the longest day (`GUIDE_DAY_MS`), as `GUIDE_SCHEDULE`
@@ -815,6 +821,9 @@ export interface IpcOutputs {
   "library.searchGroups": LiveSearchGroups;
   "library.channel": LiveChannel;
   "library.refresh": CatalogueStatus;
+  "library.chosenChannels": readonly ChosenChannel[];
+  /** The channel as it shows after the change; null for one its provider no longer lists. */
+  "library.chooseForChannel": LiveChannel | null;
   /** Now and next per channel, by its `ownedKey`, for the channels the guide covers. */
   "guide.listings": Readonly<Record<string, Listing>>;
   /** The channel's programmes over the stretch asked for, as `GUIDE_SCHEDULE` says, in time order. */

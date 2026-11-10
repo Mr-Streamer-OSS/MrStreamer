@@ -15,6 +15,9 @@ export const de: Translation = {
   "Kids policy: enter the correct PIN.": "Kinderregeln: die richtige PIN eingeben.",
   "Kids policy: this content or action is not approved.":
     "Kinderregeln: Dieser Inhalt oder diese Aktion ist nicht freigegeben.",
+  "A channel can't be its own fallback.": "Ein Sender kann nicht sein eigener Ersatz sein.",
+  "This channel can't keep more fallback channels, counting those you can't see now.":
+    "Dieser Sender kann keine weiteren Ersatzsender behalten, auch die gerade nicht sichtbaren zählen mit.",
   "Kids · allowed titles only": "Kinder · nur freigegebene Titel",
   "Manage profiles": "Profile verwalten",
   PIN: "PIN",
@@ -1892,4 +1895,38 @@ export const de: Translation = {
   "Couldn't close {channel}. Try again.": "{channel} schließen fehlgeschlagen. Versuch es erneut.",
   "Couldn't return to single view. Try again.":
     "Zurück zur Einzelansicht fehlgeschlagen. Versuch es erneut.",
+  "Add fallback channel": "Ersatzsender hinzufügen",
+  "Changed channels": "Geänderte Sender",
+  "Channel options": "Senderoptionen",
+  "Couldn't read your changed channels.": "Deine geänderten Sender konnten nicht gelesen werden.",
+  "Couldn't save. Nothing changed.": "Speichern fehlgeschlagen. Nichts wurde geändert.",
+  "Couldn't search channels.": "Sendersuche fehlgeschlagen.",
+  "Find a channel": "Sender suchen",
+  "Find a fallback channel": "Ersatzsender suchen",
+  Forget: "Vergessen",
+  "From {subscription}: {channel}": "Von {subscription}: {channel}",
+  Hidden: "Ausgeblendet",
+  "Hide from lists": "In Listen ausblenden",
+  "If it doesn't play, try": "Wenn er nicht läuft, versuchen",
+  "No channels match.": "Keine passenden Sender.",
+  "Not kept for this channel": "Für diesen Sender nicht gemerkt",
+  Number: "Nummer",
+  "Options for {name}": "Optionen für {name}",
+  "Remembered here: {tracks}": "Hier gemerkt: {tracks}",
+  "Restore channel": "Sender wiederherstellen",
+  "Restore {name}": "{name} wiederherstellen",
+  "That channel isn't in your lists now.": "Dieser Sender ist gerade nicht in deinen Listen.",
+  "The sound kept for this channel isn't here now.":
+    "Der für diesen Sender gemerkte Ton ist gerade nicht da.",
+  "The subtitles kept for this channel aren't here now.":
+    "Die für diesen Sender gemerkten Untertitel sind gerade nicht da.",
+  "This channel": "Dieser Sender",
+  "Tracks kept": "Spuren gemerkt",
+  "{channel} and its fallback channels didn't play.":
+    "{channel} und seine Ersatzsender liefen nicht.",
+  "{channel} didn't play. Its fallback from {subscription} plays instead.":
+    "{channel} lief nicht. Sein Ersatzsender von {subscription} läuft stattdessen.",
+  "{channel} didn't play. {fallback} from {subscription} plays instead.":
+    "{channel} lief nicht. {fallback} von {subscription} läuft stattdessen.",
+  "{count} fallback channels": { one: "{count} Ersatzsender", other: "{count} Ersatzsender" },
 };

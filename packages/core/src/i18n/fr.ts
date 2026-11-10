@@ -15,6 +15,10 @@ export const fr: Translation = {
   "Kids policy: enter the correct PIN.": "Restrictions enfants : saisissez le bon code PIN.",
   "Kids policy: this content or action is not approved.":
     "Restrictions enfants : ce contenu ou cette action ne sont pas autorisés.",
+  "A channel can't be its own fallback.":
+    "Une chaîne ne peut pas être sa propre chaîne de secours.",
+  "This channel can't keep more fallback channels, counting those you can't see now.":
+    "Cette chaîne ne peut pas garder plus de chaînes de secours, y compris celles que vous ne voyez pas maintenant.",
   "Kids · allowed titles only": "Enfants · titres autorisés uniquement",
   "Manage profiles": "Gérer les profils",
   PIN: "Code PIN",
@@ -1971,4 +1975,41 @@ export const fr: Translation = {
   "{channel} has sound": "{channel} a le son",
   "Couldn't close {channel}. Try again.": "Impossible de fermer {channel}. Réessayez.",
   "Couldn't return to single view. Try again.": "Impossible de revenir à la vue unique. Réessayez.",
+  "Add fallback channel": "Ajouter une chaîne de secours",
+  "Changed channels": "Chaînes modifiées",
+  "Channel options": "Options de la chaîne",
+  "Couldn't read your changed channels.": "Impossible de lire vos chaînes modifiées.",
+  "Couldn't save. Nothing changed.": "Impossible d’enregistrer. Rien n’a changé.",
+  "Couldn't search channels.": "Impossible de rechercher les chaînes.",
+  "Find a channel": "Rechercher une chaîne",
+  "Find a fallback channel": "Rechercher une chaîne de secours",
+  Forget: "Oublier",
+  "From {subscription}: {channel}": "De {subscription} : {channel}",
+  Hidden: "Masquée",
+  "Hide from lists": "Masquer des listes",
+  "If it doesn't play, try": "Si elle ne démarre pas, essayer",
+  "No channels match.": "Aucune chaîne ne correspond.",
+  "Not kept for this channel": "Non retenu pour cette chaîne",
+  Number: "Numéro",
+  "Options for {name}": "Options de {name}",
+  "Remembered here: {tracks}": "Retenu ici : {tracks}",
+  "Restore channel": "Rétablir la chaîne",
+  "Restore {name}": "Rétablir {name}",
+  "That channel isn't in your lists now.": "Cette chaîne n’est pas dans vos listes pour le moment.",
+  "The sound kept for this channel isn't here now.":
+    "Le son retenu pour cette chaîne n’est pas disponible pour le moment.",
+  "The subtitles kept for this channel aren't here now.":
+    "Les sous-titres retenus pour cette chaîne ne sont pas disponibles pour le moment.",
+  "This channel": "Cette chaîne",
+  "Tracks kept": "Pistes retenues",
+  "{channel} and its fallback channels didn't play.":
+    "{channel} et ses chaînes de secours n’ont pas démarré.",
+  "{channel} didn't play. Its fallback from {subscription} plays instead.":
+    "{channel} n’a pas démarré. Sa chaîne de secours de {subscription} la remplace.",
+  "{channel} didn't play. {fallback} from {subscription} plays instead.":
+    "{channel} n’a pas démarré. {fallback} de {subscription} la remplace.",
+  "{count} fallback channels": {
+    one: "{count} chaîne de secours",
+    other: "{count} chaînes de secours",
+  },
 };

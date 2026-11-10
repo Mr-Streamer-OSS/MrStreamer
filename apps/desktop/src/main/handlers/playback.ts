@@ -82,6 +82,7 @@ export function playbackHandlers({
             repair: input.repair ?? false,
             audio: input.audio ?? null,
             audioLanguage: input.audioLanguage ?? null,
+            savedAudio: input.audio === undefined ? (channel.choices?.audio ?? null) : null,
           });
         }),
       ),
@@ -268,6 +269,7 @@ export function playbackHandlers({
                 repair: repair ?? false,
                 audio: audio ?? null,
                 audioLanguage: audioLanguage ?? null,
+                savedAudio: audio === undefined ? (channel.choices?.audio ?? null) : null,
                 preview: preview ?? false,
                 turn,
               });

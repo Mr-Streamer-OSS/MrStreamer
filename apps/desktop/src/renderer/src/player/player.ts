@@ -67,6 +67,7 @@ import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
 import {
   DEFAULT_SUBTITLE_LOOK,
   ORIGINAL_SOUND,
+  rememberedTrack,
   type Preferences,
 } from "@mrstreamer/contracts/preferences";
 import type {
@@ -431,6 +432,8 @@ function createLiveController(video: HTMLVideoElement) {
 
   /** Explicit Off suppresses later language autoselection on this channel. */
   let subtitlesOff = false;
+  let manualSubtitles = false;
+  let manualAudio = false;
 
   /** Time played across streams of this channel, including reconnects. */
   let channelPlayed = 0;
@@ -997,7 +1000,7 @@ function createLiveController(video: HTMLVideoElement) {
       const { audioId } = store.getState();
       const preferred = (await readPreferences().catch(() => null))?.audioLanguage;
 
-      if (mine !== selection) return;
+      if (mine !== selection || !currentProfile(owner)) return;
       observation.remote();
 
       const media = await call("output.playChannel", {
@@ -1313,6 +1316,8 @@ function createLiveController(video: HTMLVideoElement) {
     declaredTracks = null;
     provenSubtitles.clear();
     subtitlesOff = false;
+    manualSubtitles = false;
+    manualAudio = false;
     channelPlayed = 0;
     tracksRevision++;
     recentSubtitlePackets = [];
@@ -1425,17 +1430,59 @@ function createLiveController(video: HTMLVideoElement) {
     const chosen = () =>
       subtitlesOff || store.getState().subtitle !== null || lastSubtitle !== null;
 
-    const wanted = (await readPreferences().catch(() => null))?.subtitleLanguage ?? null;
+    const channel = store.getState().channel;
+    const owner = selectedOwner;
 
-    if (mine !== selection || revision !== tracksRevision) return;
+    // Guide Search supplies catalogue channels without the profile's saved choices.
+    const [preferences, kept] = await Promise.all([
+      readPreferences().catch(() => null),
+      channel && channel.choices === undefined
+        ? callForProfile(owner, "library.channel", { channel: ownedId(channel) })
+            .then((latest) => latest.choices ?? {})
+            .catch(() => undefined)
+        : channel?.choices,
+    ]);
 
-    if (!chosen()) {
-      const match = channelSubtitle(
-        onReceiver ? available : { ...tracks, subtitles: proven },
-        wanted,
-      );
+    const wanted = preferences?.subtitleLanguage ?? null;
 
-      if (match) choose(match);
+    if (mine !== selection || revision !== tracksRevision || !currentProfile(owner)) return;
+
+    if (channel && channel.choices === undefined && kept) {
+      store.setState({ channel: { ...channel, choices: kept } });
+    }
+
+    const own = current?.engine.tracks;
+
+    if (own && kept?.audio && !manualAudio) {
+      const match =
+        rememberedTrack(tracks.audio, kept.audio) ??
+        tracks.audio.find((track) => track.language === preferences?.audioLanguage) ??
+        tracks.audio.find((track) => track.default) ??
+        tracks.audio[0];
+
+      if (match && store.getState().audioId !== match.id) {
+        store.setState({ audioId: match.id });
+        own.setAudio(match.id);
+      }
+    }
+
+    if (!onReceiver && !manualSubtitles && kept?.subtitles === "off") {
+      subtitlesOff = true;
+
+      if (store.getState().subtitle) choose(null);
+    } else {
+      const candidates = onReceiver ? available : { ...tracks, subtitles: proven };
+
+      const remembered =
+        !onReceiver && !manualSubtitles && kept?.subtitles && kept.subtitles !== "off"
+          ? rememberedTrack(candidates.subtitles, kept.subtitles)
+          : null;
+
+      const match = remembered ?? (!chosen() ? channelSubtitle(candidates, wanted) : null);
+
+      const selected = store.getState().subtitle;
+
+      if (match && (!selected || subtitleKey(match) !== subtitleKey(selected))) choose(match);
     }
 
     if (!onReceiver && !store.getState().subtitleAvailability && proven.length > 0) {
@@ -2057,6 +2104,7 @@ function createLiveController(video: HTMLVideoElement) {
       const retained = timeline !== null && !retainedSession?.convertedHls;
 
       if (!channel || !track || (!own && retained && admissionPending())) return;
+      manualAudio = true;
       store.setState({ audioId: id });
 
       if (track.language) {
@@ -2083,6 +2131,7 @@ function createLiveController(video: HTMLVideoElement) {
         !store.getState().tracks?.subtitles.some((each) => subtitleKey(each) === subtitleKey(track))
       )
         return;
+      manualSubtitles = true;
       subtitlesOff = track === null;
       choose(track);
       rememberSubtitles(track);

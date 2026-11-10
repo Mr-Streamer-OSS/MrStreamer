@@ -3,15 +3,38 @@
 // Off and every subtitle track, then their timing and look; C turns the last choice on and off.
 // A title playing here opens its CC panel instead (SubtitlePanel.tsx), which has the same and
 // online search.
+//   On a live channel, a track the viewer picks is also kept for that channel in their profile
+// (its channel choices), beside the language the pick remembers. A kept track the channel lacks
+// now is said at the foot of its menu; the profile's language plays and the choice stays. A kids
+// profile keeps no channel choices, so its picks set the languages only.
+import type { LocalProfile } from "@mrstreamer/contracts/profiles";
 import { Popover } from "@base-ui/react/popover";
+import { QueryClientContext } from "@tanstack/react-query";
 import { AudioLines, Captions } from "lucide-react";
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useContext,
+  useRef,
+  useSyncExternalStore,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import type { AudioTrack, SubtitleFormat, SubtitleTrack } from "@mrstreamer/contracts/playback";
+import {
+  rememberedTrack,
+  type ChannelChoices,
+  type ChannelChoicesChange,
+} from "@mrstreamer/contracts/preferences";
 import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { menuSurface } from "../../components/ui/menu.ts";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
+import { currentProfile } from "../../lib/ipc.ts";
+import { queries } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
+import { usePlayer } from "../../player/player.ts";
+import { choiceFailure, chooseForChannel, keepsChoices } from "../live/ChannelTable.tsx";
+import { profileListQuery, profileStatus, subscribeProfiles } from "../profiles/profiles.ts";
+import { flashNote } from "./flash-state.ts";
 import { SubtitleSettingRows } from "./SubtitleSettings.tsx";
 
 /** Which menu is open over the controls, so Escape closes it before anything else. */
@@ -54,6 +77,9 @@ export function TrackMenus({
   onAudio: (id: number) => void;
   onSubtitle: (track: SubtitleTrack | null) => void;
 }) {
+  const kept = useKeptTracks(subtitles);
+  const keptSubtitles = kept?.choices?.subtitles;
+
   return (
     <>
       {showSound && audio.length > 1 && (
@@ -83,6 +109,7 @@ export function TrackMenus({
             chosen={subtitle === null}
             onChoose={() => {
               onSubtitle(null);
+              kept?.keep({ subtitles: "off" });
               onOpenChange(null);
             }}
           >
@@ -100,6 +127,9 @@ export function TrackMenus({
                 note={elsewhere ? t("Here only") : chosen ? subtitleNote : null}
                 onChoose={() => {
                   onSubtitle(track);
+                  kept?.keep({
+                    subtitles: { id: track.id, language: track.language, page: track.page },
+                  });
                   onOpenChange(null);
                 }}
               >
@@ -107,6 +137,11 @@ export function TrackMenus({
               </Choice>
             );
           })}
+          {keptSubtitles &&
+            keptSubtitles !== "off" &&
+            rememberedTrack(subtitles, keptSubtitles) === null && (
+              <MenuNote>{t("The subtitles kept for this channel aren't here now.")}</MenuNote>
+            )}
           {shows !== null && subtitles.some((track) => !shows.includes(track.format)) && (
             <MenuNote>{hereOnly}</MenuNote>
           )}
@@ -144,19 +179,70 @@ export function SoundChoices({
   onDone: () => void;
 }) {
   const playing = audioId ?? audio.find((track) => track.default)?.id ?? audio[0]?.id;
+  const kept = useKeptTracks(audio);
+  const keptAudio = kept?.choices?.audio;
 
-  return audio.map((track) => (
-    <Choice
-      key={track.id}
-      chosen={track.id === playing}
-      onChoose={() => {
-        onAudio(track.id);
-        onDone();
-      }}
-    >
-      {track.label}
-    </Choice>
-  ));
+  return (
+    <>
+      {audio.map((track) => (
+        <Choice
+          key={track.id}
+          chosen={track.id === playing}
+          onChoose={() => {
+            onAudio(track.id);
+            kept?.keep({ audio: { id: track.id, language: track.language } });
+            onDone();
+          }}
+        >
+          {track.label}
+        </Choice>
+      ))}
+      {keptAudio && rememberedTrack(audio, keptAudio) === null && (
+        <MenuNote>{t("The sound kept for this channel isn't here now.")}</MenuNote>
+      )}
+    </>
+  );
+}
+
+/**
+ * The tracks kept for the live channel `tracks` are of, and `keep` to keep another pick: while
+ * they are the live player's own tracks and the profile keeps channel choices. Null for a
+ * title's tracks and in a kids profile. A pick that wasn't kept says so; it still plays.
+ */
+function useKeptTracks(tracks: readonly AudioTrack[] | readonly SubtitleTrack[]): {
+  readonly choices: Omit<ChannelChoices, "channel"> | undefined;
+  readonly keep: (change: ChannelChoicesChange) => void;
+} | null {
+  const live = usePlayer((state) => state.tracks);
+  const channel = usePlayer((state) => state.channel);
+  // Standalone title menus have no query client; live menus observe profile metadata arrivals.
+  const client = useContext(QueryClientContext);
+  const owner = useSyncExternalStore(subscribeProfiles, profileStatus).owner;
+
+  const profiles = useSyncExternalStore(
+    (notify) => client?.getQueryCache().subscribe(notify) ?? (() => {}),
+    () => client?.getQueryData<readonly LocalProfile[]>(profileListQuery().queryKey),
+  );
+
+  if (
+    !client ||
+    !channel ||
+    !(live?.audio === tracks || live?.subtitles === tracks) ||
+    !keepsChoices(profiles, owner?.id)
+  )
+    return null;
+
+  // The channel the player holds has the choices it had when it started; a change since is read.
+  const now = client.getQueryData(queries.channel(channel).queryKey) ?? channel;
+
+  return {
+    choices: now.choices,
+    keep: (change) =>
+      void chooseForChannel(client, channel, change).catch((cause: unknown) => {
+        if (owner && currentProfile(owner))
+          flashNote(`${t("Not kept for this channel")}: ${choiceFailure(cause).text}`, true);
+      }),
+  };
 }
 
 /**
