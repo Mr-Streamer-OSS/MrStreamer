@@ -183,7 +183,9 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
     );
 
   const StoredRules = type("string.json.parse").pipe(Rules);
+
   const lists = db.prepare("select id, name from personal_collections order by position, rowid");
+  const savedRules = db.prepare("select rules from collection_rules where collection_id = ?");
 
   const members = db.prepare(
     "select account, kind, title_id as titleId, name, year, adult from collection_members where collection_id = ? order by position, rowid",
@@ -193,10 +195,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
     lists.all().flatMap((raw) => {
       const row = Row.assert(raw);
 
-      const saved = db
-        .prepare("select rules from collection_rules where collection_id = ?")
-        .get(row.id);
-
+      const saved = savedRules.get(row.id);
       const rules = saved ? StoredRules(saved.rules) : undefined;
 
       // Withheld from reads and commands, and kept as stored: read as manual or by the filters
