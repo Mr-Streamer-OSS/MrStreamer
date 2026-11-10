@@ -380,15 +380,15 @@ it("keeps the same channel ID from different subscriptions separate while dedupl
   ]);
 });
 
-/** A guide that always has a continuation, page `n` listing one channel, `${prefix}n`. */
+/** A guide that always has a continuation, page `n` listing one channel, `page${n}`. */
 const endlessPages =
-  (prefix = "page") =>
+  () =>
   ({ after }: IpcInput<"guide.searchPage">): GuideSearchPage => {
     const page = after ? after.start + 1 : 1;
 
     return {
-      matches: [discoveryMatch(`${prefix}${page}`)],
-      next: { start: page, channel: `${prefix}${page}` },
+      matches: [discoveryMatch(`page${page}`)],
+      next: { start: page, channel: `page${page}` },
     };
   };
 
