@@ -1,3 +1,5 @@
+import { appError } from "../../lib/errors.ts";
+import { chosenChannelsQuery } from "../live/ChannelTable.tsx";
 // What the picture area says when there is no picture: idle, tuning, reconnecting or failed. A
 // failure says what went wrong, what was observed of it in a small line, and offers what can help
 // (see problems.ts for the words): Retry opens the same channel again in the quality it had,
@@ -335,6 +337,7 @@ interface FallingBack {
  */
 function useFallback(channel: LiveChannel): string | null {
   const client = useQueryClient();
+  const output = useOutput((state) => state.status.output);
   const phase = usePlayer((state) => state.phase);
   const nameOf = useSubscriptionNames();
   const [run, setRun] = useState<FallingBack | null>(null);
@@ -345,7 +348,7 @@ function useFallback(channel: LiveChannel): string | null {
   }, [run, current]);
 
   useEffect(() => {
-    if (phase.kind !== "failed") return;
+    if (phase.kind !== "failed" || output.kind !== "local") return;
     const error = problemError(phase.problem);
 
     if (!error) return;
@@ -354,13 +357,40 @@ function useFallback(channel: LiveChannel): string | null {
     let mine = true;
 
     void (async () => {
-      const latest = await client.fetchQuery(queries.channel(chosen));
-      const next = fallbackAfter(latest, error, tried);
+      let latest: LiveChannel;
 
-      if (!next || !mine) return;
-      const found = await client.fetchQuery(queries.channel(next));
+      try {
+        latest = await client.fetchQuery(queries.channel(chosen));
+      } catch (cause) {
+        if (appError(cause).kind !== "channel-not-found") throw cause;
+        const saved = await client.fetchQuery(chosenChannelsQuery());
+        const choices = saved.find((entry) => sameOwned(entry.choices.channel, chosen))?.choices;
+        latest = { ...chosen, choices: choices ?? {} };
+      }
 
-      if (!mine || player.state().phase !== phase) return;
+      let next = fallbackAfter(latest, error, tried);
+      let found: LiveChannel | null = null;
+
+      while (next && mine && outputs.status().output.kind === "local") {
+        try {
+          found = await client.fetchQuery(queries.channel(next));
+          break;
+        } catch (cause) {
+          if (appError(cause).kind !== "channel-not-found") throw cause;
+          tried.push(next);
+          next = fallbackAfter(latest, error, tried);
+        }
+      }
+
+      if (!mine || outputs.status().output.kind !== "local" || player.state().phase !== phase)
+        return;
+
+      if (!found) {
+        setRun({ chosen: latest, playing: channel, tried });
+
+        return;
+      }
+
       setRun({ chosen: latest, playing: found, tried: [...tried, ownedId(found)] });
       flashNote(
         t("{channel} didn't play. {fallback} from {subscription} plays instead.", {
@@ -370,13 +400,17 @@ function useFallback(channel: LiveChannel): string | null {
         }),
       );
       player.play(found);
-    })().catch(() => {});
+    })().catch(() => {
+      if (mine) flashNote(t("Couldn't read your changed channels."), true);
+    });
 
     return () => {
       mine = false;
     };
     // Once per failure: the phase of each is its own.
-  }, [phase]);
+  }, [phase, output]);
+
+  if (output.kind !== "local") return null;
 
   if (!current || phase.kind === "playing") return null;
 

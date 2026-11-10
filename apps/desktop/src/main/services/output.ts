@@ -1,3 +1,4 @@
+import type { TrackChoice } from "@mrstreamer/contracts/preferences";
 import { AdmittedSettings } from "./preferences.ts";
 import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { AdmittedViewing } from "./profiles.ts";
@@ -210,6 +211,7 @@ export class Output extends Context.Service<
         readonly variants: readonly string[];
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly savedAudio?: TrackChoice | null;
         readonly shown: Shown;
         /** The turn it was asked under (`PlaybackCoordination.begin`): it plays nothing once another began. */
         readonly turn?: number | undefined;
@@ -1065,6 +1067,7 @@ function make(deps: OutputDeps) {
           readonly variants: readonly string[];
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
+          readonly savedAudio?: TrackChoice | null;
           readonly shown: Shown;
           readonly turn?: number | undefined;
         },
@@ -1082,6 +1085,7 @@ function make(deps: OutputDeps) {
               owner: options.owner,
               audio: options.audio ?? null,
               audioLanguage: options.audioLanguage ?? null,
+              savedAudio: options.savedAudio ?? null,
               turn: options.turn,
             });
 

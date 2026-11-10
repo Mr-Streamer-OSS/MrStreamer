@@ -1,3 +1,4 @@
+import { rememberedTrack, type TrackChoice } from "@mrstreamer/contracts/preferences";
 import type { PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import type { Codec, StreamFailure } from "@mrstreamer/contracts/playback";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
@@ -20,18 +21,30 @@ export const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set(["h264", "hevc", "
 /** How much of a stream the proxy reads, at most, before deciding how to deliver it. */
 export const INSPECT_LIMIT = { bytes: 2 * 1024 * 1024, ms: 2500 };
 
-/** The requested input PID, else the remembered language, else the channel's first sound. */
+/** Explicit PID, else saved id in its language, saved language, profile language, first sound. */
 export function liveAudio(
   layout: StreamLayout | null,
   pid: number | null,
   language: string | null,
+  saved: TrackChoice | null = null,
 ) {
+  const tracks = layout?.audio ?? [];
+
+  const remembered = saved
+    ? rememberedTrack(
+        tracks.map((track) => ({
+          id: track.pid,
+          language: languageCode(track.language),
+        })),
+        saved,
+      )
+    : null;
+
   return (
-    layout?.audio.find((track) => track.pid === pid) ??
-    (language
-      ? layout?.audio.find((track) => languageCode(track.language) === language)
-      : undefined) ??
-    layout?.audio[0]
+    tracks.find((track) => track.pid === pid) ??
+    tracks.find((track) => track.pid === remembered?.id) ??
+    (language ? tracks.find((track) => languageCode(track.language) === language) : undefined) ??
+    tracks[0]
   );
 }
 

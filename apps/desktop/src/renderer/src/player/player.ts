@@ -999,7 +999,6 @@ function createLiveController(video: HTMLVideoElement) {
     try {
       const { audioId } = store.getState();
       const preferred = (await readPreferences().catch(() => null))?.audioLanguage;
-      const remembered = audioId === null ? channel.choices?.audio : undefined;
 
       if (mine !== selection || !currentProfile(owner)) return;
       observation.remote();
@@ -1009,10 +1008,8 @@ function createLiveController(video: HTMLVideoElement) {
         channel: ownedId(channel),
         name: channel.title,
         ...defined({
-          audio: audioId ?? remembered?.id,
-          audioLanguage:
-            remembered?.language ??
-            (preferred && preferred !== ORIGINAL_SOUND ? preferred : undefined),
+          audio: audioId ?? undefined,
+          audioLanguage: preferred && preferred !== ORIGINAL_SOUND ? preferred : undefined,
         }),
       });
 

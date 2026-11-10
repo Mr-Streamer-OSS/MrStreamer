@@ -1,3 +1,5 @@
+import * as Effect from "effect/Effect";
+import { AdmittedKids } from "../src/main/services/profile-policy.ts";
 import { type as arkType } from "arktype";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -833,6 +835,43 @@ describe("a viewer's channel choices", () => {
 
     return channel;
   };
+
+  it("ignores adult choices for an admitted kids viewer", async () => {
+    const { dataDir, own, library } = await connectedLibrary();
+    const alternative = (await library.channels({})).find((channel) => channel.id !== fhd)!;
+    await library.choose(own(fhd), {
+      name: "Adult name",
+      hidden: true,
+      audio: { id: 257, language: "de" },
+      fallbacks: [alternative],
+    });
+
+    const runtime = runtimeFor(
+      Library.layer({ confirmDelay: 0 }).pipe(
+        Layer.provide(Settings.layer(dataDir)),
+        Layer.provide(
+          Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+        ),
+      ),
+    );
+
+    try {
+      const service = await runtime.runPromise(Library);
+
+      const read = await runtime.runPromise(
+        service
+          .channel(own(fhd))
+          .pipe(
+            Effect.provideService(AdmittedKids, { approved: [{ kind: "channel", ...own(fhd) }] }),
+          ),
+      );
+
+      expect(read.title).toBe("Kwaliteit 1");
+      expect(read.choices).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+    }
+  });
 
   it("shows the viewer's name and number, hides from lists only, and restores the provider's", async () => {
     const { library, own, restart } = await connectedLibrary();

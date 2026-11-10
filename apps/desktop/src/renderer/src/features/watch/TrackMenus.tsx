@@ -7,6 +7,7 @@
 // (its channel choices), beside the language the pick remembers. A kept track the channel lacks
 // now is said at the foot of its menu; the profile's language plays and the choice stays. A kids
 // profile keeps no channel choices, so its picks set the languages only.
+import type { LocalProfile } from "@mrstreamer/contracts/profiles";
 import { Popover } from "@base-ui/react/popover";
 import { QueryClientContext } from "@tanstack/react-query";
 import { AudioLines, Captions } from "lucide-react";
@@ -27,6 +28,7 @@ import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { menuSurface } from "../../components/ui/menu.ts";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
+import { currentProfile } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { usePlayer } from "../../player/player.ts";
@@ -213,16 +215,20 @@ function useKeptTracks(tracks: readonly AudioTrack[] | readonly SubtitleTrack[])
 } | null {
   const live = usePlayer((state) => state.tracks);
   const channel = usePlayer((state) => state.channel);
-  // These menus also show where no query client is, as some views are mounted alone. They read
-  // its cache as they render rather than following it: a menu renders afresh each time it opens.
+  // Standalone title menus have no query client; live menus observe profile metadata arrivals.
   const client = useContext(QueryClientContext);
   const owner = useSyncExternalStore(subscribeProfiles, profileStatus).owner;
+
+  const profiles = useSyncExternalStore(
+    (notify) => client?.getQueryCache().subscribe(notify) ?? (() => {}),
+    () => client?.getQueryData<readonly LocalProfile[]>(profileListQuery().queryKey),
+  );
 
   if (
     !client ||
     !channel ||
     !(live?.audio === tracks || live?.subtitles === tracks) ||
-    !keepsChoices(client.getQueryData(profileListQuery().queryKey), owner?.id)
+    !keepsChoices(profiles, owner?.id)
   )
     return null;
 
@@ -232,9 +238,10 @@ function useKeptTracks(tracks: readonly AudioTrack[] | readonly SubtitleTrack[])
   return {
     choices: now.choices,
     keep: (change) =>
-      void chooseForChannel(client, channel, change).catch((cause: unknown) =>
-        flashNote(`${t("Not kept for this channel")}: ${choiceFailure(cause).text}`, true),
-      ),
+      void chooseForChannel(client, channel, change).catch((cause: unknown) => {
+        if (owner && currentProfile(owner))
+          flashNote(`${t("Not kept for this channel")}: ${choiceFailure(cause).text}`, true);
+      }),
   };
 }
 

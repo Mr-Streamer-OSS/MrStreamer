@@ -80,6 +80,7 @@ export function outputHandlers({
               return yield* output.playChannel(ownedId(channel), {
                 variants,
                 audio: audio ?? null,
+                savedAudio: audio === undefined ? (channel.choices?.audio ?? null) : null,
                 audioLanguage: audioLanguage ?? null,
                 shown: { name },
                 turn,

@@ -1,3 +1,4 @@
+import { profileOwner, selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 // @vitest-environment happy-dom
 // A live channel that doesn't play says what was observed of it and offers what can help. One that
 // breaks off is tried again after 1, 2, 4 and 8 seconds, and those four tries are the channel's
@@ -165,7 +166,7 @@ async function stops(why: StreamFailure | null, session: LivePlaying | null = nu
 }
 
 /** Opens Watch on `channel` with its sound on, as the viewer does: its stream is asked for. */
-async function watching(channel = vrt): Promise<void> {
+async function watching(channel = vrt): Promise<QueryClient> {
   player.setAudible(true);
   openWatch();
   await act(async () => player.play(channel));
@@ -175,6 +176,8 @@ async function watching(channel = vrt): Promise<void> {
   container = mounted.container;
   await mounted.render(createElement(WatchScreen));
   unmount = mounted.unmount;
+
+  return client;
 }
 
 /** Watch on a channel whose stream plays for `seconds`. */
@@ -205,6 +208,15 @@ function oneAtATime(): boolean {
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
+  selectProfileOwner({ id: "default", revision: 1 });
+  ipc.emit("output.changed", {
+    owner: profileOwner()!,
+    offers: [],
+    scanning: false,
+    receivers: [],
+    airplayRoutes: null,
+    output: { kind: "local" },
+  });
   sessions = 0;
   useUi.setState(useUi.getInitialState(), true);
 });
@@ -879,5 +891,134 @@ describe("a wait for the next reconnect", () => {
 
     expect(asked()).toHaveLength(1);
     expect(player.state().phase).toEqual({ kind: "idle" });
+  });
+});
+
+describe("named channel fallbacks in Watch", () => {
+  const chosen = {
+    ...vrt,
+    choices: {
+      fallbacks: [
+        { subscriptionId: SUBSCRIPTION, id: "een" },
+        { subscriptionId: SUBSCRIPTION, id: "third" },
+      ],
+    },
+  };
+
+  const third = { ...een, id: "third", title: "Third" };
+
+  it("tries only the original channel's named alternatives, then reports exhaustion", async () => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(chosen);
+    client.setQueryData(queries.channel(chosen).queryKey, chosen);
+    client.setQueryData(queries.channel(een).queryKey, {
+      ...een,
+      choices: { fallbacks: [{ subscriptionId: SUBSCRIPTION, id: "fourth" }] },
+    });
+    client.setQueryData(queries.channel(third).queryKey, third);
+    const second = ipc.hold("playback.open");
+    await act(async () => opened.reject({ kind: "stream", failure: noStream }));
+    expect(asked().map((call) => call.channel.id)).toEqual(["vrt", "een"]);
+    expect(text()).toContain("fallback");
+    const last = ipc.hold("playback.open");
+    await act(async () => second.reject({ kind: "stream", failure: noStream }));
+    expect(asked().map((call) => call.channel.id)).toEqual(["vrt", "een", "third"]);
+    await act(async () => last.reject({ kind: "stream", failure: noStream }));
+    expect(text()).toContain("and its fallback channels didn't play");
+  });
+
+  it("still reaches saved alternatives when the original is no longer listed", async () => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(chosen);
+    client.setQueryData(queries.channel(een).queryKey, een);
+    client.setDefaultOptions({ queries: { retry: false } });
+    client.removeQueries({ queryKey: queries.channel(chosen).queryKey });
+    ipc.always("library.chosenChannels", [
+      {
+        choices: { channel: { subscriptionId: SUBSCRIPTION, id: "vrt" }, ...chosen.choices },
+        channel: null,
+      },
+    ]);
+    ipc
+      .hold("library.channel", (args) => args.channel.id === "vrt")
+      .reject({ kind: "channel-not-found", channelId: "vrt" });
+    await act(async () => opened.reject({ kind: "channel-not-found", channelId: "vrt" }));
+    await wait(1);
+    expect(asked().map((call) => call.channel.id)).toEqual(["vrt", "een"]);
+  });
+
+  it("skips an unlisted alternative but retains retryable read failures", async () => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(chosen);
+    client.setDefaultOptions({ queries: { retry: false } });
+    client.setQueryData(queries.channel(chosen).queryKey, chosen);
+    ipc
+      .hold("library.channel", (args) => args.channel.id === "een")
+      .reject({ kind: "channel-not-found", channelId: "een" });
+    ipc
+      .hold("library.channel", (args) => args.channel.id === "third")
+      .reject({ kind: "unexpected", detail: "read failed" });
+    await act(async () => opened.reject({ kind: "stream", failure: noStream }));
+    expect(asked()).toHaveLength(1);
+    expect(text()).toContain("Couldn't read your changed channels.");
+    expect(player.state().channel?.choices).toEqual(chosen.choices);
+  });
+
+  it("does not start fallbacks for an upstream failure while output is remote", async () => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(chosen);
+    client.setQueryData(queries.channel(chosen).queryKey, chosen);
+    client.setQueryData(queries.channel(een).queryKey, een);
+    await act(async () => {
+      ipc.emit("output.changed", {
+        owner: profileOwner()!,
+        offers: [],
+        scanning: false,
+        receivers: [],
+        airplayRoutes: null,
+        output: {
+          kind: "lost",
+          receiver: { id: "tv", kind: "cast", name: "TV" },
+          failure: { kind: "unreachable" },
+        },
+      });
+      opened.reject({ kind: "stream", failure: noStream });
+    });
+    expect(asked()).toHaveLength(1);
+    expect(ipc.argsOf("output.playChannel")).toEqual([]);
+  });
+
+  it("cancels an in-flight fallback when output leaves this computer", async () => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(chosen);
+    client.setQueryData(queries.channel(chosen).queryKey, chosen);
+    const alternative = ipc.hold("library.channel", (args) => args.channel.id === "een");
+    await act(async () => opened.reject({ kind: "stream", failure: noStream }));
+    await act(async () =>
+      ipc.emit("output.changed", {
+        owner: profileOwner()!,
+        offers: [],
+        scanning: false,
+        receivers: [],
+        airplayRoutes: null,
+        output: {
+          kind: "lost",
+          receiver: { id: "tv", kind: "cast", name: "TV" },
+          failure: { kind: "unreachable" },
+        },
+      }),
+    );
+    await act(async () => alternative.resolve(een));
+    expect(asked()).toHaveLength(1);
+    expect(ipc.argsOf("output.playChannel")).toEqual([]);
+  });
+
+  it.each([401, 403, 429])("never tries an alternative after HTTP %i", async (status) => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(chosen);
+    client.setQueryData(queries.channel(chosen).queryKey, chosen);
+    client.setQueryData(queries.channel(een).queryKey, een);
+    await act(async () => opened.reject({ kind: "stream", failure: refused(status) }));
+    expect(asked()).toHaveLength(1);
   });
 });

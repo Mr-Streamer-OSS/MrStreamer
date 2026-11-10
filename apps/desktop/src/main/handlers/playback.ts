@@ -32,12 +32,13 @@ function soundFor(
   channel: LiveChannel,
   audio: number | undefined,
   audioLanguage: string | undefined,
-): { readonly audio: number | null; readonly audioLanguage: string | null } {
+) {
   const remembered = audio === undefined ? channel.choices?.audio : undefined;
 
   return {
-    audio: audio ?? remembered?.id ?? null,
-    audioLanguage: remembered?.language ?? audioLanguage ?? null,
+    audio: audio ?? null,
+    savedAudio: remembered ?? null,
+    audioLanguage: audioLanguage ?? null,
   };
 }
 

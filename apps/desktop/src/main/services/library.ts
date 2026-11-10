@@ -401,7 +401,14 @@ function make(options: LibraryOptions) {
       Effect.gen(function* () {
         const viewer = yield* viewingSettings(settings);
 
-        return ownView(yield* viewer.channelChoices, lists);
+        const policy = yield* Effect.serviceOption(AdmittedKids);
+
+        return ownView(
+          policy._tag === "Some" && policy.value.approved !== null
+            ? []
+            : yield* viewer.channelChoices,
+          lists,
+        );
       });
 
     /** Whether Live TV's lists show channels for adults. */

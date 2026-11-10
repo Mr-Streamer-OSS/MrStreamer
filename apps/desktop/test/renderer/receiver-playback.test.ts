@@ -549,7 +549,7 @@ describe("what a receiver plays as the window opens, once the viewer went on", (
   });
 });
 
-it("sends the channel's saved sound to a receiver without changing the profile language", async () => {
+it("leaves saved receiver sound matching to main and sends the independent profile language", async () => {
   selectProfileOwner({ id: "default", revision: 1 });
   await emit(connected());
   ipc.prefer({ audioLanguage: "en" });
@@ -558,10 +558,10 @@ it("sends the channel's saved sound to a receiver without changing the profile l
   );
   await vi.waitFor(() =>
     expect(ipc.argsOf("output.playChannel").at(-1)).toMatchObject({
-      audio: 202,
-      audioLanguage: "nl",
+      audioLanguage: "en",
     }),
   );
+  expect(ipc.argsOf("output.playChannel").at(-1)).not.toHaveProperty("audio");
   expect(ipc.argsOf("preferences.update")).toEqual([]);
 });
 

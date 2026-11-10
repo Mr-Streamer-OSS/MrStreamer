@@ -1,3 +1,4 @@
+import type { TrackChoice } from "@mrstreamer/contracts/preferences";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -90,6 +91,7 @@ export interface LiveReceiverSource extends ReceiverSourceBase {
   readonly stream: LiveStream;
   readonly audio: number | null;
   readonly audioLanguage: string | null;
+  readonly savedAudio?: TrackChoice | null;
   readonly repair: boolean;
   made(run: string): { readonly segments: string; readonly list: string };
   begin(active: AbortController): void;
@@ -465,7 +467,7 @@ export function liveReceiverDelivery(
         : input;
 
     // The track asked for, else the sound in the viewer's language, else the channel's first.
-    const chosen = liveAudio(layout, source.audio, source.audioLanguage);
+    const chosen = liveAudio(layout, source.audio, source.audioLanguage, source.savedAudio);
 
     if (!hls) source.started(layout, chosen?.pid ?? null);
     const decodes = (codec: Codec | "unknown") => codec !== "unknown" && source.decoders.has(codec);

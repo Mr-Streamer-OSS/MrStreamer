@@ -185,3 +185,61 @@ it("discards a late saved subtitle list when profiles change", async () => {
   expect(player.state().subtitle).toBeNull();
   expect(ipc.argsOf("preferences.update")).toEqual([]);
 });
+
+it("keeps a pick from a menu already open when profile metadata arrives", async () => {
+  const { QueryClient } = await import("@tanstack/react-query");
+  const { act, createElement } = await import("react");
+  const { queryView } = await import("./mount.ts");
+  const { TrackMenus } = await import("../../src/renderer/src/features/watch/TrackMenus.tsx");
+  const { syncProfiles } = await import("../../src/renderer/src/features/profiles/profiles.ts");
+  const client = new QueryClient();
+  selectProfileOwner({ id: "default", revision: 1 });
+  const stopProfiles = syncProfiles(client);
+  const pending = ipc.hold("profiles.list");
+
+  const profiles = client.fetchQuery({
+    queryKey: ["profiles", "list"],
+    queryFn: () =>
+      import("../../src/renderer/src/lib/ipc.ts").then(({ call }) => call("profiles.list")),
+  });
+
+  await playing("a", tracksOfA);
+  const view = queryView(client);
+
+  try {
+    await view.render(
+      createElement(TrackMenus, {
+        audio: tracksOfA.audio,
+        audioId: 201,
+        subtitles: [],
+        subtitle: null,
+        open: "sound",
+        onOpenChange: () => {},
+        onAudio: (id) => player.setAudio(id),
+        onSubtitle: () => {},
+      }),
+    );
+    await act(async () => {
+      pending.resolve([{ id: "default", name: "Default", deleting: false }]);
+      await profiles;
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    await act(async () => {
+      const choice = [...document.querySelectorAll("button")].find(
+        (button) => button.textContent === "Nederlands",
+      );
+
+      expect(choice).toBeDefined();
+      choice!.click();
+    });
+    expect(ipc.argsOf("library.chooseForChannel")).toEqual([
+      {
+        channel: { subscriptionId: SUBSCRIPTION, id: "a" },
+        change: { audio: { id: 202, language: "nl" } },
+      },
+    ]);
+  } finally {
+    stopProfiles();
+    view.unmount();
+  }
+});
