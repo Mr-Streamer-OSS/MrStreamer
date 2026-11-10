@@ -16,6 +16,8 @@ export const de: Translation = {
   "Kids policy: this content or action is not approved.":
     "Kinderregeln: Dieser Inhalt oder diese Aktion ist nicht freigegeben.",
   "A channel can't be its own fallback.": "Ein Sender kann nicht sein eigener Ersatz sein.",
+  "This channel can't keep more fallback channels, counting those you can't see now.":
+    "Dieser Sender kann keine weiteren Ersatzsender behalten, auch die gerade nicht sichtbaren zählen mit.",
   "Kids · allowed titles only": "Kinder · nur freigegebene Titel",
   "Manage profiles": "Profile verwalten",
   PIN: "PIN",

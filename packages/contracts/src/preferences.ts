@@ -172,6 +172,7 @@ export const ChannelChoicesChange = lazy(() =>
     "name?": type(`string <= ${CHANNEL_NAME_MAX}`).or("null"),
     "number?": type(`1 <= number.integer <= ${CHANNEL_NUMBER_MAX}`).or("null"),
     "hidden?": "boolean",
+    /** The fallbacks the viewer sees now, in order; saved ones they can't see now stay. */
     "fallbacks?": ownedChannel().array().atMostLength(FALLBACKS_MAX),
     "audio?": TrackChoice().or("null"),
     "subtitles?": TrackChoice().or("'off' | null"),

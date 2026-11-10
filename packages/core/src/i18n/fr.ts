@@ -17,6 +17,8 @@ export const fr: Translation = {
     "Restrictions enfants : ce contenu ou cette action ne sont pas autorisés.",
   "A channel can't be its own fallback.":
     "Une chaîne ne peut pas être sa propre chaîne de secours.",
+  "This channel can't keep more fallback channels, counting those you can't see now.":
+    "Cette chaîne ne peut pas garder plus de chaînes de secours, y compris celles que vous ne voyez pas maintenant.",
   "Kids · allowed titles only": "Enfants · titres autorisés uniquement",
   "Manage profiles": "Gérer les profils",
   PIN: "Code PIN",

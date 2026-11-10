@@ -837,7 +837,7 @@ describe("a viewer's channel choices", () => {
   it("shows the viewer's name and number, hides from lists only, and restores the provider's", async () => {
     const { library, own, restart } = await connectedLibrary();
     const before = await library.channel(own(fhd));
-    const listed = await library.channels({});
+    const lists = await library.channels({});
 
     const everything = async () =>
       library.browse({
@@ -866,7 +866,7 @@ describe("a viewer's channel choices", () => {
     await library.choose(own(fhd), { hidden: true });
     const all = await library.channels({});
 
-    expect(all).toHaveLength(listed.length - 1);
+    expect(all).toHaveLength(lists.length - 1);
     expect(all.some((channel) => channel.id === fhd)).toBe(false);
     expect(await library.channels({ query: "zebra" })).toEqual([]);
     expect(await library.channels({ query: "kwaliteit" })).toEqual([]);
@@ -898,7 +898,7 @@ describe("a viewer's channel choices", () => {
 
     expect(restored).toEqual(before);
     expect(await library.chosen()).toEqual([]);
-    expect(await library.channels({})).toEqual(listed);
+    expect(await library.channels({})).toEqual(lists);
     expect(await (await restart()).channel(own(fhd))).toEqual(before);
   });
 
@@ -1006,7 +1006,25 @@ describe("a viewer's channel choices", () => {
     expect((await listed(library.choose(own(fhd), { fallbacks: [own("4000")] }))).choices).toEqual({
       fallbacks: [own("4000")],
     });
+    await library.choose(own(fhd), { fallbacks: [own("4000"), own("1000"), own("1001")] });
     await settings.update({ adultTitles: false });
-    expect((await library.channel(own(fhd))).choices).toBeUndefined();
+    expect((await library.channel(own(fhd))).choices).toEqual({
+      fallbacks: [own("1000"), own("1001")],
+    });
+
+    // A change names the fallbacks the viewer sees; the one they can't see now stays saved.
+    await expect(
+      library.choose(own(fhd), { fallbacks: [own("1000"), own("1001"), own("1002")] }),
+    ).rejects.toMatchObject({ error: { kind: "invalid-input" } });
+    expect((await listed(library.choose(own(fhd), { fallbacks: [own("1001")] }))).choices).toEqual({
+      fallbacks: [own("1001")],
+    });
+    await settings.update({ adultTitles: true });
+    expect((await library.channel(own(fhd))).choices).toEqual({
+      fallbacks: [own("1001"), own("4000")],
+    });
+    // Undoing every choice forgets them all.
+    await library.choose(own(fhd), RESTORE_CHANNEL);
+    expect(await library.chosen()).toEqual([]);
   });
 });

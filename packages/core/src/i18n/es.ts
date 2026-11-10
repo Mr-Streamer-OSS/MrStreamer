@@ -16,6 +16,8 @@ export const es: Translation = {
   "Kids policy: this content or action is not approved.":
     "Política infantil: este contenido o acción no está aprobado.",
   "A channel can't be its own fallback.": "Un canal no puede ser su propio canal de respaldo.",
+  "This channel can't keep more fallback channels, counting those you can't see now.":
+    "Este canal no puede guardar más canales de respaldo, contando los que ahora no ves.",
   "Kids · allowed titles only": "Infantil · solo títulos permitidos",
   "Manage profiles": "Gestionar perfiles",
   PIN: "PIN",

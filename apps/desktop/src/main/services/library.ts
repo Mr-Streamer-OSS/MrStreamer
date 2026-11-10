@@ -23,7 +23,11 @@ import type {
   LiveSearchGroups,
   LiveSearchStamp,
 } from "@mrstreamer/contracts/library";
-import type { ChannelChoices, ChannelChoicesChange } from "@mrstreamer/contracts/preferences";
+import {
+  FALLBACKS_MAX,
+  type ChannelChoices,
+  type ChannelChoicesChange,
+} from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { adultIn, isAdultCategory } from "@mrstreamer/core/adult";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
@@ -242,6 +246,7 @@ export class Library extends Context.Service<
      * Changes the viewer's choices for a channel the viewer sees, named by its id or any of its
      * streams', and answers with the channel as it shows now. Fallbacks must name other channels
      * the viewer sees, or it fails with `channel-not-found` or `invalid-input` and changes nothing.
+     * Fallbacks it names replace those the viewer sees; saved ones they can't see now stay.
      * For a channel its catalogue no longer lists, only undoing every choice (`RESTORE_CHANNEL`)
      * applies, by the id `chosen` gave, and answers null.
      */
@@ -813,15 +818,39 @@ function make(options: LibraryOptions) {
 
           const viewer = yield* viewingSettings(settings);
           const mine = (choice: ChannelChoices) => isChoiceFor(choice, found);
+          let full = false;
 
           const after = yield* viewer.changeChannelChoices((choices) => {
-            const next = changedChoices(choices.find(mine), found, {
+            const previous = choices.find(mine);
+
+            // The change names the fallbacks the viewer sees. Saved ones they can't see now, as
+            // for adults while those are off, stay for when they can, unless all is undone.
+            const unseen = restoresAll(change)
+              ? []
+              : (previous?.fallbacks ?? []).filter((ref) => !channelIn(lists, ref));
+
+            const saved = fallbacks && [...fallbacks, ...unseen];
+            full = (saved?.length ?? 0) > FALLBACKS_MAX;
+
+            if (full) return choices;
+
+            const next = changedChoices(previous, found, {
               ...change,
-              ...defined({ fallbacks }),
+              ...defined({ fallbacks: saved }),
             });
 
             return [...choices.filter((choice) => !mine(choice)), ...(next ? [next] : [])];
           });
+
+          if (full)
+            return yield* new Failed({
+              error: {
+                kind: "invalid-input",
+                detail: t(
+                  "This channel can't keep more fallback channels, counting those you can't see now.",
+                ),
+              },
+            });
 
           return ownView(after, lists).shown(lists.shown(found));
         }),

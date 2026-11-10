@@ -16,6 +16,8 @@ export const nl: Translation = {
   "Kids policy: this content or action is not approved.":
     "Kinderbeleid: deze inhoud of actie is niet goedgekeurd.",
   "A channel can't be its own fallback.": "Een zender kan niet zijn eigen reserve zijn.",
+  "This channel can't keep more fallback channels, counting those you can't see now.":
+    "Deze zender kan geen reservezenders meer bewaren, ook die je nu niet ziet tellen mee.",
   "Kids · allowed titles only": "Kinderen · alleen toegestane titels",
   "Manage profiles": "Profielen beheren",
   PIN: "Pincode",

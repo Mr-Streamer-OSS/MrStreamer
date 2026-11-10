@@ -78,6 +78,8 @@ A row's options button, beside its list button, changes how that channel shows f
 
 **If it doesn't play, try** names up to three fallback channels, of any of your subscriptions: **Add fallback channel** searches your channels, and only one you pick is added, never one that just has the same name. A kids profile has no options and no Changed channels.
 
+A fallback you can't see now, such as an adult channel while adult channels are off, isn't listed or tried, but stays saved for when you can, and counts toward the three. **Restore channel** forgets it too.
+
 ## Watching
 
 _The channel list, the controls, quality, and what to do when a channel doesn't play._

@@ -17,6 +17,8 @@ export const en = {
   "Kids policy: this content or action is not approved.":
     "Kids policy: this content or action is not approved.",
   "A channel can't be its own fallback.": "A channel can't be its own fallback.",
+  "This channel can't keep more fallback channels, counting those you can't see now.":
+    "This channel can't keep more fallback channels, counting those you can't see now.",
   "Kids · allowed titles only": "Kids · allowed titles only",
   "Manage profiles": "Manage profiles",
   PIN: "PIN",
