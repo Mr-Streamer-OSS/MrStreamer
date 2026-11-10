@@ -6040,7 +6040,9 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     await recordings.stop(id);
     const final = await source.read();
     expect(final).toMatchObject({ final: true, status: { kind: "stopped" }, bytes: bytes.length });
-    expect(final.gaps).toEqual((await recordings.list()).find((row) => row.id === id)?.gaps);
+    const row = (await recordings.list()).find((row) => row.id === id);
+    expect(row).toBeDefined();
+    expect(final.gaps).toEqual(row?.gaps ?? []);
 
     const session = await playback.openCopy(
       {
