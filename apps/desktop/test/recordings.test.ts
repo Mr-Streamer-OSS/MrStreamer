@@ -6795,16 +6795,19 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
   );
 });
 
-it("retains a recording checkpoint with unknown length across a fresh copy and resume read", async () => {
-  const { recordings, channel } = await connected();
-  const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+it.runIf(hasTools)(
+  "retains a recording checkpoint with unknown length across a fresh copy and resume read",
+  async () => {
+    const { recordings, channel } = await connected();
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
 
-  if (started.kind !== "started") throw new Error("Recording did not start");
-  const id = started.recording.id;
-  await recordings.stop(id);
-  await recordings.recordProgress(id, 115, 0);
-  expect((await recordings.copy(id))?.progress).toEqual({ position: 115, duration: 0 });
-  expect((await recordings.resume()).items).toMatchObject([
-    { recording: { id }, progress: { position: 115, duration: 0 } },
-  ]);
-});
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    await recordings.stop(id);
+    await recordings.recordProgress(id, 115, 0);
+    expect((await recordings.copy(id))?.progress).toEqual({ position: 115, duration: 0 });
+    expect((await recordings.resume()).items).toMatchObject([
+      { recording: { id }, progress: { position: 115, duration: 0 } },
+    ]);
+  },
+);

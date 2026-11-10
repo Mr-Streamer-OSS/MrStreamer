@@ -909,7 +909,9 @@ function RecordingEntry({
       : [
           day,
           outcome(recording, now).word,
-          (settledPlace(recording, place) && timeLeftOf({ ...place, finished: false })) ||
+          (settledPlace(recording, place) &&
+            place.duration > 0 &&
+            timeLeftOf({ ...place, finished: false })) ||
             placeText(recording, place),
         ]
           .filter(Boolean)

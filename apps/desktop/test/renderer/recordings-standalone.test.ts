@@ -219,6 +219,19 @@ it.each([false, true])("recovers failed places with only active rows, group=%s",
   }
 
   expect(view.container.querySelector('[role="alert"]')?.textContent).toContain("couldn't be read");
+
+  if (!group) {
+    const scheduledShelf = [
+      ...view.container.querySelectorAll<HTMLButtonElement>("nav button"),
+    ].find((each) => each.textContent?.startsWith("Scheduled"));
+
+    expect(scheduledShelf).toBeDefined();
+    await click(scheduledShelf);
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    await click(button(view.container, "Overview"));
+    expect(view.container.querySelector('[role="alert"]')).not.toBeNull();
+  }
+
   ipc.always("recordings.resume", {
     owner: { id: "default", revision: 1 },
     items: [{ recording: active, progress: { position: 120, duration: 300, at: Date.now() } }],
@@ -227,6 +240,7 @@ it.each([false, true])("recovers failed places with only active rows, group=%s",
   await until(() => !view.container.querySelector('[role="alert"]'));
   expect(ipc.argsOf("recordings.resume").length).toBeGreaterThan(1);
   expect(button(view.container, "Resume Weather Watch")).toBeDefined();
+  expect(view.container.textContent).not.toContain("Progress is yours");
 });
 
 it("keeps a final recording's place without claiming an unknown length", async () => {
@@ -261,4 +275,19 @@ it("keeps a final recording's place without claiming an unknown length", async (
     ]),
   );
   expect(resumes(recorded, { position: 115, duration: 0, at: Date.now() })).toBe(true);
+});
+
+it("shows an unknown-length saved recording place on Home without invented time left", async () => {
+  const { HomeScreen } = await import("../../src/renderer/src/features/home/HomeScreen.tsx");
+  ipc.always("recordings.list", [recorded]);
+  ipc.always("recordings.resume", {
+    owner: { id: "default", revision: 1 },
+    items: [{ recording: recorded, progress: { position: 115, duration: 0, at: Date.now() } }],
+  });
+  const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  unmount = view.unmount;
+  await view.render(createElement(HomeScreen, { active: false }));
+  await until(() => view.container.textContent?.includes("Weather Watch") ?? false);
+  expect(view.container.textContent).toContain("at 1 min");
+  expect(view.container.textContent).not.toContain("min left");
 });

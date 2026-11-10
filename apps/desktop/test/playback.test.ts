@@ -2237,10 +2237,12 @@ describe("growing copy readers", () => {
     const listeners = new Set<() => void>();
     const waiting = Promise.withResolvers<void>();
     const cancelled = Promise.withResolvers<void>();
+    let waits = 0;
 
     const source: RecordingFile = {
       read: async () => extent,
       wait: async (revision, signal) => {
+        waits++;
         signal.throwIfAborted();
 
         if (extent.revision > revision) return extent;
@@ -2271,6 +2273,9 @@ describe("growing copy readers", () => {
       root,
       source,
       waiting: waiting.promise,
+      get waits() {
+        return waits;
+      },
       cancelled: cancelled.promise,
       update: (patch: Partial<RecordingExtent>) => {
         extent = { ...extent, ...patch, revision: extent.revision + 1 };
@@ -2588,8 +2593,31 @@ describe("growing copy readers", () => {
         await expect.poll(() => changed.length, { timeout: 2000 }).toBe(beforeWrites + 1);
         file.update({});
         await new Promise((resolve) => setTimeout(resolve, 20));
+        await local.closeCopy("kept-recording");
+        await file.cancelled;
+        expect((await file.source.read()).final).toBe(false);
+        expect(await local.copyState(copy.sessionId)).toBeNull();
+
+        const waitsBeforeReopen = file.waits;
+
+        const following = await local.openCopy(
+          {
+            id: "kept-recording",
+            kind: "recording",
+            path: file.path,
+            container: "ts",
+            title: { kind: "movie", id: "kept-recording" },
+            progress: null,
+            recording: file.source,
+          },
+          LINUX,
+        );
+
+        await expect.poll(() => file.waits).toBeGreaterThan(waitsBeforeReopen);
+        const beforeFinal = changed.length;
         file.update({ final: true, status: { kind: "complete" } });
-        await expect.poll(() => changed.length, { timeout: 500 }).toBe(beforeWrites + 2);
+        await expect.poll(() => changed.length, { timeout: 500 }).toBe(beforeFinal + 1);
+        expect(changed.at(-1)).toBe(following.sessionId);
         await local.closeCopy("kept-recording");
 
         expect((await file.source.read()).final).toBe(true);
