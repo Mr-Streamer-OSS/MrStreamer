@@ -84,6 +84,18 @@ export interface RecordingExtent extends RecordingCopyState {
    * stays empty.
    */
   readonly access?: readonly RecordingAccess[];
+  /** Each program table the recording has had, in order; published with `access`. */
+  readonly tables?: readonly RecordingTable[];
+}
+
+/**
+ * A program table as the recording took it up: from the PAT at `from`, or the packet its table
+ * arrived in when no PAT just before it was read. Repeats of one table are one entry, and
+ * `layout` is the object the access points under it share.
+ */
+export interface RecordingTable {
+  readonly from: number;
+  readonly layout: Inspection;
 }
 
 /**
@@ -302,6 +314,8 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
   const known = new Map<string, Inspection>();
   const access: RecordingAccess[] = [];
   let published: readonly RecordingAccess[] = [];
+  const history: RecordingTable[] = [];
+  let publishedTables: readonly RecordingTable[] = [];
   /** The clock wrapped, or there were too many points: no access point is published again. */
   let refused = false;
   let tail = Promise.resolve();
@@ -382,9 +396,17 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
               clockOf(layout) !== clockOf(inspected)
             )
               uncertain = true;
-            layout = inspected;
 
-            if (!known.has(inspected.signature)) known.set(inspected.signature, inspected);
+            if (layout?.signature !== inspected.signature) {
+              if (!known.has(inspected.signature)) known.set(inspected.signature, inspected);
+
+              // A table that keeps changing is refused like a flood of access points.
+              if (history.length >= ACCESS_LIMIT) refused = true;
+              else
+                history.push({ from: tables?.from ?? at, layout: known.get(inspected.signature)! });
+            }
+
+            layout = inspected;
 
             // The fresh inspector has read this PAT and its program table, both before here.
             if (tables) tables.ready = true;
@@ -482,6 +504,8 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
       // Each extent keeps the points of its own read.
       if (published.length !== access.length) published = access.slice();
 
+      if (publishedTables.length !== history.length) publishedTables = history.slice();
+
       return {
         ...extent,
         // Only the observed presentation span is known, not the final frame's end or a seek map.
@@ -490,7 +514,7 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           first !== undefined &&
           maximum > 0 && {
             presentation: { from: first / 90_000, to: (first + maximum) / 90_000 },
-            ...(!refused && published.length > 0 && { access: published }),
+            ...(!refused && published.length > 0 && { access: published, tables: publishedTables }),
           }),
         ...(layout && { layout }),
       };

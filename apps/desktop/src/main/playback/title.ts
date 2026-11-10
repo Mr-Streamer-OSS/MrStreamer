@@ -393,7 +393,8 @@ export interface RecordingInput {
 /**
  * The ffmpeg arguments for a run. `source` is the loopback address of the file; `subtitles` and
  * `start` are where ffmpeg sends the subtitles and the first video packet's report. With
- * `recording`, ffmpeg reads standard input instead of `source`, and takes no subtitles.
+ * `recording`, ffmpeg reads standard input instead of `source`, and takes each track, subtitles
+ * too, by its PID.
  */
 export function titlePlan(
   probe: TitleProbe,
@@ -407,18 +408,24 @@ export function titlePlan(
   const copyVideo = video?.codec != null && decoders.has(video.codec) && !run.rejectedCopy;
   const copySound = sound?.codec != null && decoders.has(sound.codec) && run.convertSound !== true;
 
-  if (recording && run.subtitle !== null) throw new Error("A recording run takes no subtitles.");
-  const side = subtitleSide(probe, run.subtitle, urls.subtitles);
-
-  // A track as ffmpeg's input knows it: by its place in the file, or a recording's by its PID.
-  const track = (id: number) => {
-    if (!recording) return `0:${id}`;
-    const pid = recording.pids.get(id);
+  const pidOf = (id: number) => {
+    const pid = recording?.pids.get(id);
 
     if (pid === undefined) throw new Error("A recording run's track has no PID.");
 
-    return `0:i:${pid}`;
+    return pid;
   };
+
+  // A track as ffmpeg's input knows it: by its place in the file, or a recording's by its PID.
+  const track = (id: number) => (recording ? `0:i:${pidOf(id)}` : `0:${id}`);
+
+  const side = subtitleSide(
+    probe,
+    run.subtitle,
+    urls.subtitles,
+    undefined,
+    recording && run.subtitle !== null ? pidOf(run.subtitle) : undefined,
+  );
 
   const args = [
     ...["-hide_banner", "-loglevel", "error", "-nostdin"],
@@ -600,12 +607,14 @@ function subtitleSide(
   id: number | null,
   url: string,
   stream?: number,
+  pid?: number,
 ): { readonly output: SubtitleOutput; readonly args: readonly string[] } | null {
   const track = probe.subtitles.find((each) => each.id === id);
 
   if (!track) return null;
-  // The track's place in the file ffmpeg reads: its own, unless that file holds it alone.
-  const map = ["-map", `0:${stream ?? track.id}`];
+  // The track's place in the file ffmpeg reads: its own, unless that file holds it alone, or a
+  // recording's by its PID.
+  const map = ["-map", pid === undefined ? `0:${stream ?? track.id}` : `0:i:${pid}`];
   const send = ["-flush_packets", "1", "-method", "PUT", url];
 
   const packets = (
