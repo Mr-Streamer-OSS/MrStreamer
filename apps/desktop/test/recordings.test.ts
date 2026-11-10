@@ -5724,6 +5724,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     }
 
     if (!damaged) throw new Error("Fixture has no PAT packets to damage");
+
     const { recordings, channel, provider } = await connected({
       streams: (_source, out) => {
         out.write(bytes);
@@ -5738,11 +5739,13 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     try {
       const source = await recordings.file(id);
       const signal = AbortSignal.timeout(5000);
+
       const extent = await until(
         () => source.read(signal),
         (current) => current.bytes === bytes.length,
         5000,
       );
+
       expect(extent.bytes).toBe(bytes.length);
       expect(extent.final).toBe(false);
       expect(extent.duration).toBeNull();
@@ -5893,9 +5896,26 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
   });
 
   it("refuses a nonzero recording seek without verified session media coverage", async () => {
+    const bytes = Buffer.from(fixture(TRACKS_FIXTURE));
+    let tables = 0;
+    let damaged = 0;
+
+    // The first table opens the copy on its tracks. Every later PAT carries a transport error,
+    // so the recorded program cannot be verified as one continuous stream after it.
+    for (let offset = 0; offset + 188 <= bytes.length; offset += 188) {
+      if (bytes[offset] !== 0x47) throw new Error("Fixture is not packet aligned");
+      const pid = ((bytes[offset + 1]! & 31) << 8) | bytes[offset + 2]!;
+
+      if (pid !== 0 || tables++ === 0) continue;
+      bytes[offset + 1] = bytes[offset + 1]! | 0x80;
+      damaged++;
+    }
+
+    if (!damaged) throw new Error("Fixture has only one PAT packet");
+
     const { recordings, channel, playback, dataDir, provider } = await connected({
       streams: (_source, out) => {
-        out.write(fixture(TRACKS_FIXTURE));
+        out.write(bytes);
       },
     });
 
@@ -5904,6 +5924,14 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     if (started.kind !== "started") throw new Error("Recording did not start");
     const id = started.recording.id;
     const source = await recordings.file(id);
+    const signal = AbortSignal.timeout(5000);
+
+    // Ask only once every recorded byte has been read, so no shorter clean prefix answers.
+    await until(
+      () => source.read(signal),
+      (current) => current.bytes === bytes.length,
+      5000,
+    );
     const file = await fileOf(dataDir, started.recording);
 
     const copy = await playback.openCopy(

@@ -78,7 +78,29 @@ export interface RecordingExtent extends RecordingCopyState {
   readonly mediaRevision?: number;
   /** Verified presentation span on the transport clock, not the final sample end. */
   readonly presentation?: { readonly from: number; readonly to: number };
+  /**
+   * Where a fresh decoder can start, oldest first; present only with `presentation`. Session
+   * seconds need the session's clock origin, which this layer does not have, so `seekable` here
+   * stays empty.
+   */
+  readonly access?: readonly RecordingAccess[];
 }
+
+/**
+ * An H.264 IDR access unit with its parameter sets, and the program tables just before it: the
+ * original bytes from `from` play from this picture on their own. `pts` is the picture's raw
+ * 90 kHz transport time, which no wrap has changed.
+ */
+export interface RecordingAccess {
+  readonly from: number;
+  readonly pts: number;
+}
+
+/** More access points than a day of one-second groups of pictures is refused, not truncated. */
+const ACCESS_LIMIT = 1 << 17;
+
+/** An access unit that has not shown its first slice within this much is not an access point. */
+const ACCESS_UNIT_BYTES = 64 * 1024;
 
 /** wait atomically observes a newer revision or subscribes, and must honor cancellation. */
 export interface RecordingFile {
@@ -270,7 +292,31 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
   let maximum = 0;
   let uncertain = false;
   let continuity: number | undefined;
+  /** The PAT that reset the inspector, ready once its program table has been read. */
+  let tables: { readonly from: number; ready: boolean } | null = null;
+  /** The video PES being examined for an access point. */
+  let unit: (RecordingAccess & { data: Buffer; walked: number; sets: number }) | null = null;
+  const access: RecordingAccess[] = [];
+  let published: readonly RecordingAccess[] = [];
+  /** The clock wrapped, or there were too many points: no access point is published again. */
+  let refused = false;
   let tail = Promise.resolve();
+
+  // Adds a packet's PES bytes to `unit`, and decides once its first slice shows.
+  const examine = (bytes: Uint8Array) => {
+    if (!unit) return;
+    unit.data = Buffer.concat([unit.data, bytes]);
+    const verdict = accessUnit(unit);
+
+    if (verdict === undefined && unit.data.length <= ACCESS_UNIT_BYTES) return;
+
+    if (verdict) {
+      if (access.length >= ACCESS_LIMIT) refused = true;
+      else access.push({ from: unit.from, pts: unit.pts });
+    }
+
+    unit = null;
+  };
 
   const scan = async (extent: RecordingExtent, signal?: AbortSignal) => {
     signal?.throwIfAborted();
@@ -292,6 +338,8 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
 
         if (!bytesRead) throw new Error("Recording file was truncated.");
         const data = Buffer.concat([carry, chunk.subarray(0, bytesRead)]);
+        // The file offset of data[0].
+        const base = position - carry.length;
         let offset = 0;
 
         while (offset + 188 <= data.length) {
@@ -301,6 +349,7 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
             continue;
           }
 
+          const at = base + offset;
           const packet = data.subarray(offset, offset + 188);
           offset += 188;
           const pid = ((packet[1]! & 31) << 8) | packet[2]!;
@@ -313,15 +362,23 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           }
 
           // A fresh table can change tracks after capture resumes. Reuse the existing parser.
-          if (pid === 0 && start) inspector = createInspector();
+          if (pid === 0 && start) {
+            inspector = createInspector();
+            tables = { from: at, ready: false };
+          }
+
           const inspected = inspector.push(packet);
 
           if (inspected) {
             if (layout && layout.signature !== inspected.signature) uncertain = true;
             layout = inspected;
+
+            // The fresh inspector has read this PAT and its program table, both before here.
+            if (tables) tables.ready = true;
           }
 
-          const selected = layout?.layout.video?.pid ?? layout?.layout.audio[0]?.pid;
+          const video = layout?.layout.video;
+          const selected = video?.pid ?? layout?.layout.audio[0]?.pid;
 
           if (pid !== selected) continue;
           const adaptation = (packet[3]! >> 4) & 3;
@@ -337,7 +394,20 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           continuity = counter;
           const payload = adaptation === 3 ? 5 + packet[4]! : 4;
 
-          if (!start || payload + 14 > 188) continue;
+          if (payload >= 188) continue;
+
+          if (!start) {
+            examine(packet.subarray(payload));
+            continue;
+          }
+
+          // The previous picture's PES ended undecided: it is not an access point.
+          unit = null;
+          // Its tables are this picture's only if no other picture starts between.
+          const before = tables?.ready ? tables.from : null;
+          tables = null;
+
+          if (payload + 14 > 188) continue;
           const pes = packet.subarray(payload);
 
           if (pes[0] !== 0 || pes[1] !== 0 || pes[2] !== 1 || !(pes[7]! & 0x80) || pes[8]! < 5)
@@ -348,12 +418,7 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
             continue;
           }
 
-          const pts =
-            (pes[9]! & 14) * 2 ** 29 +
-            pes[10]! * 2 ** 22 +
-            (pes[11]! & 254) * 2 ** 14 +
-            pes[12]! * 128 +
-            (pes[13]! >> 1);
+          const pts = timestamp(pes, 9);
 
           if (first === undefined) first = pts;
 
@@ -367,6 +432,24 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           const unwrapped: number = last === undefined ? pts : last + delta;
           last = unwrapped;
           maximum = Math.max(maximum, unwrapped - first);
+
+          // How ffmpeg places a wrapped clock is not established; points stop there.
+          if (unwrapped !== pts) refused = true;
+
+          if (before === null || refused || video?.codec !== "h264" || pid !== video.pid) continue;
+          const flags = pes[7]! >> 6;
+
+          // A decoding time other than the picture's own would need reordering facts we lack.
+          if (
+            flags === 3 &&
+            (pes[8]! < 10 ||
+              payload + 19 > 188 ||
+              !(pes[14]! & pes[16]! & pes[18]! & 1) ||
+              timestamp(pes, 14) !== pts)
+          )
+            continue;
+          unit = { from: before, pts, data: Buffer.alloc(0), walked: 9 + pes[8]!, sets: 0 };
+          examine(pes);
         }
 
         carry = Buffer.from(data.subarray(offset));
@@ -374,6 +457,9 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
       }
 
       signal?.throwIfAborted();
+
+      // Each extent keeps the points of its own read.
+      if (published.length !== access.length) published = access.slice();
 
       return {
         ...extent,
@@ -383,6 +469,7 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           first !== undefined &&
           maximum > 0 && {
             presentation: { from: first / 90_000, to: (first + maximum) / 90_000 },
+            ...(!refused && published.length > 0 && { access: published }),
           }),
         ...(layout && { layout }),
       };
@@ -422,4 +509,39 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
       return indexed(() => source.read(signal), signal);
     },
   };
+}
+
+/** A PES header's 33-bit timestamp at `at`: the PTS at 9, the DTS at 14. */
+function timestamp(pes: Uint8Array, at: number): number {
+  return (
+    (pes[at]! & 14) * 2 ** 29 +
+    pes[at + 1]! * 2 ** 22 +
+    (pes[at + 2]! & 254) * 2 ** 14 +
+    pes[at + 3]! * 128 +
+    (pes[at + 4]! >> 1)
+  );
+}
+
+/**
+ * Whether a PES's H.264 access unit, read so far, starts a fresh decoder: SPS and PPS before its
+ * first slice, which is an IDR's first. Undefined until that slice shows. A non-IDR I slice is
+ * not enough here, unlike a live start (clean-start.ts), because nothing has been decoded yet.
+ */
+function accessUnit(unit: { data: Buffer; walked: number; sets: number }): boolean | undefined {
+  const data = unit.data;
+
+  for (; unit.walked + 4 < data.length; unit.walked++) {
+    const at = unit.walked;
+
+    if (data[at] !== 0 || data[at + 1] !== 0 || data[at + 2] !== 1) continue;
+    const type = data[at + 3]! & 31;
+
+    // SPS and PPS, as bits.
+    if (type === 7 || type === 8) unit.sets |= type === 7 ? 1 : 2;
+
+    // first_mb_in_slice is 0 when its Exp-Golomb code starts with a one bit.
+    if (type >= 1 && type <= 5) return type === 5 && unit.sets === 3 && data[at + 4]! >= 0x80;
+  }
+
+  return undefined;
 }

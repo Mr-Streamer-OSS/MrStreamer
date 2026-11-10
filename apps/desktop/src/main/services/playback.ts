@@ -64,12 +64,13 @@ import type { Json } from "@mrstreamer/contracts/json";
 // aborts its upstream requests, which ends their ffmpeg processes; the proxy closes with the
 // service.
 import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { arrives } from "../playback/signals.ts";
 import type { PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import { liveDiagnostic, titleDiagnostic, lastLine } from "../playback/diagnostic.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { Readable, Transform } from "node:stream";
+import { Readable, Transform, type Writable } from "node:stream";
 import type { CopySession, CopyState } from "@mrstreamer/contracts/downloads";
 import type { RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { PlaybackFailureSelector } from "@mrstreamer/contracts/ipc";
@@ -102,6 +103,7 @@ import { SavedSubtitles, subtitlesOfCopy, type SubtitleFile } from "../platform/
 import {
   fileRequest,
   recordingFile,
+  type RecordingAccess,
   type RecordingFile,
   type RecordingExtent,
 } from "../playback/file-source.ts";
@@ -205,6 +207,14 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** The ffprobe fields conversion reads; unrelated stream fields remain forward compatible. */
 const ProbeStreams = lazy(() => type({ streams: "unknown[]" }));
+
+/** What a recording copy keeps of its session's ffprobe read beyond `readProbe`. */
+const ProbeClock = lazy(() =>
+  type({
+    "streams?": type({ index: "number", "id?": "string" }).array(),
+    "format?": type({ "start_time?": "string" }),
+  }),
+);
 
 const ProbePicture = lazy(() =>
   type({
@@ -461,6 +471,8 @@ type TitleOrigin =
       readonly recording?: RecordingFile | undefined;
       refreshRecording?: (() => Promise<void>) | undefined;
       finalRecording?: { readonly revision: number; readonly duration: number | null };
+      /** From the session's own probe; null when ffprobe reported no origin. */
+      recordingClock?: RecordingClock | null;
     };
 
 interface TitleSessionState extends SessionBase {
@@ -2714,18 +2726,29 @@ function make(deps: PlaybackDeps) {
         rejectedCopy: session.rejectedCopy,
       };
 
+      const clock = session.origin.kind === "copy" ? session.origin.recordingClock : undefined;
+      // Where a recording's run starts in its file, when it doesn't start at the beginning.
+      let landing: RecordingAccess | null = null;
+
       if (session.origin.kind === "copy" && session.origin.recording) {
         await session.origin.refreshRecording?.();
         const extent = await session.origin.recording.read(signal);
         signal.throwIfAborted();
 
-        if (
-          run.start > 0 &&
-          !extent.seekable.some((range) => run.start >= range.from && run.start <= range.to)
-        ) {
-          response.writeHead(416).end();
+        if (run.start > 0) {
+          // Subtitles on a run from inside a recording are not aligned yet: refused, not dropped.
+          landing =
+            run.subtitle === null && session.probe
+              ? (recordingCoverage(extent, clock, session.probe, copiesVideo(session))?.at(
+                  run.start,
+                ) ?? null)
+              : null;
 
-          return;
+          if (!landing) {
+            response.writeHead(416).end();
+
+            return;
+          }
         }
       }
 
@@ -2752,11 +2775,13 @@ function make(deps: PlaybackDeps) {
       const kept = session.kept;
       const generation = session.identity.generation;
 
-      const plan = titlePlan(probe, run, session.decoders, {
-        source: lease.source,
-        subtitles: lease.subtitles,
-        start: lease.start,
-      });
+      const plan = titlePlan(
+        probe,
+        run,
+        session.decoders,
+        { source: lease.source, subtitles: lease.subtitles, start: lease.start },
+        landing && clock ? { pids: clock.pids } : undefined,
+      );
 
       const report = (outcome: "ok" | StreamFailure["kind"]) =>
         diagnostics.record({
@@ -2771,9 +2796,27 @@ function make(deps: PlaybackDeps) {
         ...titleDiagnostic(probe, plan, run.audio),
         diagnostic_fallback: run.rejectedCopy ? "video" : run.convertSound ? "audio" : "none",
       };
-      const child = spawn(deps.ffmpeg, plan.args, { stdio: ["ignore", "pipe", "pipe"] });
+
+      // Only a recording's run reads standard input.
+      const child = landing
+        ? spawn(deps.ffmpeg, plan.args, { stdio: ["pipe", "pipe", "pipe"] })
+        : spawn(deps.ffmpeg, plan.args, { stdio: ["ignore", "pipe", "pipe"] });
+
       let errors = "";
       let spawnFailed = false;
+
+      if (landing && child.stdin) {
+        const input = child.stdin;
+        // ffmpeg can be gone before its input is: that is its exit's to report.
+        input.on("error", () => undefined);
+
+        // The session's own reader of the recording, from the landing's tables on. It follows
+        // what the recorder appends and ends when the recording does; a failed read stops the run.
+        void feed(session, landing.from, input, signal).catch(() => {
+          if (!signal.aborted) child.kill("SIGKILL");
+        });
+      }
+
       child.stderr.on("data", (chunk: Buffer) => {
         errors = (errors + chunk.toString()).slice(-2000);
       });
@@ -2944,7 +2987,14 @@ function make(deps: PlaybackDeps) {
         return;
       }
 
-      if (pictureStart === null || (held.length === 0 && child.exitCode !== null)) {
+      // A recording's run must begin at the very picture main chose, on the file's own clock.
+      const landed =
+        landing === null ||
+        (plan.video === "copy" &&
+          pictureStart !== null &&
+          Math.round(pictureStart * 90_000) === landing.pts);
+
+      if (pictureStart === null || !landed || (held.length === 0 && child.exitCode !== null)) {
         stop();
 
         const failure: StreamFailure = session.failure ?? {
@@ -3676,10 +3726,10 @@ function make(deps: PlaybackDeps) {
     async function probeTitle(
       session: TitleSessionState,
       settledPath?: string,
-    ): Promise<TitleProbe> {
+    ): Promise<{ readonly probe: TitleProbe; readonly raw: Json | null }> {
       const known = settledPath ? undefined : probes.get(session.probeKey);
 
-      if (known) return known;
+      if (known) return { probe: known, raw: null };
       const ffprobe = deps.ffprobe;
 
       if (!ffprobe) {
@@ -3760,7 +3810,7 @@ function make(deps: PlaybackDeps) {
         if (probes.size > PROBES_KEPT) probes.delete(probes.keys().next().value ?? "");
       }
 
-      return probe;
+      return { probe, raw: json };
     }
 
     /**
@@ -4083,6 +4133,10 @@ function make(deps: PlaybackDeps) {
           ? yield* Effect.tryPromise({ try: (signal) => source.read(signal), catch: failedWith })
           : undefined;
 
+        const coverage = extent
+          ? recordingCoverage(extent, origin.recordingClock, session.probe, copiesVideo(session))
+          : null;
+
         const duration =
           extent?.final && extent.presentation
             ? origin.finalRecording?.revision === extent.revision
@@ -4099,7 +4153,7 @@ function make(deps: PlaybackDeps) {
               status: extent.status,
               final: extent.final,
               duration,
-              seekable: extent.seekable,
+              seekable: coverage?.seekable ?? extent.seekable,
               gaps: extent.gaps,
             }
           : undefined;
@@ -4199,7 +4253,7 @@ function make(deps: PlaybackDeps) {
             }).pipe(Effect.tapError(() => Scope.close(forked, Exit.void)))
           : undefined;
 
-        const probe = yield* Effect.tryPromise({
+        const { probe, raw } = yield* Effect.tryPromise({
           try: () => probeTitle(session),
           catch: failedWith,
         }).pipe(Effect.tapError(() => Scope.close(forked, Exit.void)));
@@ -4209,6 +4263,7 @@ function make(deps: PlaybackDeps) {
         session.probed = session.identity.generation;
 
         if (origin.kind === "copy" && origin.recording && file.recordingPath) {
+          origin.recordingClock = recordingClock(raw);
           const source = origin.recording;
           const path = file.recordingPath;
           let settled = opened?.final ?? false;
@@ -4247,7 +4302,7 @@ function make(deps: PlaybackDeps) {
               settled = true;
 
               if (!before.presentation) return;
-              const finalProbe = await probeTitle(session, path);
+              const { probe: finalProbe } = await probeTitle(session, path);
               const after = await source.read(session.closed.signal);
 
               if (
@@ -4907,6 +4962,130 @@ function drained(response: ServerResponse): Promise<void> {
     response.on("drain", resumed);
     response.on("close", resumed);
   });
+}
+
+/** A recording copy's clock origin and track PIDs, as its session's own ffprobe reported them. */
+interface RecordingClock {
+  /** The reported `format.start_time`, in seconds: title seconds are file seconds minus this. */
+  readonly origin: number;
+  /** Transport PIDs by probe stream id. */
+  readonly pids: ReadonlyMap<number, number>;
+}
+
+/** Null when ffprobe gave no origin: a defaulted zero would misplace every run. */
+function recordingClock(raw: Json | null): RecordingClock | null {
+  const probe = raw === null ? null : ProbeClock()(raw);
+
+  if (!probe || probe instanceof type.errors) return null;
+  const reported = probe.format?.start_time;
+  const origin = Number(reported);
+
+  if (reported === undefined || !Number.isFinite(origin)) return null;
+  const pids = new Map<number, number>();
+
+  for (const stream of probe.streams ?? []) {
+    // MPEG-TS streams are named by PID, "0x100".
+    if (stream.id && /^0x[0-9a-f]{1,4}$/i.test(stream.id))
+      pids.set(stream.index, Number(stream.id));
+  }
+
+  return { origin, pids };
+}
+
+/** Whether a run copies the session's picture, as `titlePlan` decides it for H.264. */
+function copiesVideo(session: TitleSessionState): boolean {
+  return session.decoders.has("h264") && !session.rejectedCopy;
+}
+
+/**
+ * Where runs of an active recording can start: from its first verified access point to the last
+ * picture time read, in title seconds, and the point a run from `start` reads from, the last at
+ * or before it, as a title's copied picture starts at the keyframe before. Null when any fact it
+ * needs is unverified: a final or interrupted recording, no access point, no reported origin, a
+ * converted or reordered picture, or a track ffprobe and the recorded tables don't name alike.
+ */
+function recordingCoverage(
+  extent: RecordingExtent,
+  clock: RecordingClock | null | undefined,
+  probe: TitleProbe,
+  copied: boolean,
+): {
+  readonly seekable: readonly { readonly from: number; readonly to: number }[];
+  at(start: number): RecordingAccess | null;
+} | null {
+  const access = extent.access;
+  const layout = extent.layout?.layout;
+  const video = probe.video;
+
+  if (
+    extent.final ||
+    (extent.mediaRevision ?? 0) > 0 ||
+    !access?.[0] ||
+    !extent.presentation ||
+    !clock ||
+    !layout?.video ||
+    video?.codec !== "h264" ||
+    video.reordered ||
+    !copied ||
+    clock.pids.get(video.id) !== layout.video.pid
+  )
+    return null;
+  const sounds = new Set(layout.audio.map((track) => track.pid));
+
+  if (!probe.audio.every((track) => sounds.has(clock.pids.get(track.id) ?? -1))) return null;
+  const from = access[0].pts / 90_000 - clock.origin;
+  const to = extent.presentation.to - clock.origin;
+
+  if (from < 0 || to < from) return null;
+
+  return {
+    seekable: [{ from, to }],
+    at: (start) => {
+      if (start < from || start > to) return null;
+      const time = clock.origin + start;
+      let landing: RecordingAccess | null = null;
+
+      for (const point of access) {
+        // Title seconds count from the same reported origin as x-start, so a position at a
+        // point's own title time is that point; the margin covers only float rounding.
+        if (point.pts / 90_000 <= time + 1e-9 && (!landing || point.pts > landing.pts))
+          landing = point;
+      }
+
+      return landing;
+    },
+  };
+}
+
+/** Writes the session's recording from byte `from` on to `input`, until it ends or `signal`. */
+async function feed(
+  session: TitleSessionState,
+  from: number,
+  input: Writable,
+  signal: AbortSignal,
+): Promise<void> {
+  const answer = await session.request(session.upstreamUrl, {
+    headers: { Range: `bytes=${from}-` },
+    signal,
+  });
+
+  if (!answer.ok || !answer.body) throw new Error("Recording file cannot be read.");
+  const reader = answer.body.getReader();
+
+  try {
+    for (;;) {
+      const next = await reader.read();
+
+      if (next.done) break;
+
+      // ffmpeg reads no faster than the player takes the picture.
+      if (!input.write(next.value)) await once(input, "drain", { signal });
+    }
+
+    input.end();
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
 }
 
 function optionalNumber(value: string | null): number | null {

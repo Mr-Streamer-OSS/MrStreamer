@@ -374,38 +374,74 @@ export interface TitlePlan {
  * film, it reads a file several times as fast when nothing holds it back. ffmpeg 7 and later
  * queue packets by themselves and take no notice of the option.
  */
+const QUEUE = ["-thread_queue_size", "64"];
+
 const INPUT = [
   ...["-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "4"],
-  ...["-thread_queue_size", "64"],
+  ...QUEUE,
 ];
 
 /**
+ * A recording's run reads the recorded MPEG-TS bytes on standard input, already starting where
+ * the picture may start, so ffmpeg does not seek. `pids` names each probed track's transport
+ * PID, by its probe id, for the tracks the run may take.
+ */
+export interface RecordingInput {
+  readonly pids: ReadonlyMap<number, number>;
+}
+
+/**
  * The ffmpeg arguments for a run. `source` is the loopback address of the file; `subtitles` and
- * `start` are where ffmpeg sends the subtitles and the first video packet's report.
+ * `start` are where ffmpeg sends the subtitles and the first video packet's report. With
+ * `recording`, ffmpeg reads standard input instead of `source`, and takes no subtitles.
  */
 export function titlePlan(
   probe: TitleProbe,
   run: TitleRun,
   decoders: ReadonlySet<Codec>,
   urls: { readonly source: string; readonly subtitles: string; readonly start: string },
+  recording?: RecordingInput,
 ): TitlePlan {
   const video = probe.video;
   const sound = probe.audio.find((track) => track.id === run.audio) ?? probe.audio[0] ?? null;
   const copyVideo = video?.codec != null && decoders.has(video.codec) && !run.rejectedCopy;
   const copySound = sound?.codec != null && decoders.has(sound.codec) && run.convertSound !== true;
+
+  if (recording && run.subtitle !== null) throw new Error("A recording run takes no subtitles.");
   const side = subtitleSide(probe, run.subtitle, urls.subtitles);
+
+  // A track as ffmpeg's input knows it: by its place in the file, or a recording's by its PID.
+  const track = (id: number) => {
+    if (!recording) return `0:${id}`;
+    const pid = recording.pids.get(id);
+
+    if (pid === undefined) throw new Error("A recording run's track has no PID.");
+
+    return `0:i:${pid}`;
+  };
 
   const args = [
     ...["-hide_banner", "-loglevel", "error", "-nostdin"],
-    ...INPUT,
-    // Seeking to zero skips the first seconds of some AVI and FLV files, so zero doesn't seek.
-    ...(run.start > 0 ? ["-ss", seconds(run.start)] : []),
-    ...["-copyts", "-i", urls.source],
+    ...(recording
+      ? [
+          ...QUEUE,
+          // A growing recording waits for bytes like a live stream, and ffmpeg's default 5 s of
+          // probing would hold the picture back for tracks it never maps: the same bound as
+          // live MPEG-TS on standard input (convert.ts).
+          ...["-probesize", "1000000", "-analyzeduration", "1500000"],
+          ...["-f", "mpegts", "-copyts", "-i", "pipe:0"],
+        ]
+      : [
+          ...INPUT,
+          // Seeking to zero skips the first seconds of some AVI and FLV files, so zero doesn't seek.
+          ...(run.start > 0 ? ["-ss", seconds(run.start)] : []),
+          ...["-copyts", "-i", urls.source],
+        ]),
   ];
 
-  if (video) args.push("-map", `0:${video.id}`);
+  if (video) args.push("-map", track(video.id));
 
-  if (sound) args.push("-map", `0:${sound.id}`);
+  if (sound) args.push("-map", track(sound.id));
 
   if (video && copyVideo) {
     args.push("-c:v", "copy");
@@ -437,7 +473,7 @@ export function titlePlan(
   if (video && copyVideo) {
     // Copied video starts at the keyframe before `start`; the report says which.
     args.push(
-      ...["-map", `0:${video.id}`, "-c:v", "copy", "-frames:v", "1", "-f", "framecrc"],
+      ...["-map", track(video.id), "-c:v", "copy", "-frames:v", "1", "-f", "framecrc"],
       ...["-method", "PUT", urls.start],
     );
   }
