@@ -379,3 +379,104 @@ it("keeps the same channel ID from different subscriptions separate while dedupl
     { subscriptionId: otherSubscription, id: "22" },
   ]);
 });
+
+/** A guide that always has a continuation, page `n` listing one channel, `${prefix}n`. */
+const endlessPages =
+  (prefix = "page") =>
+  ({ after }: IpcInput<"guide.searchPage">): GuideSearchPage => {
+    const page = after ? after.start + 1 : 1;
+
+    return {
+      matches: [discoveryMatch(`${prefix}${page}`)],
+      next: { start: page, channel: `${prefix}${page}` },
+    };
+  };
+
+it("keeps the discovery limit warning while no channel is selected", async () => {
+  await discover(endlessPages());
+  await vi.waitFor(() => expect(document.body.textContent).toContain(LIMIT_WARNING));
+
+  // Turn off the only channel on: the rule has nothing to record, but more may still match.
+  await act(async () => channelButtons()[0]!.click());
+  expect(
+    channelButtons().filter((button) => button.getAttribute("aria-pressed") === "true"),
+  ).toHaveLength(0);
+  expect(document.body.textContent).toContain("Choose at least one channel.");
+  expect(document.body.textContent).toContain(LIMIT_WARNING);
+});
+
+it("warns of no limit when the guide's tenth page is its last", async () => {
+  await discover((input) => {
+    const page = endlessPages()(input);
+
+    return page.next?.start === 10 ? { ...page, next: null } : page;
+  });
+  await vi.waitFor(() => expect(channelButtons()).toHaveLength(11));
+  expect(channelButtons().at(-1)?.textContent).toBe("Channel page10");
+  expect(ipc.argsOf("guide.searchPage")).toHaveLength(10);
+  expect(document.body.textContent).not.toContain(LIMIT_WARNING);
+});
+
+it("keeps the limit warning when a later subscription's guide runs out", async () => {
+  const otherSubscription = "another-subscription";
+  await discover(
+    (input) =>
+      input.subscriptionId === SUBSCRIPTION
+        ? endlessPages()(input)
+        : { matches: [discoveryMatch("33", "Noon News", otherSubscription)], next: null },
+    createElement(RulePanel, {
+      rule: {
+        id: "rule",
+        plan: {
+          title: "Noon News",
+          channels: [channel, { subscriptionId: otherSubscription, id: "11" }],
+          mode: "every",
+          padding: { before: 2, after: 5 },
+        },
+      },
+      onDone: () => {},
+    }),
+  );
+  // Both named channels, ten pages of the limited guide and the other guide's one channel.
+  await vi.waitFor(() => expect(channelButtons()).toHaveLength(13));
+  expect(channelButtons().at(-1)?.textContent).toBe("Channel 33");
+  expect(
+    ipc.argsOf("guide.searchPage").map(({ subscriptionId }) => subscriptionId === SUBSCRIPTION),
+  ).toEqual([...Array<boolean>(10).fill(true), false]);
+  expect(document.body.textContent).toContain(LIMIT_WARNING);
+});
+
+it("offers Retry when a continuation page fails and finds its channels once retried", async () => {
+  let continuation: ReturnType<typeof ipc.hold<"guide.searchPage">> | undefined;
+  await discover(({ after }) => {
+    if (after) return { matches: [discoveryMatch("22")], next: null };
+    // The first read's continuation waits to fail; the retried one is answered as listed.
+    continuation ??= ipc.hold("guide.searchPage", (input) => input.after !== undefined);
+
+    return { matches: [discoveryMatch("21")], next: { start: NOON, channel: "21" } };
+  });
+  await vi.waitFor(() => expect(ipc.argsOf("guide.searchPage")).toHaveLength(2));
+  await act(async () =>
+    continuation?.reject({ kind: "unexpected", detail: "guide search failed" }),
+  );
+
+  const retry = () =>
+    [...document.querySelectorAll<HTMLButtonElement>("[role=alert] button")].find(
+      (each) => each.textContent === "Retry",
+    );
+
+  await vi.waitFor(() => expect(retry()).toBeDefined());
+  expect(channelButtons().map((button) => button.textContent)).toEqual(["Eurosport 1"]);
+
+  await act(async () => retry()!.click());
+  await vi.waitFor(() =>
+    expect(channelButtons().map((button) => button.textContent)).toEqual([
+      "Eurosport 1",
+      "Channel 21",
+      "Channel 22",
+    ]),
+  );
+  expect(document.querySelector("[role=alert]")).toBeNull();
+  expect(ipc.argsOf("guide.searchPage")).toHaveLength(4);
+  expect(document.body.textContent).not.toContain(LIMIT_WARNING);
+});
