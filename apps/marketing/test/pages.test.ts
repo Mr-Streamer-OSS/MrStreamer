@@ -86,6 +86,7 @@ describe("public document pages without JavaScript", () => {
     const sections = [...document.querySelectorAll("details.section")];
     expect(sections.map((section) => section.querySelector("summary h2")?.id)).toEqual([
       "live-channels",
+      "multiview",
       "movies-and-episodes",
       "recordings",
       "online-subtitles",
@@ -100,7 +101,7 @@ describe("public document pages without JavaScript", () => {
     );
     // A renamed heading's old address lands right before its section, not inside the one above.
     expect(document.querySelector("#online-subtitles-from-009")?.nextElementSibling).toBe(
-      sections[3],
+      sections[4],
     );
   });
 
