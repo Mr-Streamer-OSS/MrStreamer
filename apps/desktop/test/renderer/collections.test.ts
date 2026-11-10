@@ -848,6 +848,9 @@ describe("a title's collections menu in its details", () => {
       await act(async () => button("Try again").click());
       await vi.waitFor(() => expect(button("Retry")).toBeTruthy());
       expect(document.querySelector("[role=alert]")?.textContent).toContain("Couldn't save.");
+
+      // The stored create disables the menu until its add is sent, so Retry takes the focus.
+      if (operation === "create") expect(document.activeElement).toBe(button("Retry"));
       expect(ipc.argsOf("collections.change")).toHaveLength(1);
       const retry = ipc.hold("collections.change");
       await act(async () => button("Retry").click());
@@ -868,6 +871,44 @@ describe("a title's collections menu in its details", () => {
       await vi.waitFor(() => expect(document.querySelector("[role=alert]")).toBeNull());
     },
   );
+
+  it("keeps an unsent new collection name through a failed title read", async () => {
+    mainCollections([{ name: "Private films", members: [] }], [{ ...film, id: "4k" }]);
+    const client = await details();
+    const stop = syncOnDemand(client);
+    const close = unmount;
+    unmount = () => {
+      stop();
+      close();
+    };
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='Collections for Night Harbour']")).not.toBeNull(),
+    );
+    await act(async () => button("Add to collection").click());
+    const item = await vi.waitFor(() => button("New collection"));
+    await act(async () => item.click());
+    await type("Private weekend", "Shift");
+    const refused = ipc.hold("ondemand.titles");
+    const reads = ipc.argsOf("ondemand.titles").length;
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+    await vi.waitFor(() => expect(ipc.argsOf("ondemand.titles").length).toBeGreaterThan(reads));
+    await act(async () => refused.reject({ kind: "unexpected", detail: "worker unavailable" }));
+    await vi.waitFor(() => expect(button("Try again")).toBeTruthy());
+    expect(document.querySelector("input[aria-label='Collection name']")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("Private weekend");
+
+    ipc.always("ondemand.titles", [film]);
+    await act(async () => button("Try again").click());
+    await vi.waitFor(() => expect(field().value).toBe("Private weekend"));
+    await type("Private weekend", "Enter");
+    await vi.waitFor(() =>
+      expect(ipc.argsOf("collections.change")[0]).toMatchObject({
+        kind: "create",
+        name: "Private weekend",
+      }),
+    );
+  });
 
   it("ticks and adds the version the details play, not the title's first", async () => {
     mainCollections(
@@ -1247,6 +1288,30 @@ it("keeps a refused rename and its exact submitted name through privacy loading"
   );
   await vi.waitFor(() => expect(ipc.argsOf("collections.change")).toHaveLength(2));
   expect(ipc.argsOf("collections.change")[1]).toEqual(ipc.argsOf("collections.change")[0]);
+});
+
+it("keeps an unsent rename through privacy loading without showing it meanwhile", async () => {
+  ipc.reset();
+  ipc.always("subscription.list", [SAVED]);
+  mainCollections([{ name: "Films", members: [member(kite)] }]);
+  await mountTab();
+  await row("Films");
+  await choose("Films", "Rename");
+  await type("Weekend", "Shift");
+  const list = ipc.hold("collections.list");
+  await act(async () =>
+    ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+  );
+  await vi.waitFor(() => expect(document.querySelector("input")).toBeNull());
+  expect(document.body.innerHTML).not.toContain("Weekend");
+  await act(async () => list.resolve([{ id: "c0", name: "Films", total: 1 }]));
+  await vi.waitFor(() => expect(field().value).toBe("Weekend"));
+  await type("Weekend", "Enter");
+  await vi.waitFor(() =>
+    expect(ipc.argsOf("collections.change")).toEqual([
+      { kind: "rename", id: "c0", name: "Weekend" },
+    ]),
+  );
 });
 
 it("forgets a restricted selection and pending refusal before it can become eligible again", async () => {
