@@ -110,6 +110,7 @@ const SCHEMA = `
     command_id text not null
   );
   create table if not exists receipts (command_id text primary key);
+  create index if not exists events_by_command on events (command_id);
   create table if not exists state (
     account text primary key,
     favourites text not null,
@@ -943,7 +944,14 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
         if (favouriteAdded) added?.();
 
-        return { ...read(accounts), written: sequences };
+        return {
+          ...read(accounts),
+          written: sequences,
+          recorded: db
+            .prepare("select * from events where command_id = ? order by sequence")
+            .all(commandId)
+            .flatMap((raw) => eventOf(raw) ?? []),
+        };
       }),
     importOnce: ({ account, at, events }) =>
       attempt(() => {
@@ -1045,7 +1053,7 @@ function save(db: DatabaseSync, account: string, state: ViewingState, sequence: 
 
 /**
  * Stores what `account` keeps under a series' key, in place of what it kept, with the marks of
- * `changed`: a mark or its Undo changes one episode's, and only a rebuild writes them all.
+ * `changed`: a single mark changes one episode; bulk marks, Undo and rebuilds rewrite all.
  */
 function saveSeries(
   db: DatabaseSync,

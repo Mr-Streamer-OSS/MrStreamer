@@ -306,3 +306,13 @@ export function goesOn(
     resume: resume ? { position: resume.position, duration: resume.duration } : null,
   };
 }
+
+/** The latest film mark that stands against every play in its subscription-scoped versions. */
+export function standingFilmMark<Mark extends { readonly at: number }>(
+  marks: readonly Mark[],
+  played: readonly Pick<RawProgress, "since">[],
+): Mark | null {
+  const mark = marks.toSorted((a, b) => b.at - a.at)[0];
+
+  return mark && played.every((row) => stands(mark, row)) ? mark : null;
+}

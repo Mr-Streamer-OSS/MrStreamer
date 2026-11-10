@@ -143,6 +143,16 @@ describe("the viewing record over the in-memory store", () => {
     expect([filmMarked.changed, seasonMarked.changed]).toEqual([1, 3]);
 
     const relaunched = app(saved, (next) => (saved = next));
+    expect(
+      await relaunched.run((record) =>
+        record.markTitles("f1", { kind: "film", versions: [film] }, true),
+      ),
+    ).toEqual(filmMarked);
+    expect(
+      await relaunched.run((record) =>
+        record.markTitles("s1", { kind: "season", series, season: 1 }, true),
+      ),
+    ).toEqual(seasonMarked);
     const viewing = await relaunched.run((record) => record.state);
     expect(viewing.continueWatching).toEqual([]);
     expect(viewing.marked[0]?.next).toBeNull();
@@ -169,6 +179,7 @@ describe("the viewing record over the in-memory store", () => {
     await running.run((record) => record.markEpisode("m1", episode(1), true));
     await running.run((record) => record.erase(SUB));
     expect(kept.snapshot?.accounts).toEqual({});
+    expect(Object.values(kept.snapshot?.receiptEvents ?? {}).flat()).toEqual([]);
   });
 
   it("stars, shows, moves and unstars a favourite by the port's group, none of it listed", async () => {

@@ -36,15 +36,11 @@ import type {
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import type {
-  EpisodeMark,
-  FilmMark,
-  MarkScope,
-  TitleProgress,
-} from "@mrstreamer/contracts/viewing";
+import type { EpisodeMark, MarkScope, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { episodeFileVersion } from "@mrstreamer/core/ondemand/details";
 import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
+import { standingFilmMark } from "@mrstreamer/core/viewing/marks";
 import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
 import { formatDate, formatDecimal, t } from "@mrstreamer/core/i18n";
 import {
@@ -529,8 +525,10 @@ function MovieActions({
   // A mark is of the film's versions in that subscription too, and stands over their progress.
   const film = filmScope(versions.title?.versions ?? details.title.versions, versions.playing);
   const filmMarks = useQuery(queries.filmMarks(film.versions));
-  const mark = latestMark(filmMarks.data);
-  const partly = !mark && current && !current.finished && current.position > 0;
+  const ready = filmMarks.isSuccess && progress.isSuccess;
+  const readError = filmMarks.error ?? progress.error;
+  const mark = standingFilmMark(filmMarks.data ?? [], ownProgress(progress.data, versions.playing));
+  const partly = ready && !mark && current && !current.finished && current.position > 0;
   const watched = mark ? mark.watched : current?.finished === true;
   const now = movieNow({ ...details.title, ...versions.playing }, details.backdropUrl);
   const removal = useRemoveFromContinue();
@@ -543,7 +541,7 @@ function MovieActions({
   return (
     <Actions
       versions={versions}
-      switching={switching}
+      switching={switching || !ready}
       saving={saving}
       progress={partly ? current : undefined}
       primaryLabel={partly ? t("Resume") : t("Play")}
@@ -554,7 +552,7 @@ function MovieActions({
       download={<MovieDownload title={now.title} />}
       markControl={
         // Until the marks are read, the sheet can't say which of the two the film needs.
-        filmMarks.data && (
+        ready && (
           <MarkButton
             busy={marking.busy}
             watched={watched}
@@ -570,11 +568,14 @@ function MovieActions({
       notice={
         <>
           <TitleMarkNotice marks={marking} className="mt-3" />
-          {filmMarks.error && (
+          {readError && (
             <p role="alert" className="mt-3 text-sm text-destructive">
-              {t("Couldn't read what you watched.")} {describeError(appError(filmMarks.error))}{" "}
+              {t("Couldn't read what you watched.")} {describeError(appError(readError))}{" "}
               <button
-                onClick={() => void filmMarks.refetch()}
+                onClick={() => {
+                  void filmMarks.refetch();
+                  void progress.refetch();
+                }}
                 className="text-white underline underline-offset-4"
               >
                 {t("Try again")}
@@ -585,11 +586,6 @@ function MovieActions({
       }
     />
   );
-}
-
-/** The film's mark that stands, the latest made of its versions, or null. */
-function latestMark(marks: readonly FilmMark[] | undefined): FilmMark | null {
-  return marks?.toSorted((a, b) => b.at - a.at)[0] ?? null;
 }
 
 /**

@@ -44,7 +44,6 @@ import {
   type RecordingPlace,
 } from "../recordings/recordings.ts";
 import {
-  filmScope,
   MarkItem,
   TitleMarkNotice,
   useTitleMarks,
@@ -60,7 +59,18 @@ export function HistoryPage({ onBack }: { onBack: () => void }) {
 
   // Undo goes by the marks that still stand, as the record last listed them.
   const marks = useTitleMarks(
-    history.data && new Set(entries.flatMap((entry) => (entry.mark ? [entry.mark.revision] : []))),
+    history.data &&
+      new Set(
+        entries.flatMap((entry) =>
+          entry.kind === "series"
+            ? entry.undoable == null
+              ? []
+              : [entry.undoable]
+            : entry.mark
+              ? [entry.mark.revision]
+              : [],
+        ),
+      ),
   );
 
   return (
@@ -242,7 +252,7 @@ function historyTitle({ title, version }: Listed) {
 
 /**
  * An online entry: the row opens its details, and the three dots beside it mark it or take it out
- * of Continue watching. A film is marked in its own subscription's versions, a series as a whole
+ * of Continue watching. A film is marked in its exact row version, a series as a whole
  * in the version the entry is of.
  */
 function HistoryRow({
@@ -269,7 +279,7 @@ function HistoryRow({
   const mark = (next: boolean) =>
     marks.mark(
       entry.kind === "movie"
-        ? filmScope(title.versions, version)
+        ? { kind: "film", versions: [version] }
         : { kind: "series", series: version },
       next,
       { name: title.title, episodes: entry.kind === "series" },
@@ -320,11 +330,11 @@ function HistoryRow({
               >
                 <MarkItem disabled={marks.busy || watched === true} onPick={() => mark(true)}>
                   <Check className="size-4 flex-none" />
-                  {t("Mark watched")}
+                  {entry.kind === "series" ? t("Mark series watched") : t("Mark watched")}
                 </MarkItem>
                 <MarkItem disabled={marks.busy || watched === false} onPick={() => mark(false)}>
                   <Circle className="size-4 flex-none" />
-                  {t("Mark unwatched")}
+                  {entry.kind === "series" ? t("Mark series unwatched") : t("Mark unwatched")}
                 </MarkItem>
                 {listed && (
                   <MarkItem onPick={onRemove}>

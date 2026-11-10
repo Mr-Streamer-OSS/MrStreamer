@@ -266,7 +266,7 @@ export class ViewingStore extends Context.Service<
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
      * the records of `accounts` as they stand, each to its own account's and in the order given,
      * and stores the states they add up to. Returns the records after, with the numbers the
-     * events were given, in their order: none when the command ran before. A `Failed` from
+     * events were given, in their order, and the original events for receipt recovery. A `Failed` from
      * `decide` refuses the command: the call fails with it and stores nothing, the id neither.
      */
     readonly commit: (input: {
@@ -279,7 +279,13 @@ export class ViewingStore extends Context.Service<
         stored: StoredViewing,
         look: StoredLook,
       ) => readonly AccountEvent[] | Failed;
-    }) => Effect.Effect<StoredViewing & { readonly written: readonly number[] }, Failed>;
+    }) => Effect.Effect<
+      StoredViewing & {
+        readonly written: readonly number[];
+        readonly recorded: readonly (AccountEvent & { readonly sequence: number })[];
+      },
+      Failed
+    >;
     /**
      * In one transaction with the import marker: appends `events` for `account`. Does nothing,
      * and returns false, once the marker is set.
@@ -939,41 +945,61 @@ function make() {
     const ownerIn = (owners: readonly ViewingOwner[], title: { readonly subscriptionId: string }) =>
       owners.find((owner) => owner.subscriptionId === title.subscriptionId) ?? noSubscription;
 
-    /**
-     * Commits a mark command whose events `decide` makes, one per film version or series, with
-     * how many films and episodes each changes and the title Undo names it by.
-     */
+    /** Commits mark events and recovers their original Undo receipt on retries. */
     const marking = (
       commandId: string,
       named: readonly OwnedId[],
-      kind: MarkMade["kind"],
       decide: (
         owners: readonly ViewingOwner[],
         look: StoredLook,
-      ) =>
-        | readonly {
-            readonly event: AccountEvent;
-            readonly title: OwnedId;
-            readonly count: number;
-          }[]
-        | Failed,
+      ) => readonly AccountEvent[] | Failed,
     ) =>
       Effect.gen(function* () {
-        let made: ReturnType<typeof decide> = [];
+        const { stored } = yield* committed(commandId, named, (_found, owners, look) =>
+          decide(owners, look),
+        );
 
-        const { stored } = yield* committed(commandId, named, (_found, owners, look) => {
-          made = decide(owners, look);
+        // The store returns the original events on retries too, even after a restart.
+        const owners = yield* account.owners;
 
-          return made instanceof Failed ? made : made.map(({ event }) => event);
-        });
+        const made = stored.recorded.flatMap<{ count: number; mark: MarkMade }>(
+          ({ account: key, event, sequence }) => {
+            const owner = owners.find((each) => each.key === key);
 
-        // None written: the command ran before, and changed nothing more now.
-        const kept = stored.written.length > 0 && !(made instanceof Failed) ? made : [];
+            if (!owner) return [];
+
+            if (event.type === "movie-marked")
+              return [
+                {
+                  count: 1,
+                  mark: {
+                    kind: "movie" as const,
+                    title: { subscriptionId: owner.subscriptionId, id: event.title.id },
+                    revision: sequence,
+                  },
+                },
+              ];
+            const first = event.type === "episodes-marked" ? event.titles[0] : undefined;
+
+            if (event.type === "episodes-marked" && first)
+              return [
+                {
+                  count: event.titles.length,
+                  mark: {
+                    kind: "series" as const,
+                    title: { subscriptionId: owner.subscriptionId, id: first.seriesId },
+                    revision: sequence,
+                  },
+                },
+              ];
+
+            return [];
+          },
+        );
 
         return {
-          changed: kept.reduce((sum, each) => sum + each.count, 0),
-          // The store numbers each event written, in order. A 0 matches no mark and Undo refuses it.
-          made: kept.map(({ title }, at) => ({ kind, title, revision: stored.written[at] ?? 0 })),
+          changed: made.reduce((sum, each) => sum + each.count, 0),
+          made: made.map((each) => each.mark),
         } satisfies MarksChanged;
       });
 
@@ -982,7 +1008,7 @@ function make() {
       const wanted = watched ? "watched" : "unwatched";
       const unique = [...new Map(versions.map((each) => [ownedKey(each), each])).values()];
 
-      return marking(commandId, unique, "movie", (owners, look) => {
+      return marking(commandId, unique, (owners, look) => {
         const made = [];
 
         for (const version of unique) {
@@ -995,7 +1021,7 @@ function make() {
           if (filmState(mark, row) === wanted) continue;
           const title = { kind: "movie" as const, id: version.id };
           const event = { type: "movie-marked" as const, title, watched };
-          made.push({ event: { account: owner.key, event }, title: version, count: 1 });
+          made.push({ account: owner.key, event });
         }
 
         return made;
@@ -1022,7 +1048,7 @@ function make() {
         const episodes = episodesIn(seasons, series, season);
         const wanted = watched ? "watched" : "unwatched";
 
-        return yield* marking(commandId, [series], "series", (owners, look) => {
+        return yield* marking(commandId, [series], (owners, look) => {
           const owner = ownerIn(owners, series);
 
           if (owner instanceof Failed) return owner;
@@ -1047,7 +1073,7 @@ function make() {
             listing,
           };
 
-          return [{ event: { account: owner.key, event }, title: series, count: titles.length }];
+          return [{ account: owner.key, event }];
         });
       });
 
@@ -1358,7 +1384,20 @@ function make() {
         const owners = yield* account.owners;
 
         const entries = yield* Effect.forEach(owners, (owner) =>
-          Effect.map(store.history(owner.key), (stored) => historyOf(owner, stored)),
+          Effect.gen(function* () {
+            const entries = historyOf(owner, yield* store.history(owner.key));
+
+            return yield* Effect.forEach(entries, (entry) =>
+              Effect.gen(function* () {
+                if (entry.kind === "movie") return entry;
+                const { keys, versions } = yield* listed.identity(entry.series);
+                const played = yield* store.titles(owner.key, { seriesIds: versions });
+                const kept = yield* store.marks(owner.key, keys);
+
+                return { ...entry, undoable: undoable(kept, played)?.revision ?? null };
+              }),
+            );
+          }),
         );
 
         return entries.flat().toSorted((a, b) => b.at - a.at);

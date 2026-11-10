@@ -1470,11 +1470,8 @@ describe("marking a film, a season or a series at once", () => {
     const all = await record.markTitles("all", { kind: "series", series }, true);
     expect(all.changed).toBe(2);
     expect(await goesOn(record)).toEqual([null]);
-    // Sent again, or asked for what stands already, it changes nothing and says so.
-    expect(await record.markTitles("all", { kind: "series", series }, true)).toEqual({
-      changed: 0,
-      made: [],
-    });
+    // A retry recovers the original acknowledgement, including Undo revisions.
+    expect(await record.markTitles("all", { kind: "series", series }, true)).toEqual(all);
     expect(await record.markTitles(randomUUID(), { kind: "series", series }, true)).toEqual({
       changed: 0,
       made: [],
@@ -1488,6 +1485,34 @@ describe("marking a film, a season or a series at once", () => {
     later();
     await record.undoMarks(randomUUID(), unwatched.made);
     expect(await goesOn(record)).toEqual([null]);
+  });
+
+  it("reports History Undo eligibility across every episode after a series mark", async () => {
+    const { viewing, series, episodeOf } = await marking();
+    const { record } = viewing;
+    const done = await record.markTitles(randomUUID(), { kind: "season", series, season: 1 }, true);
+    expect((await record.history()).find((entry) => entry.kind === "series")).toMatchObject({
+      undoable: done.made[0]?.revision,
+    });
+    later();
+    // A play outside the marked season still invalidates the entire series Undo.
+    await record.recordProgress(randomUUID(), episodeOf(2, 1), 300, 2700, Date.now());
+    expect((await record.history()).find((entry) => entry.kind === "series")).toMatchObject({
+      undoable: null,
+    });
+  });
+
+  it("recovers committed mark receipts and Undo after a lost acknowledgement and restart", async () => {
+    const { app, viewing, series } = await marking();
+    const scope = { kind: "season", series, season: 1 } as const;
+    const before = await viewing.record.episodes(series);
+    const done = await viewing.record.markTitles("lost-ack", scope, true);
+    expect(done.changed).toBe(3);
+    expect(await viewing.record.markTitles("lost-ack", scope, true)).toEqual(done);
+    const restarted = await app.start();
+    expect(await restarted.record.markTitles("lost-ack", scope, true)).toEqual(done);
+    await restarted.record.undoMarks(randomUUID(), done.made);
+    expect(await restarted.record.episodes(series)).toEqual(before);
   });
 
   it("marks every version of a film: it leaves Continue watching, the earlier play's late checkpoints change nothing, a play begun later takes over", async () => {

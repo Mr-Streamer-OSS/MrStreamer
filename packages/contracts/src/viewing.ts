@@ -209,5 +209,7 @@ export type HistoryEntry =
       readonly progress: TitleProgress | null;
       /** The latest mark made in this version, or null. */
       readonly mark: EpisodeMark | null;
+      /** The revision still eligible for Undo, across every version and episode of the series. */
+      readonly undoable?: number | null;
       readonly at: number;
     };

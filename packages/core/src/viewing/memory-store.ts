@@ -3,8 +3,8 @@
 // desktop's tables (./project.ts) and reads the same way, so the record service (./service.ts)
 // answers alike over either.
 //
-// It keeps the state the events add up to, not the events: a phone records a checkpoint a minute
-// while a title plays, and a file of every one would grow without end. So nothing here is rebuilt
+// It keeps state and recent command receipts, rather than an unbounded event log: a phone
+// records a checkpoint a minute while a title plays, and a file of every one would grow without end. So nothing here is rebuilt
 // when the rules change (STATE_VERSION); the rows and marks stay as they were committed. Command
 // ids are kept for the latest commands only, enough for a command sent again to change nothing.
 import { CONTINUE_OFFERED } from "@mrstreamer/contracts/viewing";
@@ -49,6 +49,9 @@ export type ViewingSnapshot = {
   readonly sequence: number;
   /** The latest commands done, oldest first. */
   readonly receipts: readonly string[];
+  readonly receiptEvents?: Readonly<
+    Record<string, readonly (AccountEvent & { readonly sequence: number })[]>
+  >;
   readonly imported: boolean;
   readonly accounts: Readonly<Record<string, AccountSnapshot>>;
 };
@@ -107,12 +110,14 @@ export function memoryViewingStore(deps: {
 
   let accounts = new Map<string, Account>();
   let receipts = new Set<string>();
+  let receiptEvents: NonNullable<ViewingSnapshot["receiptEvents"]> = {};
   let sequence = 0;
   let imported = false;
 
   const load = (from: ViewingSnapshot) => {
     accounts = new Map(Object.entries(from.accounts).map(([key, each]) => [key, accountOf(each)]));
     receipts = new Set(from.receipts);
+    receiptEvents = from.receiptEvents ?? {};
     sequence = from.sequence;
     imported = from.imported;
   };
@@ -123,6 +128,9 @@ export function memoryViewingStore(deps: {
     version: 1,
     sequence,
     receipts: [...receipts].slice(-RECEIPTS),
+    receiptEvents: Object.fromEntries(
+      [...receipts].slice(-RECEIPTS).map((id) => [id, receiptEvents[id] ?? []]),
+    ),
     imported,
     accounts: Object.fromEntries(
       [...accounts].map(([key, each]) => [
@@ -151,6 +159,7 @@ export function memoryViewingStore(deps: {
       deps.save(next);
       saved = next;
       receipts = new Set(next.receipts);
+      receiptEvents = next.receiptEvents ?? {};
 
       return result;
     } catch (cause) {
@@ -348,7 +357,8 @@ export function memoryViewingStore(deps: {
       }),
     commit: ({ accounts: wanted, commandId, at, decide }) =>
       attempt(() => {
-        if (receipts.has(commandId)) return { ...read(wanted), written: [] };
+        if (receipts.has(commandId))
+          return { ...read(wanted), written: [], recorded: receiptEvents[commandId] ?? [] };
         const events = decide(read(wanted), look);
 
         // Thrown, so the transaction stores nothing, the command's id neither.
@@ -357,10 +367,18 @@ export function memoryViewingStore(deps: {
 
         transaction(() => {
           receipts.add(commandId);
+          receiptEvents = {
+            ...receiptEvents,
+            [commandId]: events.map((event, index) => ({ ...event, sequence: first + index })),
+          };
           append(at, events);
         });
 
-        return { ...read(wanted), written: events.map((_event, index) => first + index) };
+        return {
+          ...read(wanted),
+          written: events.map((_event, index) => first + index),
+          recorded: receiptEvents[commandId] ?? [],
+        };
       }),
     importOnce: ({ account, at, events }) =>
       attempt(() => {
@@ -379,7 +397,15 @@ export function memoryViewingStore(deps: {
       }),
     erase: (account) =>
       attempt(() => {
-        transaction(() => accounts.delete(account));
+        transaction(() => {
+          accounts.delete(account);
+          receiptEvents = Object.fromEntries(
+            Object.entries(receiptEvents).map(([id, events]) => [
+              id,
+              events.filter((event) => event.account !== account),
+            ]),
+          );
+        });
       }),
   };
 }
