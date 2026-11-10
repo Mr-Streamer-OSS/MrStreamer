@@ -116,6 +116,7 @@ export interface RecordingResumeList {
     readonly recording: Recording;
     readonly progress: {
       readonly position: number;
+      /** Zero means unknown length, never watched. */
       readonly duration: number;
       /** User-write time in epoch milliseconds; null for legacy seeds. */
       readonly at: number | null;

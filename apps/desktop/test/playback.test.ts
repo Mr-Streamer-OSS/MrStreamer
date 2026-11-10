@@ -2577,11 +2577,22 @@ describe("growing copy readers", () => {
             gaps: [{ from: 1000, to: null, why: "stream" }],
           },
         });
-        await local.closeCopy("kept-recording", "download");
-        expect(await local.copyState(copy.sessionId)).not.toBeNull();
-        await local.closeCopy("kept-recording", "recording");
-        await file.cancelled;
-        expect((await file.source.read()).final).toBe(false);
+        const beforeWrites = changed.length;
+
+        for (let write = 0; write < 5; write++) {
+          file.update({});
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        expect(changed.length - beforeWrites).toBeLessThanOrEqual(1);
+        await expect.poll(() => changed.length, { timeout: 2000 }).toBe(beforeWrites + 1);
+        file.update({});
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        file.update({ final: true, status: { kind: "complete" } });
+        await expect.poll(() => changed.length, { timeout: 500 }).toBe(beforeWrites + 2);
+        await local.closeCopy("kept-recording");
+
+        expect((await file.source.read()).final).toBe(true);
         expect(await local.copyState(copy.sessionId)).toBeNull();
         file.update({
           duration: 5,

@@ -2,11 +2,12 @@
 // Recordings with no subscription saved: Connect offers them once any is kept, and they stand
 // alone as Downloads do, what was recorded only, with nothing scheduled and no Storage, and an
 // ended one plays over the page from this computer.
+import { defined } from "@mrstreamer/core/defined";
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Recording, ScheduledRecording } from "@mrstreamer/contracts/recordings";
 import { App } from "../../src/renderer/src/app/App.tsx";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
@@ -145,4 +146,119 @@ it("keeps Recordings in Downloads' bar while the list can't be read, to try agai
   await until(() => window.querySelector("header") !== null);
   await click(button(window, "Recordings"));
   await until(() => button(window, "Retry") !== undefined);
+});
+
+it.each([
+  { name: "watched ended copy", duration: 600, position: 600, from: 0, growing: false },
+  {
+    name: "growing checkpoint on a longer ended copy",
+    duration: 300,
+    position: 300,
+    from: 295,
+    growing: false,
+  },
+  { name: "still-growing edge checkpoint", duration: 600, position: 600, from: 595, growing: true },
+])("opens a $name at $from", async ({ duration, position, from, growing }) => {
+  const { playRecording } =
+    await import("../../src/renderer/src/features/recordings/recordings.ts");
+
+  ipc.always("playback.openCopy", {
+    sessionId: "r-session",
+    copy: "r1",
+    url: "http://127.0.0.1/title/r.mp4",
+    duration: 600,
+    audio: [],
+    subtitles: [],
+    progress: { position, duration },
+    ...defined({
+      recording: growing
+        ? {
+            revision: 1,
+            final: false,
+            duration: 600,
+            status: { kind: "recording" as const },
+            seekable: [{ from: 0, to: 600 }],
+            audioSeekable: [],
+            subtitleSeek: false,
+            gaps: [],
+          }
+        : undefined,
+    }),
+  });
+  playRecording(recorded);
+  await vi.waitFor(() => expect(titlePlayer.state().subtitleSessionId).toBe("r-session"));
+  expect(titlePlayer.state().position).toBe(from);
+});
+
+it.each([false, true])("recovers failed places with only active rows, group=%s", async (group) => {
+  const { RecordingsPage } =
+    await import("../../src/renderer/src/features/recordings/RecordingsPage.tsx");
+
+  const active: Recording = {
+    ...recorded,
+    ended: null,
+    status: { kind: "recording" },
+    scheduled: { schedule: "schedule", from: recorded.start, late: null, rule: "rule" },
+  };
+
+  ipc.always("recordings.list", [active]);
+  ipc.refuse("recordings.resume", { kind: "unexpected", detail: "Unreadable places" });
+  const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  unmount = view.unmount;
+  await view.render(createElement(RecordingsPage));
+  await until(() => view.container.textContent?.includes("Weather Watch") ?? false);
+
+  if (group) {
+    const shelf = [...view.container.querySelectorAll<HTMLButtonElement>("nav button")].find(
+      (each) => each.textContent?.includes("Weather Watch"),
+    );
+
+    expect(shelf).toBeDefined();
+    await click(shelf);
+    expect(shelf?.getAttribute("aria-current")).toBe("page");
+  }
+
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain("couldn't be read");
+  ipc.always("recordings.resume", {
+    owner: { id: "default", revision: 1 },
+    items: [{ recording: active, progress: { position: 120, duration: 300, at: Date.now() } }],
+  });
+  await click(button(view.container, "Try again"));
+  await until(() => !view.container.querySelector('[role="alert"]'));
+  expect(ipc.argsOf("recordings.resume").length).toBeGreaterThan(1);
+  expect(button(view.container, "Resume Weather Watch")).toBeDefined();
+});
+
+it("keeps a final recording's place without claiming an unknown length", async () => {
+  const { playRecording, resumes } =
+    await import("../../src/renderer/src/features/recordings/recordings.ts");
+
+  ipc.always("playback.openCopy", {
+    sessionId: "unknown-final",
+    copy: "r1",
+    url: "http://127.0.0.1/title/r.mp4",
+    duration: null,
+    audio: [],
+    subtitles: [],
+    progress: { position: 120, duration: 300 },
+    recording: {
+      revision: 2,
+      duration: null,
+      final: true,
+      status: { kind: "complete" },
+      seekable: [{ from: 0, to: 300 }],
+      audioSeekable: [],
+      gaps: [],
+      subtitleSeek: false,
+    },
+  });
+  playRecording(recorded);
+  await vi.waitFor(() => expect(titlePlayer.state().subtitleSessionId).toBe("unknown-final"));
+  titlePlayer.close();
+  await vi.waitFor(() =>
+    expect(ipc.argsOf("recordings.recordProgress")).toMatchObject([
+      { id: "r1", position: 115, duration: 0 },
+    ]),
+  );
+  expect(resumes(recorded, { position: 115, duration: 0, at: Date.now() })).toBe(true);
 });

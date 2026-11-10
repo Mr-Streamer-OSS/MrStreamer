@@ -103,6 +103,7 @@ import { withoutAddresses, type Provider } from "@mrstreamer/core/provider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -793,7 +794,7 @@ export class Playback extends Context.Service<
       turn?: number,
     ): Effect.Effect<CopySession, Failed>;
     /** Closes what plays a copy, as before it is deleted. */
-    closeCopy(copyId: string, kind?: "download" | "recording"): Effect.Effect<void>;
+    closeCopy(copyId: string): Effect.Effect<void>;
     /** Read stored copy facts, checking admission after the read and liveness before returning. */
     copyState(
       sessionId: string,
@@ -4807,7 +4808,10 @@ function make(deps: PlaybackDeps) {
                     catch: failedWith,
                   });
 
+                  let publication: Fiber.Fiber<void, never> | undefined;
+
                   while (!extent.final) {
+                    const previousStatus = JSON.stringify([extent.status, extent.gaps]);
                     extent = yield* Effect.tryPromise({
                       try: (signal) =>
                         recording.wait(
@@ -4816,7 +4820,29 @@ function make(deps: PlaybackDeps) {
                         ),
                       catch: failedWith,
                     });
-                    yield* PubSub.publish(copyChanged, session.id);
+
+                    // Reader wakeups remain per write. UI facts need at most one publication a
+                    // second; status, gaps and settlement bypass that delay.
+                    if (
+                      extent.final ||
+                      previousStatus !== JSON.stringify([extent.status, extent.gaps])
+                    ) {
+                      if (publication) yield* Fiber.interrupt(publication);
+                      publication = undefined;
+                      yield* PubSub.publish(copyChanged, session.id);
+                    } else if (!publication) {
+                      publication = yield* Effect.forkIn(
+                        Effect.sleep("1 second").pipe(
+                          Effect.andThen(() => {
+                            publication = undefined;
+
+                            return PubSub.publish(copyChanged, session.id);
+                          }),
+                          Effect.asVoid,
+                        ),
+                        session.scope,
+                      );
+                    }
                   }
                 }).pipe(Effect.catch(() => PubSub.publish(copyChanged, session.id))),
                 session.scope,
@@ -4849,15 +4875,14 @@ function make(deps: PlaybackDeps) {
             : Effect.succeed(null);
         }),
       copyChanged: Stream.fromPubSub(copyChanged),
-      closeCopy: (copyId: string, kind?: "download" | "recording") =>
+      closeCopy: (copyId: string) =>
         Effect.suspend(() =>
           Effect.forEach(
             [...sessions.values()].filter(
               (session) =>
                 session.kind === "title" &&
                 session.origin.kind === "copy" &&
-                session.origin.copy === copyId &&
-                (kind === undefined || session.origin.copyKind === kind),
+                session.origin.copy === copyId,
             ),
             (session) => Scope.close(session.scope, Exit.void),
             { discard: true },

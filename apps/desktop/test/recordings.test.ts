@@ -319,7 +319,7 @@ async function growingCopy(before: Buffer, ffprobe?: string) {
 
   if (recording.kind !== "started") throw new Error("Recording did not start");
   const id = recording.recording.id;
-  const source = await recordings.file(id);
+  const source = (await recordings.copy(id))!.recording!;
   let total = before.length;
 
   const captured = () =>
@@ -359,7 +359,7 @@ async function growingCopy(before: Buffer, ffprobe?: string) {
       return (await readFile(file.path)).subarray(0, total);
     },
     end: async () => {
-      await playback.closeCopy(id, "recording");
+      await playback.closeCopy(id);
       await recordings.stop(id);
     },
   };
@@ -5952,19 +5952,6 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     const id = started.recording.id;
 
     try {
-      const source = await recordings.file(id);
-      const signal = AbortSignal.timeout(5000);
-
-      const extent = await until(
-        () => source.read(signal),
-        (current) => current.bytes === bytes.length,
-        5000,
-      );
-
-      expect(extent.bytes).toBe(bytes.length);
-      expect(extent.final).toBe(false);
-      expect(extent.duration).toBeNull();
-      expect(extent.seekable).toEqual([]);
       await expect(recordings.copy(id)).rejects.toBeTruthy();
       expect(provider.streamRequests()).toBe(1);
     } finally {
@@ -5991,7 +5978,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     const id = started.recording.id;
     // Its program is read, so its copy plays while it records.
     expect(await recordings.copy(id)).toMatchObject({ id, kind: "recording" });
-    const source = await recordings.file(id);
+    const source = (await recordings.copy(id))!.recording!;
     const first = await source.read();
     expect(first).toMatchObject({
       bytes: split,
@@ -6026,7 +6013,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     expect((await playback.copyState(activeSession.sessionId))?.recording?.duration).toBe(
       next.duration,
     );
-    await playback.closeCopy(id, "recording");
+    await playback.closeCopy(id);
     expect((await source.read()).final).toBe(false);
     expect(provider.streamRequests()).toBe(1);
     const paused = source.wait(next.revision, AbortSignal.timeout(5000));
@@ -6062,7 +6049,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     expect(final.duration).toBeNull();
     expect(state?.recording).toMatchObject({ final: true, duration: null, seekable: [] });
     expect(state?.recording).not.toHaveProperty("layout");
-    await playback.closeCopy(id, "recording");
+    await playback.closeCopy(id);
     expect((await source.read()).final).toBe(true);
     expect(provider.streamRequests()).toBe(1);
   });
@@ -6080,7 +6067,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     await expect(playback.copyState(copy.sessionId)).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "Recording track layout changed." },
     });
-    await playback.closeCopy(id, "recording");
+    await playback.closeCopy(id);
     expect((await source.read()).final).toBe(false);
     expect(provider.streamRequests()).toBe(1);
     await recordings.stop(id);
@@ -6115,7 +6102,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     }
 
     expect((await source.read()).final).toBe(false);
-    await playback.closeCopy(id, "recording");
+    await playback.closeCopy(id);
     expect(provider.streamRequests()).toBe(1);
     await recordings.stop(id);
   });
@@ -6642,7 +6629,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
 
     if (started.kind !== "started") throw new Error("Recording did not start");
     const id = started.recording.id;
-    const source = await recordings.file(id);
+    const source = (await recordings.copy(id))!.recording!;
     const signal = AbortSignal.timeout(5000);
 
     await until(
@@ -6671,7 +6658,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
         await response.body?.cancel().catch(() => {});
       }
     } finally {
-      await playback.closeCopy(id, "recording");
+      await playback.closeCopy(id);
       await recordings.stop(id);
     }
 
@@ -6707,7 +6694,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
         await response.body?.cancel().catch(() => {});
       }
     } finally {
-      await playback.closeCopy(id, "recording");
+      await playback.closeCopy(id);
     }
 
     expect(provider.streamRequests()).toBe(1);
@@ -6731,7 +6718,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
       expect(state?.subtitles).toEqual(copy.subtitles);
     }
 
-    await playback.closeCopy(id, "recording");
+    await playback.closeCopy(id);
     expect(await playback.copyState(copy.sessionId)).toBeNull();
     expect(provider.streamRequests()).toBe(1);
   });
@@ -6749,7 +6736,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
 
     if (started.kind !== "started") throw new Error("Recording did not start");
-    const source = await recordings.file(started.recording.id);
+    const source = (await recordings.copy(started.recording.id))!.recording!;
     let extent = await source.read();
     expect(extent.duration).toBeGreaterThan(0);
 
@@ -6790,8 +6777,8 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
       const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
 
       if (started.kind !== "started") throw new Error("Recording did not start");
+      const source = (await recordings.copy(started.recording.id))!.recording!;
       await recordings.stop(started.recording.id);
-      const source = await recordings.file(started.recording.id);
       const before = await source.read();
       const file = await fileOf(dataDir, started.recording);
 
@@ -6806,4 +6793,18 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
       await expect(source.read()).rejects.toBeTruthy();
     },
   );
+});
+
+it("retains a recording checkpoint with unknown length across a fresh copy and resume read", async () => {
+  const { recordings, channel } = await connected();
+  const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+  if (started.kind !== "started") throw new Error("Recording did not start");
+  const id = started.recording.id;
+  await recordings.stop(id);
+  await recordings.recordProgress(id, 115, 0);
+  expect((await recordings.copy(id))?.progress).toEqual({ position: 115, duration: 0 });
+  expect((await recordings.resume()).items).toMatchObject([
+    { recording: { id }, progress: { position: 115, duration: 0 } },
+  ]);
 });

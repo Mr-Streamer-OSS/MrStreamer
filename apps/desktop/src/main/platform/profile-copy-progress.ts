@@ -11,6 +11,9 @@ import { Profiles } from "./profile-store.ts";
 
 const Position = type({ position: "number >= 0", duration: "number > 0" });
 
+// Recordings may retain a position without claiming a final media length.
+const RecordingPosition = type({ position: "number >= 0", duration: "number >= 0" });
+
 type Position = typeof Position.infer;
 
 type CopyKind = "download" | "recording";
@@ -95,7 +98,7 @@ export const copyProgress = Effect.gen(function* () {
           transaction(db, () => {
             const seed = owner === DEFAULT_PROFILE_ID ? legacy : null;
 
-            if (seed) Position.assert(seed);
+            if (seed) (kind === "recording" ? RecordingPosition : Position).assert(seed);
             db.prepare(
               `insert or ignore into profile_copy_progress
               (profile_id, kind, copy_id, position, duration) values (?, ?, ?, ?, ?)`,
@@ -105,7 +108,9 @@ export const copyProgress = Effect.gen(function* () {
           });
 
         // A seeded absence keeps both columns null.
-        return row?.position === null ? null : Position.assert(row);
+        return row?.position === null
+          ? null
+          : (kind === "recording" ? RecordingPosition : Position).assert(row);
       }),
     /** Explicit recording writes have a captured user time; seeds and downloads do not. */
     recordings: access(owner, (db, owner) =>
@@ -118,19 +123,27 @@ export const copyProgress = Effect.gen(function* () {
         .all(owner)
         .map((row) => ({
           id: type("string").assert(row.copy_id),
-          ...Position.assert(row),
+          ...RecordingPosition.assert(row),
           at: type("number | null").assert(row.watched_at),
         })),
     ),
     write: (kind: CopyKind, id: string, position: number, duration: number, watchedAt?: number) =>
       access(owner, (db, owner) => {
-        Position.assert({ position, duration });
+        (kind === "recording" ? RecordingPosition : Position).assert({ position, duration });
+
         db.prepare(
           `insert into profile_copy_progress
           (profile_id, kind, copy_id, position, duration, watched_at) values (?, ?, ?, ?, ?, ?)
           on conflict (profile_id, kind, copy_id) do update
           set position = excluded.position, duration = excluded.duration, watched_at = excluded.watched_at`,
-        ).run(owner, kind, id, Math.min(position, duration), duration, watchedAt ?? null);
+        ).run(
+          owner,
+          kind,
+          id,
+          duration === 0 ? position : Math.min(position, duration),
+          duration,
+          watchedAt ?? null,
+        );
       }),
   });
 

@@ -417,10 +417,14 @@ function reachable(target: number): number {
 
 /**
  * The length progress is saved against: the title's, or for a recording that grows, what it
- * verifiably reaches, at least where it plays. Null while neither is known: nothing is saved.
+ * verifiably reaches, at least where it plays. Null while neither is known and it grows;
+ * zero after settlement without a verified length, preserving a place without marking watched.
  */
 function savedLength(state: TitlePlayerState): number | null {
-  if (!state.recording || state.recording.final) return state.duration;
+  if (!state.recording) return state.duration;
+
+  // Zero is an unknown recording length, never a completion claim.
+  if (state.recording.final) return state.duration ?? 0;
   const edge = recordingEdge(state);
 
   return edge === null ? null : Math.max(edge, state.position);
@@ -750,7 +754,7 @@ function save(): Promise<boolean> {
   const { now, position, next } = state;
   const duration = savedLength(state);
 
-  if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought)))
+  if (!now || duration === null || (position <= 0 && !(now.kind === "copy" && sought)))
     return Promise.resolve(true);
 
   // A copy keeps its own, whatever its subscription's record says.
@@ -796,7 +800,7 @@ function saveCopy(
 
   const progress = {
     id: now.copy,
-    position: Math.min(position, duration),
+    position: now.recording && duration === 0 ? position : Math.min(position, duration),
     duration,
     ...defined({ owner: owner ?? undefined }),
   };
@@ -1889,7 +1893,7 @@ export const titlePlayer = {
         // Recordings says (`settledPlace`).
         const settled =
           !recorded ||
-          (recording?.final === true &&
+          ((recording?.final ?? true) &&
             opened.duration !== null &&
             progress !== null &&
             progress.duration >= opened.duration - 1);

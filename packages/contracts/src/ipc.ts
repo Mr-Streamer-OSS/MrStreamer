@@ -376,12 +376,12 @@ export const ipcInputs = {
   "recordings.schedule": () => type({ plan: RecordingPlanSchema(), "id?": "string > 0" }),
   /** Takes a schedule out. A recording it started goes on until it stops. */
   "recordings.cancel": () => type({ id: "string > 0" }),
-  /** Keeps how far an ended recording played, as `downloads.recordProgress` does for a copy. */
+  /** Keeps a recording's place; duration 0 means unknown length, never watched. */
   "recordings.recordProgress": () =>
     type({
       id: "string > 0",
       position: "number >= 0",
-      duration: "number > 0",
+      duration: "number >= 0",
       "owner?": ActiveProfileSchema(),
     }),
   "recordings.storage": none,

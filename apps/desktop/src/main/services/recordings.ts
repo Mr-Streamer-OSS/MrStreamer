@@ -243,8 +243,6 @@ export class Recordings extends Context.Service<
      * has that id. Fails, listing it as missing, when its file went.
      */
     copy(id: string, owner?: ActiveProfile): Effect.Effect<LocalCopy | null, Failed>;
-    /** Main-only local reader; closing it never detaches the recorder. */
-    file(id: string): Effect.Effect<RecordingFile, Failed>;
     /** Main-only owner-bound projection; callers must authorize every exact recording row. */
     resume(owner?: ActiveProfile): Effect.Effect<RecordingResumeList, Failed>;
     /** Keeps how far a retained recording played, including one still capturing. */
@@ -3169,7 +3167,6 @@ function make(deps: RecordingsDeps) {
           // Room it took may let a paused one go on.
           yield* retryPaused;
         }),
-      file: recordingSource,
       copy: (id: string, captured?: ActiveProfile) =>
         Effect.gen(function* () {
           const owner = captured ? personal.of(captured) : yield* personal.admit;

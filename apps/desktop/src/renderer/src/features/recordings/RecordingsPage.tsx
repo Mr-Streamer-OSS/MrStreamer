@@ -335,6 +335,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
               />
             ))}
           </Section>
+          {recorded.length === 0 && placesNote}
           <Section
             label={t("Recorded")}
             count={recorded.length}
