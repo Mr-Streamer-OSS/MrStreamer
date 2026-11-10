@@ -49,10 +49,10 @@ const SUBTITLES: readonly Rendition[] = [
 ];
 
 /** Opens `id` as an HLS stream, and gives the stream the player opened for it. */
-async function open(id: string) {
+async function open(id: string, choices: NonNullable<LiveChannel["choices"]> = {}) {
   const opened = streams.count();
   const answer = ipc.hold("playback.open");
-  player.play(channel(id));
+  player.play({ ...channel(id), choices });
   await wait();
   answer.resolve({
     sessionId: id,
@@ -566,4 +566,54 @@ describe("an HLS channel's tracks", () => {
     // The subtitles stay chosen, and nothing loads them any more.
     expect(loading()).toBe(false);
   });
+});
+
+it("restores channel sound by language when its id changed, and keeps explicit picks through late lists", async () => {
+  ipc.prefer({ audioLanguage: "en" });
+  const stream = await open("saved", { audio: { id: 999, language: "es" } });
+  stream.variant({ audio: SOUND });
+  await vi.waitFor(() => expect(soundPlaying()).toBe("Español"));
+  expect(stream.audioTrack).toBe(1);
+  expect(saved()).toEqual([]);
+
+  player.setAudio(sound("English")!.id);
+  stream.variant({ audio: SOUND.toReversed() });
+  await wait();
+  await vi.waitFor(() => expect(soundPlaying()).toBe("English"));
+  expect(stream.audioTrack).toBe(1);
+});
+
+it("uses profile sound while the saved language is absent, then restores it when tracks arrive", async () => {
+  ipc.prefer({ audioLanguage: "en" });
+  const choices = { audio: { id: 999, language: "es" } };
+  const stream = await open("saved", choices);
+  stream.variant({ audio: [{ name: "Français", lang: "fr", default: true }, SOUND[0]!] });
+  await vi.waitFor(() => expect(soundPlaying()).toBe("English"));
+  expect(stream.audioTrack).toBe(1);
+  stream.variant({ audio: SOUND });
+  await vi.waitFor(() => expect(soundPlaying()).toBe("Español"));
+  expect(stream.audioTrack).toBe(1);
+  expect(saved()).toEqual([]);
+  expect(ipc.argsOf("library.chooseForChannel")).toEqual([]);
+  expect(choices.audio).toEqual({ id: 999, language: "es" });
+});
+
+it("uses profile subtitles until the saved language is proven, without rewriting either choice", async () => {
+  ipc.prefer({ subtitleLanguage: "fr" });
+  const stream = await open("saved", { subtitles: { id: 999, language: "de" } });
+  const french = { name: "Français", lang: "fr" };
+  stream.variant({ subtitles: [french] });
+  stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "Français");
+  await vi.waitFor(() => expect(player.state().subtitle?.language).toBe("fr"));
+  stream.variant({ subtitles: [french, SUBTITLES[1]!] });
+  stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "Deutsch");
+  await vi.waitFor(() => expect(player.state().subtitle?.language).toBe("de"));
+  expect(saved()).toEqual([]);
+  expect(ipc.argsOf("library.chooseForChannel")).toEqual([]);
+
+  player.setSubtitle(subtitles("Français"));
+  stream.variant({ subtitles: [SUBTITLES[1]!, french] });
+  await wait();
+  await vi.waitFor(() => expect(player.state().subtitle?.language).toBe("fr"));
+  expect(stream.subtitleTrack).toBe(1);
 });
