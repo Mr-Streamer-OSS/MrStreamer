@@ -6743,11 +6743,15 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
 
   it("keeps a broken capture nonfinal until its partial end and refuses discontinuous media duration", async () => {
     const outputs: Writable[] = [];
+    const resumes = Array.from({ length: 2 }, () => Promise.withResolvers<Writable>());
 
     const { recordings, channel, provider } = await connected({
       streams: (_source, out) => {
         outputs.push(out);
-        out.write(fixture(TRACKS_FIXTURE));
+
+        // Hold reconnects until the checkpoint reader has observed the pause.
+        if (outputs.length === 1) out.write(fixture(TRACKS_FIXTURE));
+        else resumes[outputs.length - 2]!.resolve(out);
       },
     });
 
@@ -6759,9 +6763,11 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     expect(extent.duration).toBeGreaterThan(0);
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      const waiting = source.wait(extent.revision, AbortSignal.timeout(5000));
       outputs[attempt]!.end();
-      extent = await waiting;
+
+      // A busy reader can observe the checkpoint after the reconnect request arrives.
+      if (attempt < 2) await resumes[attempt]!.promise;
+      extent = await source.wait(extent.revision, AbortSignal.timeout(5000));
 
       while (extent.status.kind === "recording")
         extent = await source.wait(extent.revision, AbortSignal.timeout(5000));
@@ -6771,6 +6777,8 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
       if (attempt < 2) {
         const resuming = source.wait(extent.revision, AbortSignal.timeout(5000));
         await recordings.check();
+        const output = await resumes[attempt]!.promise;
+        output.write(fixture(TRACKS_FIXTURE));
         extent = await resuming;
 
         while (extent.status.kind === "paused")
