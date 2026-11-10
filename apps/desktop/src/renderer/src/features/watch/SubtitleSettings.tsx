@@ -11,7 +11,7 @@ import { formatDecimal, t } from "@mrstreamer/core/i18n";
 import { updateSubtitleLook } from "../../player/subtitle-look.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { cn } from "../../lib/utils.ts";
-import { player } from "../../player/player.ts";
+import { player, usePlayerVideo } from "../../player/player.ts";
 import {
   setSubtitleDelay,
   subtitleDelay,
@@ -33,8 +33,9 @@ const isText = (track: SubtitleTrack) => track.format !== "picture";
 /** G and H: text subtitles a tenth of a second earlier or later. Pictures and Off have no timing. */
 export function nudgeSubtitles(subtitle: SubtitleTrack | null, direction: -1 | 1): void {
   if (!subtitle || !isText(subtitle)) return;
-  setSubtitleDelay(player.element, subtitleDelay() + direction * TIMING_STEP_S);
-  const delay = subtitleDelay();
+  const video = player.element;
+  setSubtitleDelay(video, subtitleDelay(video) + direction * TIMING_STEP_S);
+  const delay = subtitleDelay(video);
   flash(
     delay === 0
       ? t("Subtitles on time")
@@ -91,24 +92,19 @@ export function SubtitleSettingRows({
 
 /** A file's or channel's text a tenth of a second earlier or later, and back on time. */
 export function TrackTiming() {
-  const delay = useSubtitleSettings((state) => state.delay);
+  const video = usePlayerVideo();
+  const delay = useSubtitleSettings((state) => state.delay, video);
 
   return (
     <div className="flex items-center gap-1">
-      <Step
-        label={t("Earlier")}
-        onClick={() => setSubtitleDelay(player.element, delay - TIMING_STEP_S)}
-      >
+      <Step label={t("Earlier")} onClick={() => setSubtitleDelay(video, delay - TIMING_STEP_S)}>
         −
       </Step>
       <span className="w-12 text-center text-[0.8125rem] tabular-nums">{delayLabel(delay)}</span>
-      <Step
-        label={t("Later")}
-        onClick={() => setSubtitleDelay(player.element, delay + TIMING_STEP_S)}
-      >
+      <Step label={t("Later")} onClick={() => setSubtitleDelay(video, delay + TIMING_STEP_S)}>
         +
       </Step>
-      <TextButton disabled={delay === 0} onClick={() => setSubtitleDelay(player.element, 0)}>
+      <TextButton disabled={delay === 0} onClick={() => setSubtitleDelay(video, 0)}>
         {t("Reset")}
       </TextButton>
     </div>

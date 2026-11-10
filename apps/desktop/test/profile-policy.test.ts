@@ -49,6 +49,9 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runtimeFor, tempDir, testConfig, fakeProvider, demoLogin } from "./support.ts";
 
+// Test-local admission scheduling only; every held request still uses the real gate.
+let admissionHold: ((expected?: ActiveProfile) => Effect.Effect<void>) | undefined;
+
 describe("kids policy public commands", () => {
   it("requires the PIN for management and leaving a kids profile", async () => {
     const dataDir = await tempDir();
@@ -274,7 +277,11 @@ async function fixture(
   };
 
   registerIpc(app.runPromiseExit, base as IpcHandlers, () => true, {
-    admit: sessions.admitFor,
+    admit: (expected) =>
+      Effect.andThen(
+        Effect.suspend(() => admissionHold?.(expected) ?? Effect.void),
+        sessions.admitFor(expected),
+      ),
     handlers: (admitted) => ({
       ...collectionsHandlers({
         collections: admitted.services.collections,
@@ -2350,6 +2357,773 @@ it.each(["cold", "reconfigure", "source replacement"])(
   },
 );
 
+it("authorizes the exact channel before exposing pane capacity", async () => {
+  const f = await fixture({ live: true });
+  const channel = { subscriptionId: f.source.id, id: "100000" };
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [{ id: f.kid.id, approved: [{ kind: "channel", ...channel }] }],
+  });
+  const switched = await f.call(f.adult, "profiles.switch", { id: f.kid.id, current: f.adult });
+
+  const kid = type({ id: "string", revision: "number" }).assert(
+    switched.ok ? switched.value : null,
+  );
+
+  const before = f.provider.streamRequests();
+  expect(await f.call(kid, "playback.paneCapacity", { channel })).toEqual({
+    ok: true,
+    value: { eligible: true, limit: 3, used: 0 },
+  });
+  expect(
+    await f.call(kid, "playback.paneCapacity", {
+      channel: { ...channel, id: "100001" },
+    }),
+  ).toMatchObject({ ok: false });
+  expect(
+    await f.call(kid, "playback.paneCapacity", {
+      channel: { ...channel, subscriptionId: "another-source" },
+    }),
+  ).toMatchObject({ ok: false });
+  expect(f.provider.streamRequests()).toBe(before);
+});
+
+it.each(["owner", "policy", "unreadable"] as const)(
+  "refuses a pending pane capacity reply after %s changes",
+  async (change) => {
+    const f = await fixture({ live: true });
+    const channel = { subscriptionId: f.source.id, id: "100000" };
+    await f.call(f.adult, "profiles.setPolicy", {
+      current: f.adult,
+      newPin: "1234",
+      profiles: [{ id: f.kid.id, approved: [{ kind: "channel", ...channel }] }],
+    });
+    const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+    const arrived = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    onTestFinished(() => release.resolve());
+    const original = f.library.channel;
+    f.library.channel = (ref) =>
+      Effect.gen(function* () {
+        const result = yield* original(ref);
+        arrived.resolve();
+        yield* Effect.promise(() => release.promise);
+
+        return result;
+      });
+    onTestFinished(() => {
+      f.library.channel = original;
+    });
+    const pending = f.call(kid, "playback.paneCapacity", { channel });
+    await arrived.promise;
+    const database = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+    onTestFinished(() => database.close());
+    const saved = database.prepare("SELECT value FROM kids_policy WHERE id = 1").get()!.value;
+    onTestFinished(() => {
+      database.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run(saved!);
+    });
+
+    if (change === "owner") {
+      await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+    } else if (change === "policy") {
+      database
+        .prepare(
+          "UPDATE kids_policy SET value = json_set(value, '$.profiles[0].approved', json('[]')) WHERE id = 1",
+        )
+        .run();
+    } else {
+      database.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run("broken");
+    }
+
+    release.resolve();
+    expect(await pending).toMatchObject({ ok: false });
+    expect(f.provider.streamRequests()).toBe(0);
+  },
+);
+
+it("reports occupied connections without revealing a hidden recording or pooling a single-stream account", async () => {
+  const f = await fixture({ live: true });
+
+  const recorded = f.provider.catalogue.channels.find(
+    (item) => item.fixture === "h264-subtitles.mpegts",
+  )!;
+
+  expect(
+    await f.call(f.adult, "recordings.start", {
+      channel: { subscriptionId: f.source.id, id: String(recorded.streamId) },
+      stop: Date.now() + 60_000,
+    }),
+  ).toMatchObject({ ok: true, value: { kind: "started" } });
+
+  const permitted = f.provider.catalogue.channels.find(
+    (item) => item.fixture === "h264-aac.mpegts",
+  )!;
+
+  const channel = { subscriptionId: f.source.id, id: String(permitted.streamId) };
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [{ id: f.kid.id, approved: [{ kind: "channel", ...channel }] }],
+  });
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(await f.call(kid, "recordings.list", undefined)).toEqual({ ok: true, value: [] });
+  expect(await f.call(kid, "playback.paneCapacity", { channel })).toEqual({
+    ok: true,
+    value: { eligible: true, limit: 3, used: 1 },
+  });
+  expect(f.provider.activeStreams()).toBe(1);
+  const back = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  const roster = await f.app.runPromise(Roster);
+
+  for (const maxConnections of [0, 1, Number.NaN]) {
+    const provider = await fakeProvider({ maxConnections });
+    const source = await f.app.runPromise(roster.add(demoLogin(provider)));
+    await f.app.runPromise(f.library.refresh(source.id));
+    expect(
+      await f.call(back, "playback.paneCapacity", {
+        channel: { subscriptionId: source.id, id: "100000" },
+      }),
+    ).toEqual({ ok: true, value: { eligible: false } });
+    expect(provider.streamRequests()).toBe(0);
+  }
+});
+
+it("opens and closes an exact-source pane through admitted public commands", async () => {
+  const f = await fixture({ live: true });
+  const channel = { subscriptionId: f.source.id, id: "100000" };
+
+  const opened = await f.call(f.adult, "playback.openPane", {
+    paneId: "1",
+    order: 1,
+    channel,
+    decoders: [],
+  });
+
+  expect(opened).toMatchObject({ ok: true, value: { channel, sessionId: expect.any(String) } });
+  const sessionId = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null).sessionId;
+  expect(
+    await f.call(f.adult, "playback.closePane", {
+      paneId: "1",
+      order: 2,
+      channel,
+      sessionId,
+    }),
+  ).toEqual({ ok: true, value: null });
+  expect(
+    await f.call(f.adult, "playback.panePlaying", { paneId: "1", channel, sessionId }),
+  ).toEqual({ ok: true, value: { _tag: "PaneRefused", reason: "stale" } });
+});
+
+it.each([
+  "newer",
+  "denied",
+  "close",
+  "stop",
+  "title",
+  "receiver",
+  "other",
+  "invalid",
+  "foreign",
+  "missing",
+  "frame",
+  "schema",
+  "policy",
+  "unreadable",
+  "capacity",
+] as const)(
+  "keeps validated arrival ordering across delayed real admission: %s",
+  async (change) => {
+    const f = await fixture({ live: true });
+    const channel = { subscriptionId: f.source.id, id: "100000" };
+    await f.call(f.adult, "profiles.setPolicy", {
+      current: f.adult,
+      newPin: "1234",
+      profiles: [
+        {
+          id: f.kid.id,
+          approved: [
+            { kind: "channel", ...channel },
+            { kind: "movie", subscriptionId: f.source.id, id: "missing-title" },
+          ],
+        },
+      ],
+    });
+    const switched = await f.call(f.adult, "profiles.switch", { id: f.kid.id, current: f.adult });
+
+    const kid = type({ id: "string", revision: "number" }).assert(
+      switched.ok ? switched.value : null,
+    );
+
+    const initial = await f.call(kid, "playback.openPane", {
+      paneId: "1",
+      order: 1,
+      channel,
+      decoders: [],
+    });
+
+    const sessionId = type({ sessionId: "string" }).assert(
+      initial.ok ? initial.value : null,
+    ).sessionId;
+
+    const reached = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const timer = setTimeout(() => release.resolve(), 5000);
+    let first = true;
+    admissionHold = () => {
+      if (!first) return Effect.void;
+      first = false;
+      reached.resolve();
+
+      return Effect.promise(() => release.promise);
+    };
+
+    let pending: Promise<Result<unknown>> | undefined;
+
+    try {
+      pending = f.call(kid, "playback.openPane", {
+        paneId: "1",
+        order: 2,
+        channel,
+        decoders: [],
+      });
+      await reached.promise;
+
+      if (change === "newer" || change === "denied" || change === "other") {
+        const next = await f.call(kid, "playback.openPane", {
+          paneId: change === "other" ? "2" : "1",
+          order: 3,
+          channel: change === "denied" ? { ...channel, id: "100001" } : channel,
+          decoders: [],
+        });
+
+        expect(next).toMatchObject({ ok: change !== "denied" });
+      } else if (change === "close") {
+        expect(
+          await f.call(kid, "playback.closePane", { paneId: "1", order: 3, channel, sessionId }),
+        ).toEqual({ ok: true, value: null });
+      } else if (change === "capacity") {
+        expect(await f.call(kid, "playback.paneCapacity", { channel })).toMatchObject({ ok: true });
+      } else if (change === "stop") {
+        expect(await f.call(kid, "playback.closeAll", undefined)).toMatchObject({ ok: true });
+      } else if (change === "title") {
+        expect(
+          await f.call(kid, "playback.openTitle", {
+            title: { kind: "movie", subscriptionId: f.source.id, id: "missing-title" },
+            decoders: [],
+          }),
+        ).toMatchObject({ ok: false });
+      } else if (change === "receiver") {
+        expect(await f.call(kid, "output.playChannel", { channel, name: "Channel" })).toMatchObject(
+          { ok: false },
+        );
+      } else if (change === "policy" || change === "unreadable") {
+        const database = new DatabaseSync(join(f.dataDir, "mrstreamer.db"));
+
+        try {
+          if (change === "unreadable")
+            database.prepare("UPDATE kids_policy SET value = ? WHERE id = 1").run("broken");
+          else
+            database
+              .prepare(
+                "UPDATE kids_policy SET value = json_set(value, '$.profiles[0].approved', json('[]')) WHERE id = 1",
+              )
+              .run();
+        } finally {
+          database.close();
+        }
+      } else if (change === "invalid" || change === "foreign") {
+        expect(
+          await f.call(
+            change === "foreign"
+              ? { ...kid, id: "foreign-owner" }
+              : { ...kid, revision: kid.revision + 1 },
+            "playback.openPane",
+            { paneId: "1", order: 9, channel, decoders: [] },
+          ),
+        ).toMatchObject({ ok: false });
+      } else {
+        const frame = { processId: 1, routingId: 1 };
+
+        const event = {
+          sender: { mainFrame: frame },
+          senderFrame: change === "frame" ? { ...frame, routingId: 2 } : frame,
+        } as IpcMainInvokeEvent;
+
+        const input = { paneId: "1", order: change === "schema" ? -1 : 9, channel, decoders: [] };
+
+        const result = await boundary.get("playback.openPane")!(
+          event,
+          change === "missing" ? input : { __profile: kid, input },
+        );
+
+        expect(result).toMatchObject({ ok: false });
+      }
+
+      if (change === "denied" || change === "invalid") {
+        expect(
+          await f.call(kid, "playback.panePlaying", { paneId: "1", channel, sessionId }),
+        ).toMatchObject({ ok: true, value: { failed: [] } });
+      }
+
+      release.resolve();
+      const result = await pending;
+      expect(result).toMatchObject(
+        change === "policy" || change === "unreadable"
+          ? { ok: false }
+          : ["other", "invalid", "foreign", "missing", "frame", "schema", "capacity"].includes(
+                change,
+              )
+            ? { ok: true, value: { channel } }
+            : { ok: true, value: { _tag: "PaneRefused", reason: "stale" } },
+      );
+    } finally {
+      admissionHold = undefined;
+      release.resolve();
+      clearTimeout(timer);
+      await pending;
+    }
+  },
+);
+
+it("keeps pane session controls and mismatched close bound to exact owner and source", async () => {
+  const f = await fixture({ live: true });
+  const channel = { subscriptionId: f.source.id, id: "100000" };
+
+  const opened = await f.call(f.adult, "playback.openPane", {
+    paneId: "1",
+    order: 1,
+    channel,
+    decoders: [],
+  });
+
+  const sessionId = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null).sessionId;
+  const wrong = { ...channel, id: "100001" };
+  expect(
+    await f.call(f.adult, "playback.paneSeek", { paneId: "2", channel, sessionId, at: null }),
+  ).toMatchObject({ ok: true, value: { _tag: "PaneRefused" } });
+  expect(
+    await f.call(f.adult, "playback.paneSeek", { paneId: "1", channel, sessionId, at: null }),
+  ).toEqual({ ok: true, value: null });
+
+  for (const method of [
+    "playback.paneTimeline",
+    "playback.paneTracks",
+    "playback.panePlaying",
+    "playback.paneFailure",
+    "playback.paneDiagnostic",
+  ] as const) {
+    expect(await f.call(f.adult, method, { paneId: "2", channel, sessionId })).toMatchObject({
+      ok: true,
+      value: { _tag: "PaneRefused" },
+    });
+    expect(await f.call(f.adult, method, { paneId: "1", channel: wrong, sessionId })).toMatchObject(
+      { ok: true, value: { _tag: "PaneRefused" } },
+    );
+  }
+
+  expect(
+    await f.call(f.adult, "playback.closePane", {
+      paneId: "1",
+      order: 2,
+      channel: wrong,
+      sessionId,
+    }),
+  ).toMatchObject({ ok: true, value: { _tag: "PaneRefused" } });
+  expect(
+    await f.call(f.adult, "playback.panePlaying", { paneId: "1", channel, sessionId }),
+  ).toMatchObject({ ok: true, value: { failed: [] } });
+  expect(await f.call(f.adult, "playback.closePane", { paneId: "1", order: 3, channel })).toEqual({
+    ok: true,
+    value: null,
+  });
+  expect(
+    await f.call(f.adult, "playback.panePlaying", { paneId: "1", channel, sessionId }),
+  ).toMatchObject({ ok: true, value: { _tag: "PaneRefused" } });
+});
+
+it("preserves the adopted session and selected buffer when returning to single view", async () => {
+  const f = await fixture({ live: true });
+  const channel = { subscriptionId: f.source.id, id: "100000" };
+  const opened = await f.call(f.adult, "playback.open", { channel, decoders: [] });
+
+  const session = type({ sessionId: "string", url: "string" }).assert(
+    opened.ok ? opened.value : null,
+  );
+
+  expect(
+    await f.call(f.adult, "playback.adoptPane", {
+      paneId: "1",
+      order: 1,
+      channel,
+      sessionId: session.sessionId,
+    }),
+  ).toMatchObject({ ok: true, value: session });
+
+  const peer = await f.call(f.adult, "playback.openPane", {
+    paneId: "2",
+    order: 1,
+    channel,
+    decoders: [],
+  });
+
+  const peerId = type({ sessionId: "string" }).assert(peer.ok ? peer.value : null).sessionId;
+
+  const before = await f.call(f.adult, "playback.paneTimeline", {
+    paneId: "1",
+    channel,
+    sessionId: session.sessionId,
+  });
+
+  expect(
+    await f.call(f.adult, "playback.singlePane", {
+      paneId: "1",
+      order: 2,
+      channel,
+      sessionId: session.sessionId,
+    }),
+  ).toMatchObject({ ok: true, value: session });
+  expect(await f.call(f.adult, "playback.timeline", { sessionId: session.sessionId })).toEqual(
+    before,
+  );
+  expect(await f.call(f.adult, "playback.playing", { sessionId: peerId })).toEqual({
+    ok: true,
+    value: null,
+  });
+});
+
+it("does not grant a secondary pane variant or fallback from a canonical kids approval", async () => {
+  const f = await fixture();
+  const channel = { subscriptionId: f.source.id, id: "100000" };
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [{ id: f.kid.id, approved: [{ kind: "channel", ...channel }] }],
+  });
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+  const opened = await f.call(kid, "playback.openPane", {
+    paneId: "1",
+    order: 1,
+    channel,
+    decoders: ["h264", "aac"],
+  });
+
+  const session = type({ sessionId: "string", url: "string" }).assert(
+    opened.ok ? opened.value : null,
+  );
+
+  const before = f.provider.streamRequests();
+  const response = await fetch(session.url);
+  expect(response.ok).toBe(false);
+  expect(f.provider.streamRequests() - before).toBe(1);
+  expect(
+    await f.call(kid, "playback.openPane", {
+      paneId: "1",
+      order: 2,
+      channel,
+      variant: "100001",
+      decoders: [],
+    }),
+  ).toMatchObject({ ok: false });
+  expect(
+    await f.call(kid, "playback.openPane", {
+      paneId: "1",
+      order: 3,
+      channel: { ...channel, id: "100001" },
+      decoders: [],
+    }),
+  ).toMatchObject({ ok: false });
+  expect(
+    await f.call(kid, "playback.paneFailure", {
+      paneId: "1",
+      channel,
+      sessionId: session.sessionId,
+    }),
+  ).toMatchObject({ ok: true, value: { kind: expect.any(String) } });
+  expect(
+    await f.call(kid, "playback.panePlaying", {
+      paneId: "1",
+      channel: { ...channel, id: "100001" },
+      sessionId: session.sessionId,
+    }),
+  ).toMatchObject({ ok: false });
+});
+
+it("admits a shared pane at actual capacity without preempting household recordings", async () => {
+  const f = await fixture({ live: true });
+
+  const channels = ["h264-aac.mpegts", "h264-mp2.mpegts", "h264-mp3.mpegts"].map((fixture) => ({
+    subscriptionId: f.source.id,
+    id: String(f.provider.catalogue.channels.find((item) => item.fixture === fixture)!.streamId),
+  }));
+
+  for (const channel of channels) {
+    expect(
+      await f.call(f.adult, "recordings.start", { channel, stop: Date.now() + 60_000 }),
+    ).toMatchObject({ ok: true, value: { kind: "started" } });
+  }
+
+  const channel = channels[0]!;
+  expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toEqual({
+    ok: true,
+    value: { eligible: true, limit: 3, used: 3 },
+  });
+
+  const opened = await f.call(f.adult, "playback.openPane", {
+    paneId: "1",
+    order: 1,
+    channel,
+    decoders: ["h264", "aac"],
+  });
+
+  expect(opened).toMatchObject({ ok: true, value: { channel } });
+  const sessionId = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null).sessionId;
+
+  const other = {
+    subscriptionId: f.source.id,
+    id: String(
+      f.provider.catalogue.channels.find((item) => item.fixture === "h264-ac3.mpegts")!.streamId,
+    ),
+  };
+
+  expect(
+    await f.call(f.adult, "playback.openPane", {
+      paneId: "2",
+      order: 1,
+      channel: other,
+      decoders: [],
+    }),
+  ).toEqual({ ok: true, value: { _tag: "PaneRefused", reason: "capacity" } });
+  expect(
+    await f.call(f.adult, "playback.panePlaying", { paneId: "1", channel, sessionId }),
+  ).toMatchObject({ ok: true, value: { failed: [] } });
+  expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toEqual({
+    ok: true,
+    value: { eligible: true, limit: 3, used: 3 },
+  });
+  expect(f.provider.activeStreams()).toBe(3);
+});
+
+it.each(["before", "after"] as const)(
+  "leaves no replacement capture after close or Single %s admission completes",
+  async (timing) => {
+    for (const action of ["close", "single"] as const) {
+      const f = await fixture({ live: true });
+
+      const [channel, replacement] = ["h264-aac.mpegts", "h264-mp2.mpegts"].map((fixture) => ({
+        subscriptionId: f.source.id,
+        id: String(
+          f.provider.catalogue.channels.find((item) => item.fixture === fixture)!.streamId,
+        ),
+      }));
+
+      const opened = await f.call(f.adult, "playback.openPane", {
+        paneId: "1",
+        order: 1,
+        channel: channel!,
+        decoders: ["h264", "aac"],
+      });
+
+      const original = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+      const reached = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const timer = setTimeout(() => release.resolve(), 5000);
+      let first = true;
+      admissionHold = () => {
+        if (!first) return Effect.void;
+        first = false;
+        reached.resolve();
+
+        return Effect.promise(() => release.promise);
+      };
+
+      let pending: Promise<Result<unknown>> | undefined;
+
+      try {
+        pending = f.call(f.adult, "playback.openPane", {
+          paneId: "1",
+          order: 2,
+          channel: replacement!,
+          decoders: ["h264", "mp2"],
+        });
+        await reached.promise;
+        let sessionId = original.sessionId;
+        let source = channel!;
+
+        if (timing === "after") {
+          release.resolve();
+          const result = await pending;
+          sessionId = type({ sessionId: "string" }).assert(
+            result.ok ? result.value : null,
+          ).sessionId;
+          source = replacement!;
+        }
+
+        const result =
+          action === "close"
+            ? await f.call(f.adult, "playback.closePane", {
+                paneId: "1",
+                order: 3,
+                channel: source,
+                sessionId,
+              })
+            : await f.call(f.adult, "playback.singlePane", {
+                paneId: "1",
+                order: 3,
+                channel: source,
+                sessionId,
+              });
+
+        expect(result).toMatchObject({
+          ok: true,
+          value: action === "close" ? null : { sessionId },
+        });
+        release.resolve();
+
+        if (timing === "before")
+          expect(await pending).toMatchObject({
+            ok: true,
+            value: { _tag: "PaneRefused", reason: "stale" },
+          });
+        expect(await f.call(f.adult, "playback.paneCapacity", { channel: source })).toEqual({
+          ok: true,
+          value: { eligible: true, limit: 3, used: action === "close" ? 0 : 1 },
+        });
+        await f.call(f.adult, "playback.closeAll", undefined);
+        expect(await f.call(f.adult, "playback.paneCapacity", { channel: source })).toEqual({
+          ok: true,
+          value: { eligible: true, limit: 3, used: 0 },
+        });
+        await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+      } finally {
+        clearTimeout(timer);
+        release.resolve();
+        await pending;
+        admissionHold = undefined;
+        await f.call(f.adult, "playback.closeAll", undefined);
+      }
+    }
+  },
+);
+
+it.each(["committed-close", "committed-no-close", "pending"] as const)(
+  "adjudicates late pane delivery with old admission %s across a global epoch",
+  async (timing) => {
+    const f = await fixture({ live: true });
+
+    const channel = {
+      subscriptionId: f.source.id,
+      id: String(
+        f.provider.catalogue.channels.find((item) => item.fixture === "h264-aac.mpegts")!.streamId,
+      ),
+    };
+
+    const releaseOld = Promise.withResolvers<void>();
+    const reachedOld = Promise.withResolvers<void>();
+    const releaseNew = Promise.withResolvers<void>();
+    const reachedNew = Promise.withResolvers<void>();
+
+    const timer = setTimeout(() => {
+      releaseOld.resolve();
+      releaseNew.resolve();
+    }, 5000);
+
+    let oldPending: Promise<Result<unknown>> | undefined;
+    let newPending: Promise<Result<unknown>> | undefined;
+
+    try {
+      if (timing === "pending") {
+        let first = true;
+        admissionHold = () => {
+          if (!first) return Effect.void;
+          first = false;
+          reachedOld.resolve();
+
+          return Effect.promise(() => releaseOld.promise);
+        };
+      }
+
+      oldPending = f.call(f.adult, "playback.openPane", {
+        paneId: "2",
+        order: 1,
+        channel,
+        decoders: ["h264", "aac"],
+      });
+      const committed = timing !== "pending" ? await oldPending : null;
+
+      if (timing === "pending") await reachedOld.promise;
+      else expect(committed).toMatchObject({ ok: true, value: { sessionId: expect.any(String) } });
+      expect(await f.call(f.adult, "playback.closeAll", undefined)).toMatchObject({ ok: true });
+      expect(
+        await f.call(f.adult, "playback.openPane", {
+          paneId: "1",
+          order: 1,
+          channel,
+          decoders: ["h264", "aac"],
+        }),
+      ).toMatchObject({ ok: true, value: { sessionId: expect.any(String) } });
+      let first = true;
+      admissionHold = () => {
+        if (!first) return Effect.void;
+        first = false;
+        reachedNew.resolve();
+
+        return Effect.promise(() => releaseNew.promise);
+      };
+
+      newPending = f.call(f.adult, "playback.openPane", {
+        paneId: "2",
+        order: 2,
+        channel,
+        decoders: ["h264", "aac"],
+      });
+      await reachedNew.promise;
+
+      if (committed && timing === "committed-close") {
+        // Deliver the already committed result only after reentry and the newer arrival.
+        const session = type({ sessionId: "string" }).assert(committed.ok ? committed.value : null);
+        expect(
+          await f.call(f.adult, "playback.closePane", {
+            paneId: "2",
+            order: 3,
+            channel,
+            sessionId: session.sessionId,
+          }),
+        ).toMatchObject({ ok: true });
+      } else if (!committed) {
+        releaseOld.resolve();
+        expect(await oldPending).toMatchObject({
+          ok: true,
+          value: { _tag: "PaneRefused", reason: "stale" },
+        });
+      }
+
+      releaseNew.resolve();
+      expect(await newPending).toMatchObject({
+        ok: true,
+        value:
+          timing === "committed-close"
+            ? { _tag: "PaneRefused", reason: "stale" }
+            : { sessionId: expect.any(String) },
+      });
+      expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toEqual({
+        ok: true,
+        value: { eligible: true, limit: 3, used: timing === "committed-close" ? 1 : 2 },
+      });
+    } finally {
+      clearTimeout(timer);
+      releaseOld.resolve();
+      releaseNew.resolve();
+      await oldPending;
+      await newPending;
+      admissionHold = undefined;
+      await f.call(f.adult, "playback.closeAll", undefined);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+    }
+  },
+);
+
 it("keeps configured metadata available without exposing household progress to kids", async () => {
   const tmdb = await startFakeTmdb();
   onTestFinished(() => tmdb.close());
@@ -2413,3 +3187,782 @@ it("keeps metadata absent without a key for both adult and kids viewers", async 
     value: { metadata: null },
   });
 });
+
+it.each(["pending", "committed"] as const)(
+  "measures the no-session Single peer cleanup obligation with %s admission",
+  async (timing) => {
+    const f = await fixture({ live: true });
+
+    const selected = {
+      subscriptionId: f.source.id,
+      id: String(
+        f.provider.catalogue.channels.find((item) => item.fixture === "h264-aac.mpegts")!.streamId,
+      ),
+    };
+
+    const peer = selected;
+    const release = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const timer = setTimeout(() => release.resolve(), 5000);
+    let pending: Promise<Result<unknown>> | undefined;
+    const media = new AbortController();
+
+    try {
+      expect(
+        await f.call(f.adult, "playback.openPane", {
+          paneId: "1",
+          order: 1,
+          channel: selected,
+          decoders: ["h264", "aac"],
+        }),
+      ).toMatchObject({ ok: true, value: { sessionId: expect.any(String) } });
+      // The failed selected controller has released its session before Single.
+      expect(
+        await f.call(f.adult, "playback.closePane", {
+          paneId: "1",
+          order: 2,
+          channel: selected,
+        }),
+      ).toMatchObject({ ok: true });
+      let first = true;
+      admissionHold = () => {
+        if (!first) return Effect.void;
+        first = false;
+        reached.resolve();
+
+        return Effect.promise(() => release.promise);
+      };
+
+      pending = f.call(f.adult, "playback.openPane", {
+        paneId: "2",
+        order: 2,
+        channel: peer,
+        decoders: ["h264", "aac"],
+      });
+      await reached.promise;
+
+      if (timing === "committed") release.resolve();
+      const committed = timing === "committed" ? await pending : null;
+      // This is the actual remaining IPC when renderer peer close returns early.
+      expect(
+        await f.call(f.adult, "playback.closePane", {
+          paneId: "1",
+          order: 3,
+          channel: selected,
+        }),
+      ).toMatchObject({ ok: true });
+      release.resolve();
+      const result = committed ?? (await pending);
+      expect(result).toMatchObject({ ok: true, value: { sessionId: expect.any(String) } });
+      // Admission alone is lazy: an undelivered peer occupies a slot but has no capture yet.
+      expect(f.provider.activeStreams()).toBe(0);
+
+      const session = type({ sessionId: "string", url: "string" }).assert(
+        result.ok ? result.value : null,
+      );
+
+      const response = await fetch(session.url, { signal: media.signal });
+      expect(response.ok).toBe(true);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(1));
+      expect(await f.call(f.adult, "playback.paneCapacity", { channel: peer })).toEqual({
+        ok: true,
+        value: { eligible: true, limit: 3, used: 1 },
+      });
+      // Preserving the newer visible peer lets its ordinary exact-pair close release it.
+      expect(
+        await f.call(f.adult, "playback.closePane", {
+          paneId: "2",
+          order: 3,
+          channel: peer,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true });
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+      expect(await f.call(f.adult, "playback.paneCapacity", { channel: peer })).toEqual({
+        ok: true,
+        value: { eligible: true, limit: 3, used: 0 },
+      });
+    } finally {
+      clearTimeout(timer);
+      media.abort();
+      release.resolve();
+      await pending;
+      admissionHold = undefined;
+      await f.call(f.adult, "playback.closeAll", undefined);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+    }
+  },
+);
+
+it.each(["pending", "committed"] as const)(
+  "observes real Single cleanup routes with %s admission and fetched capture",
+  async (timing) => {
+    const f = await fixture({ live: true });
+
+    const channel = {
+      subscriptionId: f.source.id,
+      id: String(
+        f.provider.catalogue.channels.find((item) => item.fixture === "h264-aac.mpegts")!.streamId,
+      ),
+    };
+
+    const opened = await f.call(f.adult, "playback.openPane", {
+      paneId: "1",
+      order: 1,
+      channel,
+      decoders: ["h264", "aac"],
+    });
+
+    const session = type({ sessionId: "string", url: "string" }).assert(
+      opened.ok ? opened.value : null,
+    );
+
+    const media = new AbortController();
+    const release = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const timer = setTimeout(() => release.resolve(), 5000);
+    let pending: Promise<Result<unknown>> | undefined;
+    let delivery: Promise<Result<unknown>> | undefined;
+
+    try {
+      const response = await fetch(session.url, { signal: media.signal });
+      expect(response.ok).toBe(true);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(1));
+
+      if (timing === "pending") {
+        let first = true;
+        admissionHold = () => {
+          if (!first) return Effect.void;
+          first = false;
+          reached.resolve();
+
+          return Effect.promise(() => release.promise);
+        };
+      }
+
+      pending = f.call(f.adult, "playback.singlePane", {
+        paneId: "1",
+        order: 2,
+        channel,
+        sessionId: session.sessionId,
+      });
+
+      if (timing === "pending") await reached.promise;
+      else {
+        const committed = Promise.withResolvers<Result<unknown>>();
+        delivery = pending.then(async (result) => {
+          committed.resolve(result);
+          await release.promise;
+
+          return result;
+        });
+        expect(await committed.promise).toMatchObject({
+          ok: true,
+          value: { sessionId: session.sessionId },
+        });
+      }
+
+      // This exact pane route is sent by the old renderer while the reply is withheld.
+      await f.call(f.adult, "playback.closePane", {
+        paneId: "1",
+        order: 3,
+        channel,
+        sessionId: session.sessionId,
+      });
+      expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toMatchObject({
+        ok: true,
+        value: { used: 0 },
+      });
+
+      if (timing === "committed") {
+        await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+        // Release the actual registered handler's successful result, not an invented commit.
+        release.resolve();
+        expect(await delivery).toMatchObject({ ok: true, value: { sessionId: session.sessionId } });
+        expect(
+          await f.call(f.adult, "playback.close", { sessionId: session.sessionId }),
+        ).toMatchObject({ ok: true });
+      } else {
+        release.resolve();
+        expect(await pending).toMatchObject({
+          ok: true,
+          value: { _tag: "PaneRefused", reason: "stale" },
+        });
+      }
+
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+      expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toMatchObject({
+        ok: true,
+        value: { used: 0 },
+      });
+    } finally {
+      clearTimeout(timer);
+      release.resolve();
+      await pending;
+      await delivery;
+      admissionHold = undefined;
+      media.abort();
+      await f.call(f.adult, "playback.closeAll", undefined);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+    }
+  },
+);
+
+it("closes only the exact promoted pane before Single delivery and preserves a distinct replacement", async () => {
+  const f = await fixture({ live: true });
+  const channel = { subscriptionId: f.source.id, id: "100000" };
+
+  const opened = await f.call(f.adult, "playback.openPane", {
+    paneId: "1",
+    order: 1,
+    channel,
+    decoders: [],
+  });
+
+  const old = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+  const release = Promise.withResolvers<void>();
+  const committed = Promise.withResolvers<Result<unknown>>();
+
+  const delivery = f
+    .call(f.adult, "playback.singlePane", {
+      paneId: "1",
+      order: 2,
+      channel,
+      sessionId: old.sessionId,
+    })
+    .then(async (result) => {
+      committed.resolve(result);
+      await release.promise;
+
+      return result;
+    });
+
+  try {
+    expect(await committed.promise).toMatchObject({ ok: true, value: old });
+    expect(
+      await f.call(f.adult, "playback.closePane", {
+        paneId: "1",
+        order: 3,
+        channel,
+        sessionId: old.sessionId,
+      }),
+    ).toEqual({ ok: true, value: null });
+    expect(await f.call(f.adult, "playback.playing", { sessionId: old.sessionId })).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toEqual({
+      ok: true,
+      value: { eligible: true, limit: 3, used: 0 },
+    });
+
+    const replacement = await f.call(f.adult, "playback.openPane", {
+      paneId: "1",
+      order: 4,
+      channel,
+      decoders: [],
+    });
+
+    const next = type({ sessionId: "string" }).assert(replacement.ok ? replacement.value : null);
+    expect(next.sessionId).not.toBe(old.sessionId);
+    release.resolve();
+    expect(await delivery).toMatchObject({ ok: true, value: old });
+    expect(
+      await f.call(f.adult, "playback.panePlaying", {
+        paneId: "1",
+        channel,
+        sessionId: next.sessionId,
+      }),
+    ).toMatchObject({ ok: true, value: { failed: [] } });
+    expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toEqual({
+      ok: true,
+      value: { eligible: true, limit: 3, used: 1 },
+    });
+  } finally {
+    release.resolve();
+    await delivery;
+    await f.call(f.adult, "playback.closeAll", undefined);
+  }
+});
+
+it.each([
+  "ordinary",
+  "pane",
+  "channel",
+  "source",
+  "owner",
+  "order",
+  "read",
+  "adopted",
+  "epoch",
+  "session",
+] as const)("refuses %s access through a retained Single close identity", async (mismatch) => {
+  const f = await fixture({ live: true });
+  const channel = { subscriptionId: f.source.id, id: "100000" };
+
+  const opened =
+    mismatch === "ordinary"
+      ? await f.call(f.adult, "playback.open", { channel, decoders: [] })
+      : await f.call(f.adult, "playback.openPane", {
+          paneId: "1",
+          order: 1,
+          channel,
+          decoders: [],
+        });
+
+  const session = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+
+  try {
+    if (mismatch !== "ordinary") {
+      expect(
+        await f.call(f.adult, "playback.singlePane", {
+          paneId: "1",
+          order: 2,
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: session });
+    }
+
+    if (mismatch === "adopted") {
+      expect(
+        await f.call(f.adult, "playback.adoptPane", {
+          paneId: "2",
+          order: 1,
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: session });
+    }
+
+    if (mismatch === "epoch") {
+      const coordination = await f.app.runPromise(PlaybackCoordination);
+      await f.app.runPromise(coordination.begin);
+    }
+
+    if (mismatch === "order") {
+      expect(
+        await f.call(f.adult, "playback.closePane", {
+          paneId: "1",
+          order: 4,
+          channel: { ...channel, id: "100001" },
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: { _tag: "PaneRefused", reason: "stale" } });
+    }
+
+    const input = {
+      paneId: mismatch === "pane" ? "2" : "1",
+      order: mismatch === "order" ? 2 : 3,
+      channel:
+        mismatch === "channel"
+          ? { ...channel, id: "100001" }
+          : mismatch === "source"
+            ? { ...channel, subscriptionId: "foreign-source" }
+            : channel,
+      sessionId: mismatch === "session" ? "missing-session" : session.sessionId,
+    } satisfies IpcInput<"playback.closePane">;
+
+    const result =
+      mismatch === "read"
+        ? await f.call(f.adult, "playback.panePlaying", {
+            paneId: "1",
+            channel,
+            sessionId: session.sessionId,
+          })
+        : await f.call(
+            mismatch === "owner" ? { ...f.adult, revision: f.adult.revision + 1 } : f.adult,
+            "playback.closePane",
+            input,
+          );
+
+    if (mismatch === "owner") expect(result).toMatchObject({ ok: false });
+    else
+      expect(result).toMatchObject({ ok: true, value: { _tag: "PaneRefused", reason: "stale" } });
+    expect(await f.call(f.adult, "playback.paneCapacity", { channel })).toEqual({
+      ok: true,
+      value: { eligible: true, limit: 3, used: 1 },
+    });
+
+    if (mismatch === "adopted") {
+      expect(
+        await f.call(f.adult, "playback.panePlaying", {
+          paneId: "2",
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: { failed: [] } });
+    }
+  } finally {
+    await f.call(f.adult, "playback.closeAll", undefined);
+  }
+});
+
+it("reconsiders a due recording after an exact pane releases actual capacity", async () => {
+  const f = await fixture({ live: true });
+  const owner = f.adult;
+
+  const channels = ["h264-aac.mpegts", "h264-mp2.mpegts", "h264-mp3.mpegts", "h264-ac3.mpegts"].map(
+    (fixture) => ({
+      subscriptionId: f.source.id,
+      id: String(f.provider.catalogue.channels.find((each) => each.fixture === fixture)!.streamId),
+    }),
+  );
+
+  const target = channels[3]!;
+
+  const panes: {
+    paneId: "1" | "2" | "3";
+    channel: { subscriptionId: string; id: string };
+    sessionId: string;
+    reader: ReadableStreamDefaultReader<Uint8Array>;
+  }[] = [];
+
+  const aborts: AbortController[] = [];
+  const standing = type({ id: "string", status: { kind: "string", "recording?": "string" } });
+  let scheduleId: string | undefined;
+
+  try {
+    for (const [index, paneId] of (["1", "2", "3"] as const).entries()) {
+      const channel = channels[index]!;
+
+      const opened = await f.call(owner, "playback.openPane", {
+        paneId,
+        order: 1,
+        channel,
+        decoders: ["h264", "aac", "mp2", "mp3"],
+      });
+
+      const session = type({ sessionId: "string", url: "string" }).assert(
+        opened.ok ? opened.value : null,
+      );
+
+      const abort = new AbortController();
+      aborts.push(abort);
+      const response = await fetch(session.url, { signal: abort.signal });
+      expect(response.ok).toBe(true);
+      const reader = response.body!.getReader();
+      panes.push({ paneId, channel, sessionId: session.sessionId, reader });
+      expect((await reader.read()).value?.byteLength).toBeGreaterThan(0);
+    }
+
+    const capacity = () => f.call(owner, "playback.paneCapacity", { channel: target });
+    await vi.waitFor(async () => {
+      expect(await capacity()).toEqual({
+        ok: true,
+        value: { eligible: true, limit: 3, used: 3 },
+      });
+      expect(f.provider.activeStreams()).toBe(3);
+    });
+    const requests = f.provider.streamRequests();
+    // An already-started slot stays due across a minute or midnight boundary.
+    const now = new Date(Date.now() - 60_000);
+
+    const plan = {
+      kind: "slot",
+      channel: target,
+      days: [now.getDay()],
+      at: now.getHours() * 60 + now.getMinutes(),
+      minutes: 30,
+      title: "Synthetic pane admission",
+      padding: { before: 0, after: 0 },
+    } satisfies IpcInput<"recordings.plan">["plan"];
+
+    const forecast = await f.call(owner, "recordings.plan", { plan });
+    expect(standing.assert(forecast.ok ? forecast.value : null).status.kind).toBe("conflict");
+    const saved = await f.call(owner, "recordings.schedule", { plan });
+    scheduleId = standing.assert(saved.ok ? saved.value : null).id;
+
+    const status = async () => {
+      const reply = await f.call(owner, "recordings.schedules", undefined);
+
+      return standing
+        .array()
+        .assert(reply.ok ? reply.value : null)
+        .find((each) => each.id === scheduleId)?.status;
+    };
+
+    await vi.waitFor(async () => expect((await status())?.kind).toBe("waiting"));
+    expect(f.provider.streamRequests()).toBe(requests);
+    expect(f.provider.activeStreams()).toBe(3);
+
+    const first = panes[0]!;
+    expect(
+      await f.call(owner, "playback.closePane", {
+        paneId: first.paneId,
+        order: 2,
+        channel: first.channel,
+        sessionId: first.sessionId,
+      }),
+    ).toEqual({ ok: true, value: null });
+
+    // No check(), fake lease or direct wake: the due recording retries after actual pane release.
+    await vi.waitFor(
+      async () => {
+        const current = await status();
+        expect(current?.kind).toBe("recording");
+        const reply = await f.call(owner, "recordings.list", undefined);
+
+        const actual = type({
+          id: "string",
+          channel: { subscriptionId: "string", id: "string" },
+          bytes: "number",
+          scheduled: { schedule: "string" },
+        })
+          .array()
+          .assert(reply.ok ? reply.value : null)
+          .find((each) => each.id === current?.recording);
+
+        expect(actual?.channel).toEqual(target);
+        expect(actual?.scheduled.schedule).toBe(scheduleId);
+        expect(actual?.bytes).toBeGreaterThan(0);
+        expect(f.provider.activeStreams()).toBe(3);
+        expect(f.provider.streamRequests()).toBe(requests + 1);
+        expect(await capacity()).toEqual({
+          ok: true,
+          value: { eligible: true, limit: 3, used: 3 },
+        });
+      },
+      { timeout: 15_000 },
+    );
+    const recordingId = (await status())?.recording;
+    expect(recordingId).toBeDefined();
+    expect(await f.call(owner, "recordings.cancel", { id: scheduleId })).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(await f.call(owner, "recordings.stop", { id: recordingId! })).toEqual({
+      ok: true,
+      value: null,
+    });
+    await vi.waitFor(async () => {
+      expect(await capacity()).toEqual({
+        ok: true,
+        value: { eligible: true, limit: 3, used: 2 },
+      });
+      expect(f.provider.activeStreams()).toBe(2);
+    });
+    const released = await f.call(owner, "recordings.plan", { plan });
+    expect(standing.assert(released.ok ? released.value : null).status.kind).toBe("planned");
+
+    expect(f.provider.streamRequests()).toBe(requests + 1);
+
+    for (const pane of panes.slice(1)) {
+      expect(
+        await f.call(owner, "playback.panePlaying", {
+          paneId: pane.paneId,
+          channel: pane.channel,
+          sessionId: pane.sessionId,
+        }),
+      ).toEqual({ ok: true, value: { variantId: pane.channel.id, failed: [] } });
+      expect((await pane.reader.read()).value?.byteLength).toBeGreaterThan(0);
+      expect(
+        await f.call(owner, "playback.closePane", {
+          paneId: pane.paneId,
+          order: 2,
+          channel: pane.channel,
+          sessionId: pane.sessionId,
+        }),
+      ).toEqual({ ok: true, value: null });
+    }
+
+    await vi.waitFor(async () => {
+      expect(await capacity()).toEqual({
+        ok: true,
+        value: { eligible: true, limit: 3, used: 0 },
+      });
+      expect(f.provider.activeStreams()).toBe(0);
+    });
+  } finally {
+    try {
+      if (scheduleId) {
+        const reply = await f.call(owner, "recordings.list", undefined);
+
+        const records = type({ id: "string", "scheduled?": { schedule: "string" } })
+          .array()
+          .assert(reply.ok ? reply.value : null);
+
+        await f.call(owner, "recordings.cancel", { id: scheduleId });
+
+        for (const record of records.filter((each) => each.scheduled?.schedule === scheduleId)) {
+          await f.call(owner, "recordings.stop", { id: record.id });
+        }
+      }
+    } finally {
+      try {
+        await f.call(owner, "playback.closeAll", undefined);
+      } finally {
+        for (const abort of aborts) abort.abort();
+        await Promise.allSettled(panes.map((pane) => pane.reader.cancel()));
+      }
+    }
+  }
+}, 20_000);
+
+it.each(["1", "2"] as const)(
+  "promotes retained pane %s for exact-source re-adoption without reopening media",
+  async (paneId) => {
+    const f = await fixture({ live: true });
+
+    const channel = {
+      subscriptionId: f.source.id,
+      id: String(
+        f.provider.catalogue.channels.find((item) => item.fixture === "h264-aac.mpegts")!.streamId,
+      ),
+    };
+
+    const opened = await f.call(f.adult, "playback.openPane", {
+      paneId,
+      order: 1,
+      channel,
+      decoders: ["h264", "aac"],
+    });
+
+    const session = type({ sessionId: "string", url: "string" }).assert(
+      opened.ok ? opened.value : null,
+    );
+
+    const media = new AbortController();
+
+    try {
+      expect((await fetch(session.url, { signal: media.signal })).ok).toBe(true);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(1));
+      expect(
+        await f.call(f.adult, "playback.adoptPane", {
+          paneId: "1",
+          order: 2,
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({
+        ok: true,
+        value: { _tag: "PaneRefused", reason: paneId === "1" ? "mixed" : "stale" },
+      });
+      expect(
+        await f.call(f.adult, "playback.singlePane", {
+          paneId,
+          order: 3,
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: session });
+      expect(
+        await f.call(f.adult, "playback.adoptPane", {
+          paneId: "1",
+          order: 4,
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: session });
+      expect(
+        await f.call(f.adult, "playback.panePlaying", {
+          paneId: "1",
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: { failed: [] } });
+      expect((await fetch(session.url, { signal: media.signal })).ok).toBe(true);
+      expect(f.provider.activeStreams()).toBe(1);
+      expect(
+        await f.call(f.adult, "playback.closePane", {
+          paneId: "1",
+          order: 5,
+          channel,
+          sessionId: session.sessionId,
+        }),
+      ).toMatchObject({ ok: true, value: null });
+      expect((await fetch(session.url)).ok).toBe(false);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+    } finally {
+      media.abort();
+      await f.call(f.adult, "playback.closeAll", undefined);
+    }
+  },
+);
+
+it.each(["committed", "pending"] as const)(
+  "ordinary continuation retires older %s pane authority and preserves its own fetched media",
+  async (timing) => {
+    const f = await fixture({ live: true });
+
+    const channel = {
+      subscriptionId: f.source.id,
+      id: String(
+        f.provider.catalogue.channels.find((item) => item.fixture === "h264-aac.mpegts")!.streamId,
+      ),
+    };
+
+    const release = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const timer = setTimeout(() => release.resolve(), 5000);
+    const media = new AbortController();
+    let pending: Promise<Result<unknown>> | undefined;
+
+    try {
+      if (timing === "pending") {
+        let first = true;
+        admissionHold = () => {
+          if (!first) return Effect.void;
+          first = false;
+          reached.resolve();
+
+          return Effect.promise(() => release.promise);
+        };
+      }
+
+      pending = f.call(f.adult, "playback.openPane", {
+        paneId: "2",
+        order: 1,
+        channel,
+        decoders: ["h264", "aac"],
+      });
+      const old = timing === "committed" ? await pending : null;
+
+      const previous = old
+        ? type({ sessionId: "string", url: "string" }).assert(old.ok ? old.value : null)
+        : null;
+
+      if (previous) {
+        expect((await fetch(previous.url, { signal: media.signal })).ok).toBe(true);
+        await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(1));
+      } else await reached.promise;
+
+      const ordinary = await f.call(f.adult, "playback.open", {
+        channel,
+        decoders: ["h264", "aac"],
+      });
+
+      const current = type({ sessionId: "string", url: "string" }).assert(
+        ordinary.ok ? ordinary.value : null,
+      );
+
+      if (previous) {
+        expect(current.sessionId).not.toBe(previous.sessionId);
+        expect((await fetch(previous.url)).ok).toBe(false);
+        await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+      }
+
+      release.resolve();
+
+      if (!previous)
+        expect(await pending).toMatchObject({
+          ok: true,
+          value: { _tag: "PaneRefused", reason: "stale" },
+        });
+      expect((await fetch(current.url, { signal: media.signal })).ok).toBe(true);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(1));
+      expect(
+        await f.call(f.adult, "playback.close", { sessionId: current.sessionId }),
+      ).toMatchObject({ ok: true });
+      expect((await fetch(current.url)).ok).toBe(false);
+      await vi.waitFor(() => expect(f.provider.activeStreams()).toBe(0));
+    } finally {
+      clearTimeout(timer);
+      release.resolve();
+      await pending;
+      admissionHold = undefined;
+      media.abort();
+      await f.call(f.adult, "playback.closeAll", undefined);
+    }
+  },
+);

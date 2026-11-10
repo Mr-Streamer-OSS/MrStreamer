@@ -43,7 +43,7 @@ import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { useLiveSession } from "../../player/media-session.ts";
 import { outputs, useOutput } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
-import { LIVE_EDGE_MS, player, usePlayer } from "../../player/player.ts";
+import { LIVE_EDGE_MS, player, usePaneGroup, usePlayer } from "../../player/player.ts";
 import {
   adjacentChannel,
   useListChannels,
@@ -62,6 +62,13 @@ import { nudgeSubtitles } from "./SubtitleSettings.tsx";
 import { PlaybackAnnouncement, PlaybackState, retryFailed } from "./PlaybackState.tsx";
 import { failureTitle, reconnectingLine } from "./problems.ts";
 import type { LiveMenu } from "./LiveMore.tsx";
+import {
+  isMultiviewMenu,
+  Multiview,
+  MultiviewBar,
+  type MultiviewMenu,
+  type TransportSlots,
+} from "./multiview/Multiview.tsx";
 
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
@@ -95,7 +102,7 @@ export function WatchScreen() {
   const { entries, entry, setEntry, openGroup: toggle } = picker;
   const [picking, setPicking] = useState(false);
   const [selected, setSelected] = useState(0);
-  const [menu, setMenu] = useState<LiveMenu>(null);
+  const [menu, setMenu] = useState<LiveMenu | MultiviewMenu>(null);
   const keyboardMenu = useRef(false);
 
   // A receiver on the network has playback, or had it until its connection broke.
@@ -104,12 +111,15 @@ export function WatchScreen() {
   );
 
   const waiting = usePlayer((state) => state.waiting && state.phase.kind === "playing");
+  // Several panes replace the single picture; the selected one is `channel`.
+  const grouped = usePaneGroup((state) => state.panes.length > 0);
   useLiveSession(channel);
 
-  // Menus belong to this channel and the full controls, never to another channel or mini view.
+  // Menus belong to this channel and the full controls, never to another channel or mini view,
+  // nor across entering or leaving the multiview.
   useEffect(() => {
     setMenu(null);
-  }, [channel?.subscriptionId, channel?.id]);
+  }, [channel?.subscriptionId, channel?.id, grouped]);
   useEffect(() => {
     if (mini || channelsOpen) setMenu(null);
   }, [mini, channelsOpen]);
@@ -457,7 +467,8 @@ export function WatchScreen() {
   }, [account]);
 
   if (!channel) return null;
-  const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;
+  // The multiview's bar and transport stay: they sit beside the panes, not over a picture.
+  const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote || grouped;
 
   if (mini) {
     const playing = phase.kind !== "idle" && phase.kind !== "failed";
@@ -536,27 +547,45 @@ export function WatchScreen() {
       )}
     >
       {/* In a window the picture starts below the bar, so the bar never draws on it. */}
-      <Picture
-        active
-        fit="contain"
-        className="absolute inset-x-0 bottom-0"
-        style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}
-        onClick={() => (channelsOpen ? closeChannels() : wake())}
-        onDoubleClick={toggleFullscreen}
-        onWheel={onPictureWheel}
-      />
-      <div
-        data-playback-state=""
-        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
-      >
-        <PlaybackState
-          channel={channel}
-          onWatch={() => player.play(channel)}
-          onNext={() => switchBy(1)}
-          onQuality={() => openQuality()}
-          onChannels={openChannels}
+      {grouped ? (
+        <Multiview
+          channels={channels}
+          timeline={(transport) => (
+            <LiveTimelineBar
+              visible
+              transport={transport}
+              className="mt-0 bg-none px-6 pt-0.5 pb-4.5"
+            />
+          )}
+          menu={menu}
+          onMenu={setMenu}
+          style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}
         />
-      </div>
+      ) : (
+        <>
+          <Picture
+            active
+            fit="contain"
+            className="absolute inset-x-0 bottom-0"
+            style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}
+            onClick={() => (channelsOpen ? closeChannels() : wake())}
+            onDoubleClick={toggleFullscreen}
+            onWheel={onPictureWheel}
+          />
+          <div
+            data-playback-state=""
+            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+          >
+            <PlaybackState
+              channel={channel}
+              onWatch={() => player.play(channel)}
+              onNext={() => switchBy(1)}
+              onQuality={() => openQuality()}
+              onChannels={openChannels}
+            />
+          </div>
+        </>
+      )}
       {!fullscreen && (
         <div
           className={cn(
@@ -564,7 +593,11 @@ export function WatchScreen() {
             controlsVisible || channelsOpen ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         >
-          <WindowBar />
+          <WindowBar>
+            {grouped && (
+              <MultiviewBar menu={isMultiviewMenu(menu) ? menu : null} onMenu={setMenu} />
+            )}
+          </WindowBar>
         </div>
       )}
       {channelsOpen && (
@@ -583,23 +616,25 @@ export function WatchScreen() {
         />
       )}
       {/* The timeline lifts the bar above it, and is gone where the stream can't rewind. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-        <div className="relative">
-          <NowPlayingBar
-            visible={controlsVisible && !channelsOpen}
-            channel={channel}
-            categories={categories}
-            fullscreen={fullscreen}
-            onToggleFullscreen={toggleFullscreen}
-            onOpenChannels={openChannels}
-            onSwitch={switchBy}
-            menu={menu}
-            keyboardMenu={keyboardMenu.current}
-            onMenu={setMenu}
-          />
+      {!grouped && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
+          <div className="relative">
+            <NowPlayingBar
+              visible={controlsVisible && !channelsOpen}
+              channel={channel}
+              categories={categories}
+              fullscreen={fullscreen}
+              onToggleFullscreen={toggleFullscreen}
+              onOpenChannels={openChannels}
+              onSwitch={switchBy}
+              menu={isMultiviewMenu(menu) ? null : menu}
+              keyboardMenu={keyboardMenu.current}
+              onMenu={setMenu}
+            />
+          </div>
+          <LiveTimelineBar visible={controlsVisible && !channelsOpen} />
         </div>
-        <LiveTimelineBar visible={controlsVisible && !channelsOpen} />
-      </div>
+      )}
       <NumberEntry onChannel={(target) => player.play(target)} />
       <LiveSubtitleHint />
       <Flash />
@@ -609,19 +644,51 @@ export function WatchScreen() {
   );
 }
 
-/** The retained window of a local MPEG-TS view, read again every second while it shows. */
-function LiveTimelineBar({ visible }: { visible: boolean }) {
+/**
+ * The retained window of a local MPEG-TS view, read again every second while it shows. The
+ * multiview places it under its panes with `className` and fills its `transport` slots.
+ */
+function LiveTimelineBar({
+  visible,
+  className,
+  transport,
+}: {
+  visible: boolean;
+  className?: string;
+  transport?: TransportSlots;
+}) {
   const timeline = usePlayer((state) => state.timeline);
 
-  return timeline && <RetainedTimeline timeline={timeline} visible={visible} />;
+  return (
+    timeline && (
+      <RetainedTimeline
+        timeline={timeline}
+        visible={visible}
+        className={className}
+        transport={transport}
+      />
+    )
+  );
 }
 
 /**
  * Pause, 10-second skips, the slider over what is kept, how far behind live and Go live. The
  * slider seeks when let go; its own keys move 10 seconds, or a minute with Page Up and Down.
- * A read that fails keeps the last window shown.
+ * A read that fails keeps the last window shown. With `transport`, as in the multiview, the
+ * slider has a row of its own above the buttons, and the selected pane's label says how far
+ * behind live it is between the skips and what is kept.
  */
-function RetainedTimeline({ timeline, visible }: { timeline: LiveTimeline; visible: boolean }) {
+function RetainedTimeline({
+  timeline,
+  visible,
+  className,
+  transport,
+}: {
+  timeline: LiveTimeline;
+  visible: boolean;
+  className?: string | undefined;
+  transport?: TransportSlots | undefined;
+}) {
   const paused = usePlayer((state) => state.paused);
   const [dragging, setDragging] = useState<number | null>(null);
   useEffect(() => {
@@ -647,6 +714,106 @@ function RetainedTimeline({ timeline, visible }: { timeline: LiveTimeline; visib
 
   const pauseLabel = paused ? t("Play") : t("Pause");
 
+  const buttons = (
+    <>
+      <Tooltip label={pauseLabel}>
+        <Button
+          variant="primary"
+          size="icon"
+          className="size-9"
+          aria-label={pauseLabel}
+          onClick={() => player.togglePause()}
+        >
+          {paused ? (
+            <Play className="size-4 translate-x-px fill-current" />
+          ) : (
+            <Pause className="size-4 fill-current" />
+          )}
+        </Button>
+      </Tooltip>
+      {(
+        [
+          [t("Back 10 seconds"), -SKIP_MS, RotateCcw],
+          [t("Forward 10 seconds"), SKIP_MS, RotateCw],
+        ] as const
+      ).map(([label, by, Icon]) => (
+        <Tooltip key={by} label={label}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9 text-foreground"
+            aria-label={label}
+            onClick={() => void player.skip(by)}
+          >
+            <Icon className="size-5" />
+          </Button>
+        </Tooltip>
+      ))}
+    </>
+  );
+
+  const range = (
+    <>
+      <span
+        className={cn(
+          "min-w-10 flex-none text-xs whitespace-nowrap text-muted-foreground tabular-nums",
+          !transport && "ml-2.5",
+        )}
+      >
+        {clockTime(start, end)}
+      </span>
+      <SliderPrimitive.Root
+        value={cursor}
+        min={start}
+        max={Math.max(end, start + 1)}
+        step={SKIP_MS}
+        largeStep={60_000}
+        onValueChange={(next) => setDragging(single(next))}
+        onValueCommitted={(next) => {
+          seek(single(next));
+          setDragging(null);
+        }}
+        className={cn("min-w-24 flex-1", !transport && "mx-1.5")}
+      >
+        <SliderControl className="flex h-6 w-full touch-none items-center">
+          <SliderPrimitive.Track className="relative h-1 w-full rounded-[2px] bg-white/28">
+            <SliderPrimitive.Indicator className="rounded-[2px] bg-foreground" />
+            <SliderPrimitive.Thumb
+              aria-label={t("Position")}
+              getAriaValueText={(_, value) => behind(value)}
+              className="size-3.5 rounded-full bg-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </SliderPrimitive.Track>
+        </SliderControl>
+      </SliderPrimitive.Root>
+      <span className="min-w-10 flex-none text-right text-xs font-semibold whitespace-nowrap tabular-nums">
+        {clockTime(end, end)}
+      </span>
+    </>
+  );
+
+  const kept = (
+    <span
+      className={cn(
+        "flex-none text-xs whitespace-nowrap text-muted-foreground tabular-nums max-[720px]:hidden",
+        transport ? "mr-2.5" : "ml-3",
+      )}
+    >
+      {t("{time} kept", { time: clock((end - start) / 1000) })}
+    </span>
+  );
+
+  const goLive = (
+    <Button
+      size="sm"
+      className={cn(!transport && "ml-1.5")}
+      disabled={live}
+      onClick={() => void player.goLive()}
+    >
+      {t("Go live")}
+    </Button>
+  );
+
   return (
     <div
       role="group"
@@ -655,6 +822,7 @@ function RetainedTimeline({ timeline, visible }: { timeline: LiveTimeline; visib
       className={cn(
         "no-drag relative z-20 -mt-5 bg-[linear-gradient(to_bottom,transparent,rgb(0_0_0/0.9)_0.5rem)] px-10 pt-2 pb-6 transition-opacity duration-300 max-[720px]:mt-0 max-[720px]:px-4 max-[720px]:pb-4",
         visible ? "pointer-events-auto opacity-100" : "opacity-0",
+        className,
       )}
     >
       {paused && timeline.expired && (
@@ -664,80 +832,29 @@ function RetainedTimeline({ timeline, visible }: { timeline: LiveTimeline; visib
           })}
         </p>
       )}
-      <div className="flex items-center gap-1.5">
-        <Tooltip label={pauseLabel}>
-          <Button
-            variant="primary"
-            size="icon"
-            className="size-9"
-            aria-label={pauseLabel}
-            onClick={() => player.togglePause()}
-          >
-            {paused ? (
-              <Play className="size-4 translate-x-px fill-current" />
-            ) : (
-              <Pause className="size-4 fill-current" />
-            )}
-          </Button>
-        </Tooltip>
-        {(
-          [
-            [t("Back 10 seconds"), -SKIP_MS, RotateCcw],
-            [t("Forward 10 seconds"), SKIP_MS, RotateCw],
-          ] as const
-        ).map(([label, by, Icon]) => (
-          <Tooltip key={by} label={label}>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-9 text-foreground"
-              aria-label={label}
-              onClick={() => void player.skip(by)}
-            >
-              <Icon className="size-5" />
-            </Button>
-          </Tooltip>
-        ))}
-        <span className="ml-2.5 min-w-10 flex-none text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-          {clockTime(start, end)}
-        </span>
-        <SliderPrimitive.Root
-          value={cursor}
-          min={start}
-          max={Math.max(end, start + 1)}
-          step={SKIP_MS}
-          largeStep={60_000}
-          onValueChange={(next) => setDragging(single(next))}
-          onValueCommitted={(next) => {
-            seek(single(next));
-            setDragging(null);
-          }}
-          className="mx-1.5 min-w-24 flex-1"
-        >
-          <SliderControl className="flex h-6 w-full touch-none items-center">
-            <SliderPrimitive.Track className="relative h-1 w-full rounded-[2px] bg-white/28">
-              <SliderPrimitive.Indicator className="rounded-[2px] bg-foreground" />
-              <SliderPrimitive.Thumb
-                aria-label={t("Position")}
-                getAriaValueText={(_, value) => behind(value)}
-                className="size-3.5 rounded-full bg-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </SliderPrimitive.Track>
-          </SliderControl>
-        </SliderPrimitive.Root>
-        <span className="min-w-10 flex-none text-right text-xs font-semibold whitespace-nowrap tabular-nums">
-          {clockTime(end, end)}
-        </span>
-        <span className="ml-3 min-w-28 flex-none text-right text-[0.8125rem] font-medium whitespace-nowrap tabular-nums">
-          {behind(cursor)}
-        </span>
-        <span className="ml-3 flex-none text-xs whitespace-nowrap text-muted-foreground tabular-nums max-[720px]:hidden">
-          {t("{time} kept", { time: clock((end - start) / 1000) })}
-        </span>
-        <Button size="sm" className="ml-1.5" disabled={live} onClick={() => void player.goLive()}>
-          {t("Go live")}
-        </Button>
-      </div>
+      {transport ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-3">{range}</div>
+          <div className="flex items-center gap-1.5">
+            {buttons}
+            <div className="min-w-0 pl-2.5">{transport.label}</div>
+            <span className="flex-1" />
+            {kept}
+            {goLive}
+            {transport.actions}
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          {buttons}
+          {range}
+          <span className="ml-3 min-w-28 flex-none text-right text-[0.8125rem] font-medium whitespace-nowrap tabular-nums">
+            {behind(cursor)}
+          </span>
+          {kept}
+          {goLive}
+        </div>
+      )}
     </div>
   );
 }

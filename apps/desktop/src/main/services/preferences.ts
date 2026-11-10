@@ -33,6 +33,7 @@ import {
   defaultPreferences,
   defaultSubscriptionPreferences,
   Preferences,
+  MultiviewLayout,
   SubscriptionPreferences,
 } from "@mrstreamer/contracts/preferences";
 import { Failed } from "@mrstreamer/core/failure";
@@ -51,20 +52,24 @@ import { defined } from "@mrstreamer/core/defined";
  * the record has imported them. Keys of newer versions are kept.
  */
 const Stored = lazy(() =>
-  Preferences().omit("nextEpisodeDelaySeconds").merge(SubscriptionPreferences()).merge({
-    "favouriteChannelIds?": "string[]",
-    "recentChannelIds?": "string[]",
-    /**
-     * The interface language picked in Settings: a `Locale`, or "system". Any string, so a language
-     * a later release adds doesn't make this one drop the file. System default when absent.
-     */
-    "interfaceLanguage?": "string",
-  }),
+  Preferences()
+    .omit("nextEpisodeDelaySeconds", "multiviewLayouts")
+    .merge(SubscriptionPreferences())
+    .merge({
+      "favouriteChannelIds?": "string[]",
+      "recentChannelIds?": "string[]",
+      /**
+       * The interface language picked in Settings: a `Locale`, or "system". Any string, so a language
+       * a later release adds doesn't make this one drop the file. System default when absent.
+       */
+      "interfaceLanguage?": "string",
+    }),
 );
 
 type Stored = Infer<typeof Stored> & {
   /** Preserve malformed and future values until the viewer explicitly replaces this leaf. */
   nextEpisodeDelaySeconds?: Json;
+  multiviewLayouts?: Json;
   rememberedLiveBrowse?: Json;
 };
 
@@ -378,7 +383,18 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
         ),
       update: (patch: Partial<Preferences>) =>
         Effect.map(
-          change((previous) => ({ ...previous, ...patch })),
+          change((previous) => {
+            const next = { ...previous, ...patch };
+
+            // Replace visible layouts while retaining entries this release cannot edit.
+            if (patch.multiviewLayouts !== undefined && Array.isArray(previous.multiviewLayouts))
+              next.multiviewLayouts = [
+                ...patch.multiviewLayouts,
+                ...previous.multiviewLayouts.filter((layout) => !MultiviewLayout().allows(layout)),
+              ];
+
+            return next;
+          }),
           effective,
         ),
       interfaceLanguage: one.withPermits(1)(Effect.map(stored, (file) => file.interfaceLanguage)),
@@ -498,10 +514,15 @@ function general({
 
 /** Normalize replies only. File reconstruction must keep unsupported raw values intact. */
 function effective(file: Stored): Preferences {
-  const { nextEpisodeDelaySeconds, ...preferences } = general(file);
+  const { nextEpisodeDelaySeconds, multiviewLayouts, ...preferences } = general(file);
+
+  const layouts = Array.isArray(multiviewLayouts)
+    ? multiviewLayouts.filter((layout) => MultiviewLayout().allows(layout))
+    : [];
 
   return {
     ...preferences,
+    ...(layouts.length > 0 && { multiviewLayouts: layouts }),
     nextEpisodeDelaySeconds:
       type("number | number.NaN").allows(nextEpisodeDelaySeconds) &&
       Number.isInteger(nextEpisodeDelaySeconds) &&

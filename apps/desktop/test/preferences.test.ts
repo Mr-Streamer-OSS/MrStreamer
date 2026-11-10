@@ -1,5 +1,5 @@
 import type { Json } from "@mrstreamer/contracts/json";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
 import * as Effect from "effect/Effect";
@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Preferences, SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { ipcInputs } from "@mrstreamer/contracts/ipc";
+import { profileDirectory } from "../src/main/platform/profile-store.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import {
@@ -440,6 +441,166 @@ describe("the next-episode delay", () => {
     expect((await settings.get()).nextEpisodeDelaySeconds).toBe(10);
     expect((await settings.update({ muted: true })).nextEpisodeDelaySeconds).toBe(10);
     expect(await stored(dataDir)).not.toHaveProperty("nextEpisodeDelaySeconds");
+  });
+
+  it.each(
+    [
+      null,
+      "future",
+      [{ name: "Bad", channels: [] }],
+      [
+        {
+          name: "Future",
+          channels: [
+            { subscriptionId: "a", id: "1" },
+            { subscriptionId: "a", id: "2" },
+          ],
+          mode: "future",
+        },
+      ],
+    ].map((multiviewLayouts) => ({ multiviewLayouts })),
+  )(
+    "preserves unsupported multiview leaf %j without activating it",
+    async ({ multiviewLayouts }) => {
+      const dataDir = await tempDir();
+
+      const raw = {
+        volume: 0.4,
+        muted: true,
+        lastChannelId: null,
+        lastCategoryId: null,
+        keyboardShortcuts: { playPause: ["Space"] },
+        multiviewLayouts,
+        futurePreference: { mode: "kept" },
+      };
+
+      await writeFile(join(dataDir, "preferences.json"), JSON.stringify(raw));
+      const settings = await settingsIn(dataDir);
+      expect(await settings.get()).toMatchObject({
+        volume: 0.4,
+        muted: true,
+        keyboardShortcuts: raw.keyboardShortcuts,
+      });
+      expect((await settings.get()).multiviewLayouts).toBeUndefined();
+      await settings.update({ volume: 0.6 });
+      expect(await stored(dataDir)).toMatchObject({ ...raw, volume: 0.6 });
+      const restarted = await settingsIn(dataDir);
+      expect((await restarted.get()).multiviewLayouts).toBeUndefined();
+      expect((await restarted.get()).volume).toBe(0.6);
+    },
+  );
+
+  it("retains hidden future layouts when Default saves its supported list and restarts", async () => {
+    const dataDir = await tempDir();
+    const path = join(dataDir, "preferences.json");
+
+    const known = {
+      name: "Sports",
+      channels: [
+        { subscriptionId: "a", id: "1" },
+        { subscriptionId: "b", id: "2" },
+      ],
+    };
+
+    const future = { ...known, mode: "future" };
+
+    const raw = {
+      volume: 0.4,
+      muted: false,
+      lastChannelId: null,
+      lastCategoryId: null,
+      multiviewLayouts: [known, future],
+      keyboardShortcuts: { playPause: ["Space"] },
+      foreign: { keep: true },
+    };
+
+    await writeFile(path, JSON.stringify(raw));
+    const settings = await settingsIn(dataDir);
+    expect((await settings.get()).multiviewLayouts).toEqual([known]);
+    const replacement = { ...known, name: "News" };
+    await settings.update({ multiviewLayouts: [replacement] });
+    expect((await (await settingsIn(dataDir)).get()).multiviewLayouts).toEqual([replacement]);
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+      ...raw,
+      multiviewLayouts: [replacement, future],
+    });
+    await settings.update({ multiviewLayouts: [] });
+    expect((await (await settingsIn(dataDir)).get()).multiviewLayouts).toBeUndefined();
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+      ...raw,
+      multiviewLayouts: [future],
+    });
+  });
+
+  it("activates only supported saved layouts and preserves future layouts across private restart and refusal", async () => {
+    const dataDir = await tempDir();
+    const dir = profileDirectory(dataDir, "multiview-viewer");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "preferences.json");
+
+    const known = {
+      name: "Sports",
+      channels: [
+        { subscriptionId: "a", id: "1" },
+        { subscriptionId: "b", id: "2" },
+      ],
+    };
+
+    const future = { ...known, mode: "future" };
+
+    const raw = {
+      volume: 0.4,
+      muted: false,
+      lastChannelId: null,
+      lastCategoryId: null,
+      keyboardShortcuts: { playPause: ["Space"] },
+      multiviewLayouts: [known, future],
+      foreign: { keep: true },
+    };
+
+    const boot = async () =>
+      promised(
+        runtimeFor(
+          Settings.profileLayer(dataDir, "multiview-viewer", {
+            read: Effect.succeed(false),
+            write: () => Effect.void,
+          }).pipe(
+            Layer.provide(
+              Subscriptions.layer({
+                dataDir,
+                secrets: testSecrets,
+                providerOptions: { userAgent },
+              }),
+            ),
+          ),
+        ),
+        Settings,
+      );
+
+    await writeFile(path, JSON.stringify(raw));
+    const settings = await boot();
+    expect((await settings.get()).multiviewLayouts).toEqual([known]);
+    await settings.update({ muted: true });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...raw, muted: true });
+    expect((await (await boot()).get()).multiviewLayouts).toEqual([known]);
+    const replacement = { ...known, name: "News" };
+    expect((await settings.update({ multiviewLayouts: [replacement] })).multiviewLayouts).toEqual([
+      replacement,
+    ]);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      ...raw,
+      muted: true,
+      multiviewLayouts: [replacement, future],
+    });
+    expect((await (await boot()).get()).multiviewLayouts).toEqual([replacement]);
+    const invalid = JSON.stringify({ ...raw, volume: "private-invalid-volume" });
+    await writeFile(path, invalid);
+    const refused = await boot();
+    await expect(refused.get()).rejects.not.toThrow("private-invalid-volume");
+    await expect(refused.update({ multiviewLayouts: [known] })).rejects.toBeDefined();
+    expect(await readFile(path, "utf8")).toBe(invalid);
+    await writeFile(path, JSON.stringify(raw));
+    expect((await refused.get()).multiviewLayouts).toEqual([known]);
   });
 
   it.each([-1, 37.5, 75, "future", { mode: "future" }, null])(

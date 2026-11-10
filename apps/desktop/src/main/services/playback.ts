@@ -1,5 +1,12 @@
-import type { LiveTimeline } from "@mrstreamer/contracts/playback";
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
+import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
+import {
+  paneStreamLimit,
+  type PaneId,
+  type PaneRefusal,
+  type PaneCapacity,
+  type LiveTimeline,
+} from "@mrstreamer/contracts/playback";
+import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
@@ -7,8 +14,9 @@ import type { Json } from "@mrstreamer/contracts/json";
 // Stream sessions and the loopback proxy that serves them to the UI.
 //
 // The UI never sees provider URLs: they carry the login. It gets a 127.0.0.1 URL with a random
-// token instead. Only one session is open at a time, live or on demand, so switching always
-// releases the previous provider connection first. Many subscriptions allow a single connection.
+// token instead. Single view and receivers release the previous session before switching.
+// Eligible local multiview admits up to four panes without taking another owner's connection;
+// each pane reuses the same live delivery and capture implementation.
 //
 // Live: the proxy reads the start of each MPEG-TS stream to learn its codecs. A stream the UI's
 // player decodes passes through untouched; otherwise ffmpeg converts only the tracks it cannot
@@ -359,6 +367,9 @@ export interface ReceiverTitle {
 }
 
 interface LiveSession extends SessionBase {
+  pane?: PaneRequest | undefined;
+  /** Exact close identity retained across Single commit until this session closes or is adopted. */
+  promotedPane?: PaneRequest | undefined;
   readonly kind: "live";
   readonly channel: OwnedId;
   /**
@@ -601,9 +612,92 @@ export interface Asked {
   readonly listingKey?: string | undefined;
 }
 
+/** Validated intent metadata only; authorization and media mutation happen after admission. */
+export interface PaneArrival {
+  readonly paneId: PaneId;
+  readonly owner: ActiveProfile;
+  readonly frame: string;
+  readonly order: number;
+  readonly epoch: number;
+}
+
+/** Main-only request-local validated arrival, never renderer authorization. */
+export class CurrentPaneArrival extends Context.Service<CurrentPaneArrival, PaneArrival>()(
+  "mrstreamer/PaneArrival",
+) {}
+
+/** Main-only immutable request identity. Global playback and a newer request in this slot cancel it. */
+export interface PaneRequest {
+  readonly arrival?: PaneArrival;
+  readonly paneId: PaneId;
+  readonly channel: OwnedId;
+  readonly owner: ActiveProfile;
+  readonly epoch: number;
+  readonly revision: number;
+  readonly order: number;
+}
+
 export class Playback extends Context.Service<
   Playback,
   {
+    arrivePane(
+      paneId: PaneId,
+      owner: ActiveProfile,
+      frame: string,
+      order: number,
+    ): Effect.Effect<PaneArrival>;
+    beginArrivedPane(
+      arrival: PaneArrival,
+      channel: OwnedId,
+    ): Effect.Effect<PaneRequest, PaneRefusal>;
+    /** Resolve an attached pane, an adoptable session, or retained promotion identity for close.
+     * Without a session ID, an absent slot yields cancellation identity only.
+     */
+    paneSession(
+      paneId: PaneId,
+      owner: ActiveProfile,
+      channel: OwnedId,
+      sessionId: string | undefined,
+      intent: "existing" | "adopt" | "close",
+    ): Effect.Effect<PaneRequest, Failed | PaneRefusal>;
+    paneCapacity(channel: OwnedId): Effect.Effect<PaneCapacity, Failed>;
+    /** Begin before asynchronous source/policy lookup. Other pane slots keep their requests. */
+    beginPane(
+      paneId: PaneId,
+      owner: ActiveProfile,
+      channel: OwnedId,
+      intent?: { readonly order: number; readonly epoch: number },
+    ): Effect.Effect<PaneRequest, PaneRefusal>;
+    /** Attach the current local live session without replacing its delivery or live buffer. */
+    adoptPane(
+      request: PaneRequest,
+      sessionId: string,
+    ): Effect.Effect<StreamSession, Failed | PaneRefusal>;
+    /** Keep the selected session and its buffer, closing only its peer panes. */
+    singlePane(
+      request: PaneRequest,
+      sessionId: string,
+      arrival?: PaneArrival,
+    ): Effect.Effect<StreamSession, PaneRefusal>;
+    /** Main-only live admission. Callers must enforce exact-source profile policy before opening. */
+    openPane(
+      request: PaneRequest,
+      channel: OwnedId,
+      decoders: readonly Codec[],
+      options?: {
+        readonly variants?: readonly string[];
+        readonly repair?: boolean;
+        readonly audio?: number | null;
+        readonly audioLanguage?: string | null;
+      },
+    ): Effect.Effect<StreamSession, Failed | PaneRefusal>;
+    /** Cancel and close this exact request/channel, optionally requiring its exact session. */
+    closePane(
+      request: PaneRequest,
+      channel: OwnedId,
+      sessionId?: string,
+      arrival?: PaneArrival,
+    ): Effect.Effect<void>;
     measurement(
       sessionId: string,
     ): Effect.Effect<{ kind: "live" | "vod"; closed: AbortSignal } | null>;
@@ -796,6 +890,33 @@ function make(deps: PlaybackDeps) {
     const fixed = yield* PubSub.unbounded<{ sessionId: string; variant: string | null }>();
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
+    const paneRequests = new Map<PaneId, PaneRequest>();
+    let paneRevision = 0;
+    const arrivals = new Map<string, PaneArrival>();
+
+    const arrivalKey = (arrival: PaneArrival) =>
+      JSON.stringify([arrival.owner.id, arrival.owner.revision, arrival.frame, arrival.paneId]);
+
+    const currentArrival = (arrival: PaneArrival) => arrivals.get(arrivalKey(arrival)) === arrival;
+
+    // Watermarks outlive a closed request; delayed admission must not recreate it.
+    const paneIntents = new Map<
+      PaneId,
+      { readonly owner: ActiveProfile; readonly epoch: number; readonly order: number }
+    >();
+
+    const paneFailure = (reason: PaneRefusal["reason"]) =>
+      Effect.fail({ _tag: "PaneRefused", reason } satisfies PaneRefusal);
+
+    const whilePane = (request: PaneRequest) =>
+      Effect.gen(function* () {
+        if (
+          (yield* coordination.passed(request.epoch)) ||
+          paneRequests.get(request.paneId) !== request ||
+          (request.arrival !== undefined && !currentArrival(request.arrival))
+        )
+          return yield* paneFailure("stale");
+      });
 
     /** The subscription whose provider a session reads from; none for a copy's. */
     const subscriptionOf = (session: Session): string | null =>
@@ -903,14 +1024,28 @@ function make(deps: PlaybackDeps) {
         }),
     );
 
-    const closeAll = Effect.suspend(() =>
-      Effect.forEach([...sessions.values()], (session) => Scope.close(session.scope, Exit.void)),
-    ).pipe(Effect.asVoid);
+    const closeAll = Effect.suspend(() => {
+      paneRequests.clear();
+
+      return Effect.forEach([...sessions.values()], (session) =>
+        Scope.close(session.scope, Exit.void),
+      );
+    }).pipe(Effect.asVoid);
 
     // Sessions close before the proxy does.
     yield* Effect.addFinalizer(() => closeAll);
 
     const base = `http://127.0.0.1:${port}`;
+
+    const streamSession = (session: LiveSession): StreamSession => ({
+      sessionId: session.id,
+      channel: session.channel,
+      url: `${base}/stream/${session.token}.${session.delivery === "mpegts" ? "ts" : "m3u8"}`,
+      format: session.delivery,
+      convertedHls: session.format === "hls" && session.delivery === "mpegts",
+      ...defined({ archive: session.archive ?? undefined }),
+    });
+
     /**
      * Probes by address, so reopening a title doesn't read its file again, until an answer shows
      * the provider put another file there. Oldest first.
@@ -3883,7 +4018,7 @@ function make(deps: PlaybackDeps) {
      * Opens a channel's session after closing any other, for the UI's player or `receiver`,
      * unless the viewer asked for something else while its streams were looked up.
      */
-    const liveSession = (
+    const liveSession = <E = never>(
       channel: OwnedId,
       decoders: readonly Codec[],
       options: {
@@ -3898,10 +4033,25 @@ function make(deps: PlaybackDeps) {
         readonly joining?: string;
       },
       receiver: ReceiverTarget | null,
+      pane?: {
+        readonly request: PaneRequest;
+        readonly standing: Effect.Effect<void, E>;
+        readonly before: (
+          source: Source,
+          streams: readonly (Awaited<ReturnType<Provider["liveStream"]>> & {
+            readonly id: string;
+          })[],
+        ) => Effect.Effect<string | undefined, Failed | E>;
+      },
     ) =>
       Effect.gen(function* () {
+        const standing: Effect.Effect<void, Failed | E> = pane
+          ? pane.standing
+          : coordination.whileAsked(options.turn);
+
         const source = yield* subscriptions.sourceOf(channel.subscriptionId);
-        yield* closeAll;
+
+        if (!pane) yield* closeAll;
 
         const now = Date.now();
 
@@ -3941,7 +4091,7 @@ function make(deps: PlaybackDeps) {
 
         // Looked up under the login it had: with another by now, they are no longer its streams.
         yield* whileSaved(source);
-        yield* coordination.whileAsked(options.turn);
+        yield* standing;
 
         // Streams that failed lately go last, in the order they came. The player picks its
         // engine by the format before the stream starts, so those of another format than the
@@ -3949,6 +4099,11 @@ function make(deps: PlaybackDeps) {
         const streams = listed.toSorted(
           (a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)),
         );
+
+        const joining = pane ? yield* pane.before(source, streams) : options.joining;
+
+        if (pane) yield* whileSaved(source);
+        yield* standing;
 
         const format = streams[0]?.format ?? "mpegts";
         // A recording starts where its streams' addresses say, the same moment for each.
@@ -3964,6 +4119,7 @@ function make(deps: PlaybackDeps) {
         const token = randomBytes(18).toString("base64url");
 
         const session: LiveSession = {
+          pane: pane?.request,
           owner: options.owner,
           kind: "live",
           id,
@@ -3975,7 +4131,7 @@ function make(deps: PlaybackDeps) {
             archive || receiver || !shareable(format, options.repair ?? false)
               ? null
               : source.revision,
-          joined: options.joining !== undefined,
+          joined: joining !== undefined,
           delivered: { variantId: null, failed: [] },
           request: source.provider.request,
           format,
@@ -4001,7 +4157,10 @@ function make(deps: PlaybackDeps) {
           diagnostic: null,
         };
 
-        register(session, session.shares === null ? undefined : options.joining);
+        register(session, session.shares === null ? undefined : joining);
+
+        if (pane)
+          yield* standing.pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
 
         if (format === "hls" && (receiver || options.repair)) {
           const prepared = prepareHls(session, receiver !== null);
@@ -4011,9 +4170,7 @@ function make(deps: PlaybackDeps) {
             try: () => prepared,
             catch: (cause) => new Failed({ error: { kind: "stream", failure: hlsFailure(cause) } }),
           }).pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
-          yield* coordination
-            .whileAsked(options.turn)
-            .pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
+          yield* standing.pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
         }
 
         if (lan) session.receiver = liveReceiverDelivery(liveSource(session), lan, receiverTools);
@@ -4262,6 +4419,7 @@ function make(deps: PlaybackDeps) {
           turn,
           Effect.gen(function* () {
             // What plays here goes; a receiver plays on, and a copy plays here only.
+            paneRequests.clear();
             yield* Effect.forEach(
               [...sessions.values()].filter((session) => session.lan === null),
               (session) => Scope.close(session.scope, Exit.void),
@@ -4322,6 +4480,406 @@ function make(deps: PlaybackDeps) {
       tracksChanged: Stream.fromPubSub(tracksChanged),
       fixed: Stream.fromPubSub(fixed),
 
+      arrivePane: (paneId: PaneId, owner: ActiveProfile, frame: string, order: number) =>
+        Effect.gen(function* () {
+          const epoch = yield* coordination.current;
+
+          const arrival = Object.freeze({
+            paneId,
+            owner: Object.freeze({ ...owner }),
+            frame,
+            order,
+            epoch,
+          });
+
+          for (const [key, previous] of arrivals)
+            if (previous.epoch !== epoch) arrivals.delete(key);
+          const previous = arrivals.get(arrivalKey(arrival));
+
+          if (!previous || previous.epoch !== epoch || order > previous.order)
+            arrivals.set(arrivalKey(arrival), arrival);
+
+          return arrival;
+        }),
+      beginArrivedPane: (arrival: PaneArrival, channel: OwnedId) =>
+        Effect.gen(function* () {
+          if (!currentArrival(arrival) || (yield* coordination.passed(arrival.epoch)))
+            return yield* paneFailure("stale");
+          const prior = paneRequests.get(arrival.paneId);
+
+          if (prior && !sameProfile(prior.owner, arrival.owner))
+            return yield* paneFailure("profile");
+
+          if (prior?.arrival && prior.arrival.frame !== arrival.frame)
+            return yield* paneFailure("stale");
+
+          const request = Object.freeze({
+            ...arrival,
+            arrival,
+            channel: Object.freeze({ ...channel }),
+            revision: ++paneRevision,
+          });
+
+          paneRequests.set(arrival.paneId, request);
+
+          return request;
+        }),
+      paneSession: (
+        paneId: PaneId,
+        owner: ActiveProfile,
+        channel: OwnedId,
+        sessionId: string | undefined,
+        intent: "existing" | "adopt" | "close",
+      ) =>
+        Effect.gen(function* () {
+          const session =
+            sessionId === undefined
+              ? [...sessions.values()].find(
+                  (each) => each.kind === "live" && each.pane?.paneId === paneId,
+                )
+              : sessions.get(sessionId);
+
+          // An absent-session lookup can cancel pending/empty slots; it grants no session close.
+          if (!session && sessionId === undefined)
+            return Object.freeze({
+              paneId,
+              owner,
+              channel,
+              epoch: yield* coordination.current,
+              revision: 0,
+              order: 0,
+            });
+
+          if (
+            session?.kind !== "live" ||
+            !session.owner ||
+            !sameProfile(session.owner, owner) ||
+            session.channel.subscriptionId !== channel.subscriptionId ||
+            session.channel.id !== channel.id ||
+            (!session.pane && intent === "existing") ||
+            (session.pane && session.pane.paneId !== paneId) ||
+            session.lan !== null ||
+            session.archive !== null
+          )
+            return yield* paneFailure("stale");
+          const policy = yield* Effect.serviceOption(AdmittedKids);
+
+          if (
+            policy._tag === "None" ||
+            !session.variants.every((variant) =>
+              allowsApproval(policy.value.approved, {
+                kind: "channel",
+                subscriptionId: channel.subscriptionId,
+                id: variant.id,
+              }),
+            )
+          )
+            return yield* new Failed({
+              error: {
+                kind: "invalid-input",
+                detail: "Kids policy: this content or action is not approved.",
+              },
+            });
+
+          const request = session.pane ?? session.promotedPane;
+
+          // After policy, close requires actual pane identity, never adoption's placeholder.
+          if (intent === "close" && (!request || request.paneId !== paneId))
+            return yield* paneFailure("stale");
+
+          return (
+            request ??
+            Object.freeze({
+              paneId,
+              owner,
+              channel,
+              epoch: yield* coordination.current,
+              revision: 0,
+              order: 0,
+            })
+          );
+        }),
+      paneCapacity: (channel: OwnedId) =>
+        Effect.gen(function* () {
+          const saved = yield* subscriptions.list;
+
+          const limit = paneStreamLimit(
+            saved.find((each) => each.id === channel.subscriptionId)?.account.maxConnections,
+          );
+
+          if (limit === null) return { eligible: false } as const;
+          const uses = yield* coordination.uses(channel.subscriptionId);
+
+          return { eligible: true, limit, used: uses.length } as const;
+        }),
+      beginPane: (
+        paneId: PaneId,
+        owner: ActiveProfile,
+        channel: OwnedId,
+        intent?: { readonly order: number; readonly epoch: number },
+      ) =>
+        Effect.gen(function* () {
+          const epoch = yield* coordination.current;
+          const previous = paneIntents.get(paneId);
+          const order = intent?.order ?? (previous?.epoch === epoch ? previous.order : 0) + 1;
+
+          if (intent && intent.epoch !== epoch) return yield* paneFailure("stale");
+
+          if (intent && previous?.epoch === epoch) {
+            if (!sameProfile(previous.owner, owner)) return yield* paneFailure("profile");
+
+            if (order <= previous.order) return yield* paneFailure("stale");
+          }
+
+          const request = Object.freeze({
+            paneId,
+            channel: Object.freeze({ ...channel }),
+            owner: Object.freeze({ ...owner }),
+            epoch,
+            revision: ++paneRevision,
+            order,
+          });
+
+          paneIntents.set(paneId, request);
+          paneRequests.set(paneId, request);
+
+          return request;
+        }),
+      adoptPane: (request: PaneRequest, sessionId: string) =>
+        coordination.exclusive(
+          Effect.gen(function* () {
+            yield* whilePane(request);
+            const session = sessions.get(sessionId);
+
+            if (
+              session?.kind !== "live" ||
+              session.lan !== null ||
+              session.archive !== null ||
+              session.pane ||
+              sessions.size !== 1
+            )
+              return yield* paneFailure("mixed");
+
+            if (!session.owner || !sameProfile(session.owner, request.owner))
+              return yield* paneFailure("profile");
+
+            if (
+              session.channel.subscriptionId !== request.channel.subscriptionId ||
+              session.channel.id !== request.channel.id
+            )
+              return yield* paneFailure("stale");
+            const saved = yield* subscriptions.list;
+
+            if (
+              paneStreamLimit(
+                saved.find((each) => each.id === request.channel.subscriptionId)?.account
+                  .maxConnections,
+              ) === null
+            )
+              return yield* paneFailure("ineligible");
+            yield* whilePane(request);
+            session.pane = request;
+            session.promotedPane = undefined;
+
+            return streamSession(session);
+          }),
+        ),
+      singlePane: (request: PaneRequest, sessionId: string, arrival?: PaneArrival) =>
+        coordination.exclusive(
+          Effect.gen(function* () {
+            if (
+              (arrival && !currentArrival(arrival)) ||
+              (yield* coordination.passed(request.epoch))
+            )
+              return yield* paneFailure("stale");
+            const session = sessions.get(sessionId);
+
+            if (session?.kind !== "live" || session.pane !== request)
+              return yield* paneFailure("stale");
+            // Invalidate every pending pane before releasing peers. The selected delivery stays live.
+            paneRequests.clear();
+            yield* coordination.begin;
+            yield* Effect.forEach(
+              [...sessions.values()].filter(
+                (each) => each !== session && each.kind === "live" && each.pane,
+              ),
+              (each) => Scope.close(each.scope, Exit.void),
+              { discard: true },
+            );
+            session.promotedPane = Object.freeze({
+              ...request,
+              epoch: yield* coordination.current,
+            });
+            session.pane = undefined;
+
+            return streamSession(session);
+          }),
+        ),
+      openPane: (
+        request: PaneRequest,
+        channel: OwnedId,
+        decoders: readonly Codec[],
+        options: {
+          readonly variants?: readonly string[];
+          readonly repair?: boolean;
+          readonly audio?: number | null;
+          readonly audioLanguage?: string | null;
+        } = {},
+      ) =>
+        Effect.suspend(() => {
+          if (
+            request.channel.subscriptionId !== channel.subscriptionId ||
+            request.channel.id !== channel.id
+          )
+            return paneFailure("stale");
+          const admittedChannel = request.channel;
+
+          return coordination.exclusive(
+            Effect.gen(function* () {
+              yield* whilePane(request);
+              const current = [...sessions.values()];
+
+              if (current.some((each) => each.kind !== "live" || !each.pane))
+                return yield* paneFailure("mixed");
+
+              if (
+                current.some(
+                  (each) =>
+                    each.kind === "live" &&
+                    each.pane &&
+                    !sameProfile(each.pane.owner, request.owner),
+                )
+              )
+                return yield* paneFailure("profile");
+
+              const previous = current.find(
+                (each) => each.kind === "live" && each.pane?.paneId === request.paneId,
+              );
+
+              if (!previous && current.length >= 4) return yield* paneFailure("overflow");
+
+              const session = yield* liveSession(
+                admittedChannel,
+                decoders,
+                { ...options, owner: request.owner },
+                null,
+                {
+                  request,
+                  standing: whilePane(request),
+                  before: (source, streams) =>
+                    Effect.gen(function* () {
+                      yield* whileSaved(source);
+                      const format = streams[0]?.format;
+
+                      const joining =
+                        !captures || !format || !shareable(format, options.repair ?? false)
+                          ? []
+                          : streams.flatMap((stream) => {
+                              if (stream.format !== format) return [];
+
+                              const key = streamKey(
+                                admittedChannel.subscriptionId,
+                                source.revision,
+                                admittedChannel.id,
+                                stream.id,
+                                stream,
+                              );
+
+                              return key !== null && captures.reading(key) ? [key] : [];
+                            });
+
+                      const saved = yield* subscriptions.list;
+
+                      const participants = new Set([
+                        admittedChannel.subscriptionId,
+                        ...current.flatMap((each) =>
+                          each.kind === "live" ? [each.channel.subscriptionId] : [],
+                        ),
+                      ]);
+
+                      /** Only an explicit, finite allowance of two or more streams qualifies. */
+                      const limitOf = (id: string) => {
+                        const limit = saved.find((each) => each.id === id)?.account.maxConnections;
+
+                        return paneStreamLimit(limit);
+                      };
+
+                      const limit = limitOf(admittedChannel.subscriptionId);
+
+                      if (limit === null || [...participants].some((id) => limitOf(id) === null))
+                        return yield* paneFailure("ineligible");
+
+                      if (
+                        !(yield* coordination.admitsPane(
+                          admittedChannel.subscriptionId,
+                          limit,
+                          joining,
+                          previous?.id,
+                        ))
+                      )
+                        return yield* paneFailure("capacity");
+
+                      yield* whileSaved(source);
+                      yield* whilePane(request);
+
+                      if (previous) yield* Scope.close(previous.scope, Exit.void);
+
+                      return joining[0];
+                    }),
+                },
+              );
+
+              return streamSession(session);
+            }),
+          );
+        }),
+      closePane: (
+        request: PaneRequest,
+        channel: OwnedId,
+        sessionId?: string,
+        arrival?: PaneArrival,
+      ) =>
+        Effect.suspend(() => {
+          if (
+            request.channel.subscriptionId !== channel.subscriptionId ||
+            request.channel.id !== channel.id
+          )
+            return Effect.void;
+
+          // Invalidate before waiting for admission; the exact request owns its whole lifecycle.
+          if (sessionId === undefined && paneRequests.get(request.paneId) === request)
+            paneRequests.delete(request.paneId);
+
+          return coordination.exclusive(
+            Effect.gen(function* () {
+              if (
+                arrival &&
+                (!currentArrival(arrival) || (yield* coordination.passed(arrival.epoch)))
+              )
+                return;
+
+              const session =
+                sessionId === undefined
+                  ? [...sessions.values()].find(
+                      (each) => each.kind === "live" && each.pane === request,
+                    )
+                  : sessions.get(sessionId);
+
+              if (
+                session?.kind !== "live" ||
+                (session.pane !== request &&
+                  (sessionId === undefined || session.promotedPane !== request)) ||
+                session.channel.subscriptionId !== channel.subscriptionId ||
+                session.channel.id !== channel.id
+              )
+                return;
+
+              if (paneRequests.get(request.paneId) === request) paneRequests.delete(request.paneId);
+
+              yield* Scope.close(session.scope, Exit.void);
+            }),
+          );
+        }),
       begin: coordination.begin,
 
       passed: coordination.passed,
@@ -4368,16 +4926,7 @@ function make(deps: PlaybackDeps) {
               null,
             );
 
-            const extension = session.delivery === "mpegts" ? "ts" : "m3u8";
-
-            return {
-              sessionId: session.id,
-              channel,
-              url: `${base}/stream/${session.token}.${extension}`,
-              format: session.delivery,
-              convertedHls: session.format === "hls" && session.delivery === "mpegts",
-              ...defined({ archive: session.archive ?? undefined }),
-            };
+            return streamSession(session);
           }),
         ),
 

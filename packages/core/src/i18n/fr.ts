@@ -1951,4 +1951,24 @@ export const fr: Translation = {
     "Les titres apparaissent ici quand vos sources les ajoutent.",
   "Couldn't refresh your sources. Showing matches from {time}.":
     "Impossible d'actualiser vos sources. Correspondances de {time} affichées.",
+  // Multiview.
+  Multiview: "Multivue",
+  "Add channel": "Ajouter une chaîne",
+  "In view": "À l'écran",
+  "Only subscriptions that allow several streams":
+    "Seulement les abonnements qui autorisent plusieurs flux",
+  Layout: "Disposition",
+  "Not saved": "Non enregistrée",
+  "Save layout": "Enregistrer la disposition",
+  "Single view": "Vue unique",
+  "Replaces the saved {name}": "Remplace la disposition {name}",
+  "Couldn't load layouts": "Impossible de charger les dispositions",
+  "Couldn't check streams": "Impossible de vérifier les flux",
+  "Close {channel}": "Fermer {channel}",
+  "No stream free": "Aucun flux libre",
+  "All {provider} streams are in use": "Tous les flux de {provider} sont utilisés",
+  "{used} of {limit} streams": "{used} flux sur {limit}",
+  "{channel} has sound": "{channel} a le son",
+  "Couldn't close {channel}. Try again.": "Impossible de fermer {channel}. Réessayez.",
+  "Couldn't return to single view. Try again.": "Impossible de revenir à la vue unique. Réessayez.",
 };

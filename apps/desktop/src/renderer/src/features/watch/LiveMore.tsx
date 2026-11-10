@@ -5,6 +5,7 @@ import { type PlainKey, t } from "@mrstreamer/core/i18n";
 import { qualityName, shortQuality } from "../../lib/quality.ts";
 import { outputs, receiverName, useOutput } from "../../player/output.ts";
 import { MiniPlayerButton } from "./MiniPlayer.tsx";
+import { MultiviewEntry } from "./multiview/Multiview.tsx";
 import { Receivers } from "./Output.tsx";
 import { QualityChoices } from "./QualityMenu.tsx";
 import { Menu, SoundChoices, type TrackMenu } from "./TrackMenus.tsx";
@@ -246,6 +247,7 @@ export function LiveMore({
                   ),
               )}
               <MiniPlayerButton inMenu onDone={done} />
+              <MultiviewEntry onDone={done} />
               <div className="hidden px-2 py-1.5 max-[720px]:block">
                 <VolumeControl />
               </div>

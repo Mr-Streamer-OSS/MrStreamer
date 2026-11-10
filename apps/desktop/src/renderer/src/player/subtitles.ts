@@ -1,4 +1,4 @@
-// Shows subtitles over the one video element, on a layer of the app's own: Chromium draws its cues
+// Shows subtitles over each video element, on a layer of the app's own: Chromium draws its cues
 // inside the element, under the controls and their gradient, where they dim. Text, whether WebVTT
 // from ffmpeg or decoded here from teletext and captions, goes on the element's subtitle track as
 // cues, and those due show as lines at the foot of the layer. Pictures, PGS and DVB, go on a canvas
@@ -11,6 +11,7 @@
 // a scale when pictures are drawn; how high subtitles sit is CSS for both.
 import { SubtitleTiming, type DownloadedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { createStore, useStore } from "zustand";
+import { video as sharedVideo } from "./shared-media.ts";
 import { DEFAULT_SUBTITLE_LOOK, type SubtitleLook } from "@mrstreamer/contracts/preferences";
 import {
   isBlank,
@@ -41,41 +42,82 @@ interface SubtitleSettings {
   readonly look: SubtitleLook;
 }
 
-const settings = createStore<SubtitleSettings>(() => ({
-  delay: 0,
-  speed: 1,
+const settings = createStore<Pick<SubtitleSettings, "look">>(() => ({
   look: DEFAULT_SUBTITLE_LOOK,
 }));
 
 /** Reads the subtitles' timing and look in a component. */
-export function useSubtitleSettings<T>(selector: (state: SubtitleSettings) => T): T {
-  return useStore(settings, selector);
+export function useSubtitleSettings<T>(
+  selector: (state: SubtitleSettings) => T,
+  video: HTMLVideoElement = sharedVideo,
+): T {
+  const timing = useStore(presentation(video).timing);
+  const look = useStore(settings, (state) => state.look);
+
+  return selector({ ...timing, look });
 }
 
 /** The times a text cue's file gave it, which the viewer's timing moves it from. */
 const textTimes = new WeakMap<TextTrackCue, { start: number; end: number }>();
 
-/**
- * The layer subtitles show on: the canvas pictures are drawn on, and the lines of text over it.
- * Picture.tsx keeps it over the video, wherever that goes; clicks pass through to the picture.
- */
-export const subtitleLayer = document.createElement("div");
+interface Presentation {
+  readonly layer: HTMLDivElement;
+  readonly canvas: HTMLCanvasElement;
+  readonly text: HTMLDivElement;
+  readonly rows: TextRow[];
+  readonly timing: ReturnType<typeof createTiming>;
+  readonly observer: ResizeObserver;
+  readonly cleanups: (() => void)[];
+  drawn: Drawable | null;
+  showing: TextTrackCue | null;
+}
 
-subtitleLayer.dataset["subtitles"] = "";
+const createTiming = () => createStore(() => ({ delay: 0, speed: 1 }));
 
-subtitleLayer.style.cssText = "position:absolute;inset:0;pointer-events:none";
+const presentations = new WeakMap<HTMLVideoElement, Presentation>();
 
-const subtitleCanvas = document.createElement("canvas");
+function presentation(video: HTMLVideoElement): Presentation {
+  const known = presentations.get(video);
 
-subtitleCanvas.setAttribute("aria-hidden", "true");
+  if (known) return known;
+  const layer = document.createElement("div");
+  layer.dataset["subtitles"] = "";
+  layer.style.cssText = "position:absolute;inset:0;pointer-events:none";
+  const canvas = document.createElement("canvas");
+  canvas.setAttribute("aria-hidden", "true");
+  canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
+  const text = document.createElement("div");
+  text.dataset["subtitleText"] = "";
+  layer.append(canvas, text);
 
-subtitleCanvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
+  const state: Presentation = {
+    layer,
+    canvas,
+    text,
+    rows: [],
+    timing: createTiming(),
+    observer: new ResizeObserver(() => {
+      if (presentations.has(video)) paint(video);
+    }),
+    cleanups: [],
+    drawn: null,
+    showing: null,
+  };
 
-const subtitleText = document.createElement("div");
+  presentations.set(video, state);
+  // Repaint only when this video's layout changes; cue changes paint directly.
+  state.observer.observe(video);
 
-subtitleText.dataset["subtitleText"] = "";
+  return state;
+}
 
-subtitleLayer.append(subtitleCanvas, subtitleText);
+/** The subtitle layer belonging to this video, moved together with it by Picture. */
+export function subtitleLayerFor(video: HTMLVideoElement): HTMLDivElement {
+  return presentation(video).layer;
+}
+
+/** The shared live/title video's layer. */
+export const subtitleLayer = subtitleLayerFor(sharedVideo);
 
 const textTracks = new WeakMap<HTMLVideoElement, TextTrack>();
 const pictureTracks = new WeakMap<HTMLVideoElement, TextTrack>();
@@ -88,10 +130,16 @@ function subtitleTrack(video: HTMLVideoElement): TextTrack {
     track = video.addTextTrack("subtitles", "Subtitles");
     track.mode = "hidden";
     textTracks.set(video, track);
-    track.addEventListener("cuechange", () => showText(video));
+    const textChanged = () => showText(video);
+    track.addEventListener("cuechange", textChanged);
+    const ownedTrack = track;
+    presentation(video).cleanups.push(() => {
+      ownedTrack.removeEventListener("cuechange", textChanged);
+      video.removeEventListener("seeked", textChanged);
+    });
     // Chromium holds no cue active before the element first plays or seeks, so a seek from
     // there changes what is due without a word from it.
-    video.addEventListener("seeked", () => showText(video));
+    video.addEventListener("seeked", textChanged);
   }
 
   return track;
@@ -106,7 +154,9 @@ function pictureTrack(video: HTMLVideoElement): TextTrack {
     track.mode = "hidden";
     pictureTracks.set(video, track);
     // A new stream can change the picture's shape, and where pictures go on it.
-    video.addEventListener("resize", () => paint(video));
+    const resized = () => paint(video);
+    video.addEventListener("resize", resized);
+    presentation(video).cleanups.push(() => video.removeEventListener("resize", resized));
   }
 
   return track;
@@ -121,20 +171,12 @@ interface Drawable {
   readonly images: readonly { x: number; y: number; bitmap: ImageBitmap }[];
 }
 
-let drawn: Drawable | null = null;
-
-/** Whatever was asked to show last, so a slow bitmap can't replace a newer screen. */
-let showing: TextTrackCue | null = null;
-
 /** A line of text on the layer: the cue it shows, and its box among the others. */
 interface TextRow {
   /** Null once the cue ended under another that still shows: its place stays, empty. */
   cue: VTTCue | null;
   box: HTMLDivElement;
 }
-
-/** The text on the layer, lowest first. */
-const rows: TextRow[] = [];
 
 /**
  * Shows the text cues due at the element's position, each drawn as its WebVTT says: line breaks,
@@ -144,6 +186,7 @@ const rows: TextRow[] = [];
  * another leaves its place empty, for the next cue to take.
  */
 function showText(video: HTMLVideoElement): void {
+  const { rows, text: subtitleText } = presentation(video);
   const now = video.currentTime;
 
   const due = [...(subtitleTrack(video).cues ?? [])].filter(
@@ -222,15 +265,17 @@ export function clearSubtitles(video: HTMLVideoElement): void {
   }
 
   showText(video);
-  showing = null;
-  release();
+  presentation(video).showing = null;
+  release(video);
   paint(video);
 }
 
 /** Lets go of the bitmaps on screen. */
-function release(): void {
-  for (const image of drawn?.images ?? []) image.bitmap.close();
-  drawn = null;
+function release(video: HTMLVideoElement): void {
+  const state = presentation(video);
+
+  for (const image of state.drawn?.images ?? []) image.bitmap.close();
+  state.drawn = null;
 }
 
 /**
@@ -255,7 +300,7 @@ export function addTextCue(
   end: number,
   text: string,
 ): VTTCue {
-  const { delay, speed } = settings.getState();
+  const { delay, speed } = presentation(video).timing.getState();
   const cue = new VTTCue(start * speed + delay, end * speed + delay, text);
   textTimes.set(cue, { start, end });
   subtitleTrack(video).addCue(cue);
@@ -281,7 +326,7 @@ export function setDownloadedSubtitleTiming(video: HTMLVideoElement, timing: Sub
 }
 
 function applyTiming(video: HTMLVideoElement, delay: number, speed: number): void {
-  settings.setState({ delay, speed });
+  presentation(video).timing.setState({ delay, speed });
 
   for (const cue of [...(subtitleTrack(video).cues ?? [])]) {
     const times = textTimes.get(cue);
@@ -298,7 +343,7 @@ function applyTiming(video: HTMLVideoElement, delay: number, speed: number): voi
 export function showDownloadedSubtitle(video: HTMLVideoElement, saved: DownloadedSubtitle): void {
   clearSubtitles(video);
   const track = subtitleTrack(video);
-  const { delay, speed } = settings.getState();
+  const { delay, speed } = presentation(video).timing.getState();
 
   for (const { start, end, text } of saved.cues) {
     const cue = new VTTCue(start * speed + delay, end * speed + delay, text);
@@ -310,8 +355,8 @@ export function showDownloadedSubtitle(video: HTMLVideoElement, saved: Downloade
 }
 
 /** The text subtitles' timing now: seconds after the time their file gives. */
-export function subtitleDelay(): number {
-  return settings.getState().delay;
+export function subtitleDelay(video: HTMLVideoElement = sharedVideo): number {
+  return presentation(video).timing.getState().delay;
 }
 
 /** Applies a look to every subtitle, shown now or later; kept until the viewer picks another. */
@@ -339,22 +384,23 @@ export function setSubtitleLook(look: SubtitleLook): void {
  */
 export function subtitlePresenter(video: HTMLVideoElement) {
   const timing = pictureTrack(video);
+  const state = presentation(video);
   /** The last cue, which the next change ends when that comes before the end it has. */
   let last: VTTCue | null = null;
 
   /** Draws a picture cue's screen, unless another was asked for before its bitmaps were made. */
   async function draw(cue: TextTrackCue, screen: SubtitleScreen): Promise<void> {
-    showing = cue;
+    state.showing = cue;
     const ready = await drawable(screen);
 
-    if (showing !== cue) {
+    if (state.showing !== cue) {
       for (const image of ready?.images ?? []) image.bitmap.close();
 
       return;
     }
 
-    release();
-    drawn = ready;
+    release(video);
+    state.drawn = ready;
     paint(video);
   }
 
@@ -381,7 +427,7 @@ export function subtitlePresenter(video: HTMLVideoElement) {
 
         if (times) {
           times.end = Math.min(times.end, Math.max(times.start, at));
-          last.endTime = times.end + settings.getState().delay;
+          last.endTime = times.end + state.timing.getState().delay;
           // A change that comes late ends the text behind the position.
           showText(video);
         } else {
@@ -389,9 +435,9 @@ export function subtitlePresenter(video: HTMLVideoElement) {
 
           // A run brings the changes from before its position too. A picture that ends behind
           // the position gets no exit from Chromium, so it goes here.
-          if (showing === last && last.endTime <= video.currentTime) {
-            showing = null;
-            release();
+          if (state.showing === last && last.endTime <= video.currentTime) {
+            state.showing = null;
+            release(video);
             paint(video);
           }
         }
@@ -427,8 +473,8 @@ export function subtitlePresenter(video: HTMLVideoElement) {
 
         if ((timing.activeCues?.length ?? 0) > 0) return;
 
-        if (showing === cue) showing = null;
-        release();
+        if (state.showing === cue) state.showing = null;
+        release(video);
         paint(video);
       };
 
@@ -461,7 +507,7 @@ async function drawable(screen: SubtitleScreen): Promise<Drawable | null> {
  * medium grows or shrinks them from the middle of the picture's foot, where subtitles sit.
  */
 function paint(video: HTMLVideoElement): void {
-  const canvas = subtitleCanvas;
+  const { canvas, drawn } = presentation(video);
   const scale = window.devicePixelRatio || 1;
   const width = Math.round(canvas.clientWidth * scale);
   const height = Math.round(canvas.clientHeight * scale);
@@ -505,12 +551,34 @@ function paint(video: HTMLVideoElement): void {
   }
 }
 
-/** Draws the canvas again for the video its layer covers, wherever Picture put the two. */
+/** Repaints mounted pictures after the shared subtitle look changes. */
 function repaint(): void {
-  const video = subtitleLayer.previousElementSibling;
+  for (const layer of document.querySelectorAll("[data-subtitles]")) {
+    const video = layer.previousElementSibling;
 
-  if (video instanceof HTMLVideoElement) paint(video);
+    if (video instanceof HTMLVideoElement) paint(video);
+  }
 }
 
-// The canvas follows the element's size; it is drawn again only then and at each change.
-new ResizeObserver(repaint).observe(subtitleCanvas);
+/** Releases the resources of a disposable pane video after its decoder has ended. */
+export function disposeSubtitles(video: HTMLVideoElement): void {
+  const state = presentations.get(video);
+
+  if (!state) return;
+
+  for (const track of [textTracks.get(video), pictureTracks.get(video)]) {
+    for (const cue of [...(track?.cues ?? [])]) {
+      cue.onenter = null;
+      cue.onexit = null;
+    }
+  }
+
+  clearSubtitles(video);
+  state.observer.disconnect();
+
+  for (const cleanup of state.cleanups) cleanup();
+  state.layer.remove();
+  presentations.delete(video);
+  textTracks.delete(video);
+  pictureTracks.delete(video);
+}
