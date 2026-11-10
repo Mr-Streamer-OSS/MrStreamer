@@ -4,13 +4,17 @@ import { Artwork } from "../../components/TitleArt.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 
-/** Sparse rows keep a small piece of artwork beside their title and public actions. */
+/**
+ * Sparse rows keep a small piece of artwork beside their title and public actions. Play reads
+ * Resume when it goes on from a place: with a bar, unless `resumes` says otherwise.
+ */
 export function HomeTitle({
   name,
   artworkUrl,
   line,
   still = false,
   done = null,
+  resumes = done !== null,
   unavailable = false,
   onOpen,
   onPlay,
@@ -21,6 +25,7 @@ export function HomeTitle({
   line: string;
   still?: boolean;
   done?: number | null;
+  resumes?: boolean;
   unavailable?: boolean;
   onOpen: () => void;
   onPlay?: (() => void) | undefined;
@@ -62,7 +67,7 @@ export function HomeTitle({
           {onPlay && (
             <Button variant="primary" size="sm" onClick={onPlay}>
               <Play className="fill-current" />
-              {done === null ? t("Play") : t("Resume")}
+              {resumes ? t("Resume") : t("Play")}
             </Button>
           )}
           <Button variant="secondary" size="sm" onClick={onOpen}>
