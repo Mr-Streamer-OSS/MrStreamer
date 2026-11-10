@@ -5933,6 +5933,100 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     await recordings.stop(id);
   });
 
+  it("plays an active recording from the keyframe before a nonzero position, on the file's own clock", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+
+    const { recordings, channel, playback, dataDir, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const signal = AbortSignal.timeout(5000);
+
+    const extent = await until(
+      () => source.read(signal),
+      (current) => current.bytes === bytes.length,
+      5000,
+    );
+
+    expect(extent).toMatchObject({ bytes: bytes.length, final: false });
+    const file = await fileOf(dataDir, started.recording);
+    // What the recorder wrote, read back from its file while it still records.
+    const recorded = (await readFile(file.path)).subarray(0, extent.bytes);
+    expect(recorded.length).toBe(extent.bytes);
+
+    // A digest of the first picture ffmpeg decodes from `input`, or of the first at or after
+    // `pts` (1/90000 s) on the input's own clock: decoding, not packet flags, names a picture.
+    const picture = (input: Buffer, pts?: number) => {
+      const result = spawnSync(
+        "ffmpeg",
+        [
+          ...["-v", "error", "-copyts", "-i", "pipe:0", "-map", "0:v:0"],
+          ...(pts === undefined ? [] : ["-vf", `select=gte(pts\\,${pts})`]),
+          ...["-frames:v", "1", "-f", "framemd5", "-"],
+        ],
+        { input, encoding: "utf8" },
+      );
+
+      expect(result.status).toBe(0);
+
+      return /^0,.*,\s*([0-9a-f]{32})$/m.exec(result.stdout)?.[1];
+    };
+
+    // Measured on this fixture with trace_headers: PTS 216000 (2.4 s) carries SPS, PPS and an
+    // IDR slice. The file's first picture, at 1.4 s, is the IDR before it, which a run that
+    // ignored the position would start with.
+    const keyframe = picture(recorded, 216_000);
+    expect(keyframe).toMatch(/^[0-9a-f]{32}$/);
+    expect(keyframe).not.toBe(picture(recorded));
+
+    const origin = spawnSync(
+      "ffprobe",
+      ["-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", "-i", "pipe:0"],
+      { input: recorded, encoding: "utf8" },
+    );
+
+    expect(origin.status).toBe(0);
+
+    const copy = await playback.openCopy(
+      {
+        id,
+        kind: "recording",
+        path: file.path,
+        container: "ts",
+        title: { kind: "movie", id },
+        progress: null,
+        recording: source,
+      },
+      ["h264", "aac"],
+    );
+
+    // 1.1 s on the recording's clock is 2.48 s on the file's, between its keyframes at 2.4 and
+    // 3.4 s: the picture starts at the one before it, as a title's does.
+    const response = await fetch(copy.url + "?start=1.1", { signal: AbortSignal.timeout(4000) });
+
+    try {
+      expect(response.status).toBe(200);
+      expect((await source.read()).final).toBe(false);
+      expect(Number(response.headers.get("x-start")) + Number(origin.stdout)).toBeCloseTo(2.4, 3);
+      // The run follows the file while it records, and ends with it.
+      await recordings.stop(id);
+      expect(picture(Buffer.from(await response.arrayBuffer()))).toBe(keyframe);
+    } finally {
+      await response.body?.cancel().catch(() => {});
+      await playback.closeCopy(id, "recording");
+      await recordings.stop(id);
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
   it("settles an open recorder session to the last sample end, without changing tracks or capture ownership", async () => {
     const { recordings, channel, playback, provider, dataDir } = await connected({
       streams: (_source, out) => {
