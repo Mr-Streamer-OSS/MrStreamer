@@ -70,6 +70,14 @@ Programme information comes from your provider. Many providers only cover some c
 
 The guide, the channel list while watching and Home's category row show the list you picked, in its order, and channel up and down follow it. A channel your provider stops listing stays at the end, dimmed, with **Remove**; if your provider lists it again, even under another of its qualities, it's back in its place. Channels of a subscription you removed are counted under the filters and come back when you add the same account again, unless you ticked **Also delete**, which takes them out of every list. Your lists themselves stay. Channels for adults neither show nor count while those are hidden. If a change can't be saved, Mr. Streamer says so, with **Retry**.
 
+### Your channels
+
+A row's options button, beside its list button, changes how that channel shows for you, in your profile only. Give it your own **Name** or **Number** and press Enter or **Save**: lists, search and channel digits use yours, and the line under the name keeps the provider's name and number. Leave a field empty, or type the provider's own, to go back to it. **Hide from lists** takes the channel out of every list, Favourites and your own included, and out of search and counts, until you restore it from Changed channels. **Restore channel** undoes everything you changed for it.
+
+**Changed channels**, at the foot of the topic rail, lists every channel you changed, hidden ones too, each with **Restore**. A channel your provider no longer lists says **Not listed now** and can still be restored. If a change can't be saved, nothing changes: the options say so and keep what you typed, with **Retry**.
+
+**If it doesn't play, try** names up to three fallback channels, of any of your subscriptions: **Add fallback channel** searches your channels, and only one you pick is added, never one that just has the same name. A kids profile has no options and no Changed channels.
+
 ## Watching
 
 _The channel list, the controls, quality, and what to do when a channel doesn't play._
@@ -86,6 +94,8 @@ The bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, ful
 - The keyboard's media keys and the system's own controls show the programme, the channel and its logo. Pause or stop there stops the channel, and **Watch** starts it again. Next and previous do nothing, so a tap on your headphones never changes channel. On [a TV](playback.md#playing-on-a-tv), a channel paused with the TV's own remote shows as paused, and play there plays it on.
 
 The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them. Subtitles a stream marks as its own default don't come on by themselves.
+
+On a channel, the sound and subtitles you pick are also kept for that channel in your profile, and its options show them with **Forget**. The kept sound plays when you open the channel again, unless the channel is an HLS one, whose sound follows your languages. When the channel doesn't have a kept track now, its menu says so and your languages play instead; the kept choice stays for when the track is back. Kept subtitles aren't turned on by themselves yet. A kids profile keeps no tracks per channel; its picks set the languages only.
 
 Live CC appears once subtitle data arrives. A teletext page that sends only filler or an empty DVB page stays hidden. An HLS channel needs at least one subtitle cue before CC appears, then lists all its declared text languages. Some may be empty; a chosen rendition has a short recovery allowance before turning off if it still cannot load. The picture keeps playing. If that channel reconnects, your chosen language is tried again unless you chose Off. C does nothing while CC is hidden. Proven tracks stay available until you change channel. Your saved language or Off choice applies when that language is proven. After more than ten seconds of playback, late availability flashes "Subtitles available · C" once in Watch if subtitles stay off. HLS discovery checks a few subtitle segments at a time while CC is off, without opening another channel connection. Receiver playback keeps the declared tracks and the reminder that live subtitles play on this computer only.
 
@@ -108,6 +118,7 @@ The middle of the picture says what went wrong, with a small line of what Mr. St
 - **Channels** opens the list. **Next channel** takes Quality's place when the channel has no quality left to try.
 - A refusal offers Retry and Channels only, and Mr. Streamer never changes channel by itself.
 - The cross at the message's top right closes it. The channel stays stopped; **Watch** in the controls, or R, tries it again.
+- A channel you named fallback channels for plays the first one in its place when it has no stream, doesn't answer or isn't listed now, and says which channel plays instead and from which subscription. The next fallback follows if that one fails too. A refusal or a rate limit stops there, as do the fallbacks' own fallbacks, which are never tried. When none played, the message says so under the last one's.
 
 When the picture stands still for three seconds, "Waiting for data" shows at the top right until it moves again. When data stays away for fifteen seconds, or the provider ends the stream, the channel reconnects: up to four times, after 1, 2, 4 and 8 seconds, and **Stop** ends that. A channel that comes back and breaks off again within 30 seconds gets no extra tries, so a stream that keeps dropping ends with "Keeps dropping" instead of reconnecting for ever. Once it played for 30 seconds, the next break has all four again. The mini player, and the bar at the foot of the pages while [a TV](playback.md#playing-on-a-tv) plays, say the same in a few words.
 

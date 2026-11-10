@@ -242,8 +242,13 @@ export class Library extends Context.Service<
      * Changes the viewer's choices for a channel the viewer sees, named by its id or any of its
      * streams', and answers with the channel as it shows now. Fallbacks must name other channels
      * the viewer sees, or it fails with `channel-not-found` or `invalid-input` and changes nothing.
+     * For a channel its catalogue no longer lists, only undoing every choice (`RESTORE_CHANNEL`)
+     * applies, by the id `chosen` gave, and answers null.
      */
-    choose(channel: OwnedId, change: ChannelChoicesChange): Effect.Effect<LiveChannel, Failed>;
+    choose(
+      channel: OwnedId,
+      change: ChannelChoicesChange,
+    ): Effect.Effect<LiveChannel | null, Failed>;
     /**
      * Finds a subscription's channels by their id or any of their streams', in its catalogue in
      * memory or on disk. Never fetches one: before the first, and for a subscription that isn't
@@ -784,10 +789,24 @@ function make(options: LibraryOptions) {
           const { member, lists } = yield* memberOf(channel.subscriptionId);
           const found = member.byId.get(channel.id);
 
-          if (!found)
-            return yield* new Failed({
-              error: { kind: "channel-not-found", channelId: channel.id },
-            });
+          if (!found) {
+            // A channel its catalogue no longer lists keeps its choices until undone, as `chosen`
+            // says; nothing else can change for it.
+            if (
+              !restoresAll(change) ||
+              catalogues.get(channel.subscriptionId)?.byId.has(channel.id)
+            )
+              return yield* new Failed({
+                error: { kind: "channel-not-found", channelId: channel.id },
+              });
+
+            const viewer = yield* viewingSettings(settings);
+            yield* viewer.changeChannelChoices((choices) =>
+              choices.filter((choice) => !sameOwned(choice.channel, channel)),
+            );
+
+            return null;
+          }
 
           const fallbacks =
             change.fallbacks && (yield* fallbacksOf(change.fallbacks, found, lists));
@@ -1437,6 +1456,18 @@ function fallbacksOf(refs: readonly OwnedId[], channel: LiveChannel, lists: Comb
 
     return fallbacks;
   });
+}
+
+/** Whether `change` undoes every choice, as `RESTORE_CHANNEL` does. */
+function restoresAll(change: ChannelChoicesChange): boolean {
+  return (
+    (change.name === null || change.name?.trim() === "") &&
+    change.number === null &&
+    change.hidden === false &&
+    change.fallbacks?.length === 0 &&
+    change.audio === null &&
+    change.subtitles === null
+  );
 }
 
 /**

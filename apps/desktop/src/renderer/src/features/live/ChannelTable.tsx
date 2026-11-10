@@ -15,9 +15,30 @@
 // it goes: its row stays in the page while the list draws only the rows in view.
 //   Beside its star, a row's lists button opens the viewer's lists, each ticked where it holds
 // the channel. A list's channels its subscription no longer lists follow the others, dimmed.
-import { useQuery } from "@tanstack/react-query";
+//   Then its options (Paper A5): the viewer's own name and number for it, hiding it from lists,
+// the fallback channels to try when it doesn't play, the sound and subtitles kept for it, and
+// Restore channel. A renamed channel says the provider's name and number under its own. A kids
+// profile has no options: the main process refuses them its channel choices.
+import { Popover } from "@base-ui/react/popover";
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, Bell, ChevronDown, Star } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Bell,
+  Check,
+  ChevronDown,
+  Plus,
+  SlidersHorizontal,
+  Star,
+  X,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -25,8 +46,11 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type FocusEvent,
+  type KeyboardEvent,
   type ReactNode,
+  type SyntheticEvent,
 } from "react";
 import {
   GUIDE_SCHEDULE,
@@ -36,21 +60,38 @@ import {
 } from "@mrstreamer/contracts/guide";
 import type { CustomList } from "@mrstreamer/contracts/custom-lists";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
-import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
+import {
+  CHANNEL_NAME_MAX,
+  CHANNEL_NUMBER_MAX,
+  FALLBACKS_MAX,
+  RESTORE_CHANNEL,
+  type ChannelChoicesChange,
+} from "@mrstreamer/contracts/preferences";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { archiveHolds } from "@mrstreamer/core/catchup";
 import { matchRanges } from "@mrstreamer/core/text";
 import { t } from "@mrstreamer/core/i18n";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
+import { Input } from "../../components/ui/input.tsx";
+import { menuSurface } from "../../components/ui/menu.ts";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, endOfDay, pastTime, progressOf, timeLeft } from "../../lib/format.ts";
 import { useOutput } from "../../player/output.ts";
 import { qualitiesLine } from "../../lib/quality.ts";
-import { queries, useSearchSubscriptionNames, useSourceOf } from "../../lib/queries.ts";
+import { appError } from "../../lib/errors.ts";
+import { call } from "../../lib/ipc.ts";
+import {
+  queries,
+  useSearchSubscriptionNames,
+  useSourceOf,
+  useSubscriptionNames,
+} from "../../lib/queries.ts";
 import { reminderAt, useReminders } from "../../lib/reminders.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
+import { profileListQuery, profileStatus, subscribeProfiles } from "../profiles/profiles.ts";
 import { ReminderButton } from "../reminders/ReminderButton.tsx";
 import { useVisibleListings } from "./lists.ts";
 import { rowPlays, searchQualities, type SearchChannelRow } from "./search-rows.ts";
@@ -426,7 +467,12 @@ function ChannelRow({
   const details =
     groupSummary ??
     copySummary ??
-    ([source, channel.browse?.country, qualitiesLine(channel)].filter(Boolean).join(" · ") || null);
+    ([providedLine(channel), source, channel.browse?.country, qualitiesLine(channel)]
+      .filter(Boolean)
+      .join(" · ") ||
+      null);
+
+  const organizes = useChannelChoicesAllowed();
 
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
@@ -568,7 +614,12 @@ function ChannelRow({
             ""
           )}
         </span>
-        <span className="flex w-[6.75rem] flex-none items-center justify-end gap-1">
+        <span
+          className={cn(
+            "flex flex-none items-center justify-end gap-1",
+            organizes && !order ? "w-[9rem]" : "w-[6.75rem]",
+          )}
+        >
           {order ? (
             <>
               <MoveButton by={-1} channel={channel} order={order} />
@@ -592,6 +643,13 @@ function ChannelRow({
                   shown={selected || lists.lists.some((list) => holds(list, channel))}
                   onSet={(list, member) => lists.onSet(list, channel, member)}
                   onNew={() => lists.onNew(channel)}
+                  onOpenChange={onListMenuOpenChange}
+                />
+              )}
+              {!grouped && organizes && (
+                <ChannelOptions
+                  channel={channel}
+                  shown={selected || channel.choices !== undefined}
                   onOpenChange={onListMenuOpenChange}
                 />
               )}
@@ -1009,5 +1067,471 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+/** "NPO 1 HD · 101": the provider's name and number of a channel the viewer renamed or renumbered. */
+function providedLine(channel: LiveChannel): string | null {
+  const { provided } = channel;
+
+  return provided
+    ? [provided.title, provided.number].filter((part) => part != null).join(" · ")
+    : null;
+}
+
+/**
+ * Whether the active profile keeps channel choices: not a kids profile, and not while which
+ * profile is active isn't known yet. The main process refuses a kids profile both methods, so
+ * their controls aren't offered there.
+ */
+export function useChannelChoicesAllowed(): boolean {
+  const owner = useSyncExternalStore(subscribeProfiles, profileStatus).owner;
+
+  return keepsChoices(useQuery(profileListQuery()).data, owner?.id);
+}
+
+/** `useChannelChoicesAllowed` for a read of the profiles: false while there is none. */
+export function keepsChoices(
+  profiles: readonly { readonly id: string; readonly kids?: boolean }[] | undefined,
+  owner: string | undefined,
+): boolean {
+  const active = profiles?.find((profile) => profile.id === owner);
+
+  return active !== undefined && !active.kids;
+}
+
+/** Every channel the viewer chose something for, the hidden ones too, to see and undo. */
+export const chosenChannelsQuery = () =>
+  queryOptions({
+    queryKey: ["library", "chosen"],
+    queryFn: () => call("library.chosenChannels"),
+    staleTime: Infinity,
+  });
+
+/**
+ * Changes what the viewer chose for one channel (`library.chooseForChannel`), keeps the channel
+ * it answers with as that channel's read, and reads the rest of the library again: names,
+ * numbers and hidden channels show in every list, search and count. A refusal or a failed write
+ * saves nothing and rejects; its caller keeps what it sent, to show and retry.
+ */
+export async function chooseForChannel(
+  client: QueryClient,
+  channel: OwnedId,
+  change: ChannelChoicesChange,
+): Promise<LiveChannel | null> {
+  const shown = await call("library.chooseForChannel", { channel: ownedId(channel), change });
+
+  if (shown) client.setQueryData(queries.channel(channel).queryKey, shown);
+  void client.invalidateQueries({ queryKey: ["library"] });
+
+  return shown;
+}
+
+/** `chooseForChannel` as a mutation, whose state a form shows. */
+export function useChooseForChannel() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ channel, change }: { channel: OwnedId; change: ChannelChoicesChange }) =>
+      chooseForChannel(client, channel, change),
+  });
+}
+
+/** What a channel change that saved nothing says, and whether sending it again can help. */
+export function choiceFailure(cause: unknown): { readonly text: string; readonly retry: boolean } {
+  const error = appError(cause);
+
+  switch (error.kind) {
+    case "channel-not-found":
+      return { text: t("That channel isn't in your lists now."), retry: false };
+    case "invalid-input":
+      return { text: error.detail, retry: false };
+    default:
+      return { text: t("Couldn't save. Nothing changed."), retry: true };
+  }
+}
+
+const keep = (event: SyntheticEvent) => event.stopPropagation();
+
+/**
+ * A row's options button and its popover. Its keys stay its own, so typing a name or a number
+ * never jumps to a channel.
+ */
+function ChannelOptions({
+  channel,
+  shown,
+  onOpenChange,
+}: {
+  channel: LiveChannel;
+  /** Whether the button shows while the pointer isn't on its row. */
+  shown: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const opened = useRef(false);
+  useEffect(
+    () => () => {
+      if (opened.current) onOpenChange(false);
+    },
+    [onOpenChange],
+  );
+
+  const label = t("Options for {name}", { name: channel.title });
+
+  return (
+    <span onClick={keep} onKeyDown={keep}>
+      <Popover.Root
+        open={open}
+        onOpenChange={(next) => {
+          opened.current = next;
+          setOpen(next);
+          onOpenChange(next);
+        }}
+      >
+        <Popover.Trigger
+          aria-label={label}
+          title={t("Channel options")}
+          onMouseDown={(event) => event.preventDefault()}
+          className={cn(
+            "grid size-8 place-items-center rounded-full text-muted-foreground outline-none hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-white/10 data-popup-open:text-white data-popup-open:opacity-100",
+            !shown && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+          )}
+        >
+          <SlidersHorizontal className="size-4" />
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Positioner side="bottom" align="end" sideOffset={6} className="z-[60]">
+            <Popover.Popup
+              aria-label={label}
+              className={cn(
+                menuSurface,
+                "flex max-h-[min(70vh,var(--available-height))] w-[20rem] flex-col gap-3 overflow-y-auto p-3 text-[0.875rem] text-white",
+              )}
+              onKeyDown={keep}
+              onClick={keep}
+              onMouseDown={keep}
+            >
+              {/* A fresh draft each time it opens. */}
+              {open && <ChoicesForm channel={channel} onDone={() => setOpen(false)} />}
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
+    </span>
+  );
+}
+
+/**
+ * What the viewer chose for a channel, to change. Name and number are a draft until Save or
+ * Enter; hiding, a fallback, Forget and Restore channel save at once. A change that saved nothing
+ * keeps the draft, says why, and offers Retry where sending it again can help.
+ */
+function ChoicesForm({ channel, onDone }: { channel: LiveChannel; onDone: () => void }) {
+  const choose = useChooseForChannel();
+  // The channel as the last change left it, until the lists read it again.
+  const now = choose.data ?? channel;
+  const choices = now.choices;
+  const subscriptionName = useSubscriptionNames();
+  const [name, setName] = useState(choices?.name ?? "");
+  const [number, setNumber] = useState(choices?.number?.toString() ?? "");
+  const [adding, setAdding] = useState(false);
+  const [sent, setSent] = useState<ChannelChoicesChange | null>(null);
+  const fallbacks = choices?.fallbacks ?? [];
+  const named = useQuery(queries.channelsOf(fallbacks)).data;
+  const provided = now.provided ?? { title: now.title, number: now.number };
+  const failure = choose.isError ? choiceFailure(choose.error) : null;
+
+  const typedNumber = number.trim() === "" ? null : Number(number.trim());
+
+  const numberValid =
+    typedNumber === null ||
+    (Number.isInteger(typedNumber) && typedNumber >= 1 && typedNumber <= CHANNEL_NUMBER_MAX);
+
+  const edited = name.trim() !== (choices?.name ?? "") || typedNumber !== (choices?.number ?? null);
+
+  const send = (change: ChannelChoicesChange, then?: () => void) => {
+    setSent(change);
+    choose.mutate({ channel, change }, { onSuccess: () => then?.() });
+  };
+
+  const save = () => {
+    if (!edited || !numberValid || choose.isPending) return;
+    send({ name: name.trim() || null, number: typedNumber });
+  };
+
+  const fieldKeys = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      save();
+    }
+  };
+
+  return (
+    <>
+      <div className="px-1">
+        <p className="font-semibold">{now.title}</p>
+        <p className="text-[0.8125rem] text-muted-foreground">
+          {t("From {subscription}: {channel}", {
+            subscription: subscriptionName(now.subscriptionId) ?? "",
+            channel: [provided.title, provided.number].filter((part) => part != null).join(" · "),
+          })}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        <label className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="pl-1 text-xs text-muted-foreground">{t("Name")}</span>
+          <Input
+            compact
+            autoFocus
+            maxLength={CHANNEL_NAME_MAX}
+            placeholder={provided.title}
+            value={name}
+            readOnly={choose.isPending}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={fieldKeys}
+          />
+        </label>
+        <label className="flex w-20 flex-none flex-col gap-1">
+          <span className="pl-1 text-xs text-muted-foreground">{t("Number")}</span>
+          <Input
+            compact
+            inputMode="numeric"
+            placeholder={provided.number?.toString() ?? ""}
+            value={number}
+            readOnly={choose.isPending}
+            aria-invalid={numberValid ? undefined : true}
+            onChange={(event) => setNumber(event.target.value.replace(/\D/g, "").slice(0, 5))}
+            onKeyDown={fieldKeys}
+          />
+        </label>
+      </div>
+      {failure && (
+        <p role="alert" className="flex items-baseline gap-3 px-1 text-[0.8125rem]">
+          <span className="min-w-0 flex-1 text-destructive">{failure.text}</span>
+          {failure.retry && sent && (
+            <button
+              onClick={() => send(sent)}
+              className="flex-none text-white underline underline-offset-4"
+            >
+              {t("Retry")}
+            </button>
+          )}
+        </p>
+      )}
+      <button
+        role="checkbox"
+        aria-checked={choices?.hidden === true}
+        disabled={choose.isPending}
+        onClick={() => send({ hidden: choices?.hidden !== true })}
+        className="flex h-9 items-center gap-2.5 rounded-lg px-2 text-left outline-none hover:bg-white/8 focus-visible:bg-white/10"
+      >
+        <span
+          className={cn(
+            "grid size-4 flex-none place-items-center rounded-[0.25rem]",
+            choices?.hidden
+              ? "bg-white text-black"
+              : "shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)]",
+          )}
+        >
+          {choices?.hidden && <Check className="size-3" strokeWidth={3} aria-hidden />}
+        </span>
+        {t("Hide from lists")}
+      </button>
+      <div role="separator" className="mx-1 border-t border-white/12" />
+      <div role="group" aria-label={t("If it doesn't play, try")} className="flex flex-col gap-0.5">
+        <p className="px-2 pb-1 text-[0.8125rem] text-muted-foreground">
+          {t("If it doesn't play, try")}
+        </p>
+        {fallbacks.map((fallback, index) => {
+          const found = named?.find((each) => sameOwned(each, fallback));
+          const title = found?.title ?? fallback.id;
+          const from = subscriptionName(fallback.subscriptionId);
+
+          return (
+            <div key={ownedKey(fallback)} className="flex h-9 items-center gap-2 pr-1 pl-2">
+              <span className="w-4 flex-none text-xs text-muted-foreground tabular-nums">
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate">
+                {title}
+                {from && <span className="text-muted-foreground"> · {from}</span>}
+              </span>
+              <button
+                aria-label={t("Remove {name}", { name: title })}
+                disabled={choose.isPending}
+                onClick={() =>
+                  send({ fallbacks: fallbacks.filter((each) => !sameOwned(each, fallback)) })
+                }
+                className="grid size-7 flex-none place-items-center rounded-full text-muted-foreground outline-none hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          );
+        })}
+        {adding ? (
+          <FallbackSearch
+            channel={now}
+            taken={fallbacks}
+            onPick={(picked) =>
+              send({ fallbacks: [...fallbacks, ownedId(picked)] }, () => setAdding(false))
+            }
+            onCancel={() => setAdding(false)}
+          />
+        ) : (
+          fallbacks.length < FALLBACKS_MAX && (
+            <button
+              disabled={choose.isPending}
+              onClick={() => setAdding(true)}
+              className="flex h-9 items-center gap-2 rounded-lg px-2 text-left text-muted-foreground outline-none hover:bg-white/8 hover:text-white focus-visible:bg-white/10"
+            >
+              <Plus className="size-3.5 flex-none" />
+              {t("Add fallback channel")}
+            </button>
+          )
+        )}
+      </div>
+      {(choices?.audio || choices?.subtitles) && (
+        <>
+          <div role="separator" className="mx-1 border-t border-white/12" />
+          <div className="flex items-center gap-2 pl-2">
+            <p className="min-w-0 flex-1 text-[0.8125rem] text-muted-foreground">
+              {t("Remembered here: {tracks}", {
+                tracks: [choices.audio && t("Sound"), choices.subtitles && t("Subtitles")]
+                  .filter(Boolean)
+                  .join(", "),
+              })}
+            </p>
+            <button
+              disabled={choose.isPending}
+              onClick={() => send({ audio: null, subtitles: null })}
+              className="h-7 flex-none rounded-full px-2.5 text-[0.8125rem] font-medium outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t("Forget")}
+            </button>
+          </div>
+        </>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        {(choices || now.provided) && (
+          <button
+            disabled={choose.isPending}
+            onClick={() => send(RESTORE_CHANNEL, onDone)}
+            className="h-8 rounded-full bg-white/8 px-3.5 text-[0.8125rem] font-medium outline-none hover:bg-white/12 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+          >
+            {t("Restore channel")}
+          </button>
+        )}
+        <button
+          disabled={!edited || !numberValid || choose.isPending}
+          onClick={save}
+          className="h-8 rounded-full bg-white px-3.5 text-[0.8125rem] font-semibold text-black outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+        >
+          {t("Save")}
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Add fallback channel as a search of the viewer's channels. Only a channel the viewer picks is
+ * added, never one found by its name alone; the channel itself is listed and can't be picked.
+ * Escape puts the button back.
+ */
+function FallbackSearch({
+  channel,
+  taken,
+  onPick,
+  onCancel,
+}: {
+  channel: LiveChannel;
+  taken: readonly OwnedId[];
+  onPick: (channel: LiveChannel) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState("");
+  const found = useQuery(queries.search(text));
+  const subscriptionName = useSubscriptionNames();
+  const box = useRef<HTMLDivElement>(null);
+
+  const results = (found.data ?? [])
+    .filter((each) => !taken.some((fallback) => sameOwned(fallback, each)))
+    .filter((each, index, all) => all.findIndex((other) => sameOwned(other, each)) === index)
+    .slice(0, 8);
+
+  const options = () => [
+    ...(box.current?.querySelectorAll<HTMLElement>("[data-option]:not(:disabled)") ?? []),
+  ];
+
+  return (
+    <div
+      ref={box}
+      className="flex flex-col gap-0.5"
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return;
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onCancel();
+
+          return;
+        }
+
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        const all = options();
+        const at = all.findIndex((each) => each === document.activeElement);
+        const next = event.key === "ArrowDown" ? all[at + 1] : at > 0 ? all[at - 1] : null;
+        event.preventDefault();
+
+        if (next) next.focus();
+        else if (event.key === "ArrowUp") box.current?.querySelector("input")?.focus();
+      }}
+    >
+      <Input
+        compact
+        autoFocus
+        aria-label={t("Find a fallback channel")}
+        placeholder={t("Find a channel")}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+      />
+      {found.isError && (
+        <p role="alert" className="px-2 pt-1 text-[0.8125rem]">
+          {t("Couldn't search channels.")}
+        </p>
+      )}
+      {text.trim() !== "" && found.isSuccess && results.length === 0 && (
+        <p role="status" className="px-2 pt-1 text-[0.8125rem] text-muted-foreground">
+          {t("No channels match.")}
+        </p>
+      )}
+      {results.map((result) => {
+        const itself = sameOwned(result, channel);
+        const from = subscriptionName(result.subscriptionId);
+
+        return (
+          <button
+            key={ownedKey(result)}
+            data-option
+            disabled={itself}
+            onClick={() => onPick(result)}
+            className="flex h-9 items-center gap-2 rounded-lg px-2 text-left outline-none hover:bg-white/8 focus-visible:bg-white/10 disabled:opacity-40"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {result.title}
+              <span className="text-muted-foreground">
+                {[from, result.number].flatMap((part) => (part == null ? [] : ` · ${part}`))}
+              </span>
+            </span>
+            {itself && (
+              <span className="flex-none text-[0.8125rem] text-muted-foreground">
+                {t("This channel")}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }

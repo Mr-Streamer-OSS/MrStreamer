@@ -825,6 +825,15 @@ describe("a viewer's channel choices", () => {
   const sd = String(QUALITY_STREAM_IDS + 2);
   const names = (channels: readonly LiveChannel[]) => channels.map((channel) => channel.title);
 
+  /** The channel a change answers with: one its catalogue lists always comes back. */
+  const listed = async (change: Promise<LiveChannel | null>) => {
+    const channel = await change;
+
+    if (!channel) throw new Error("The change answered no channel");
+
+    return channel;
+  };
+
   it("shows the viewer's name and number, hides from lists only, and restores the provider's", async () => {
     const { library, own, restart } = await connectedLibrary();
     const before = await library.channel(own(fhd));
@@ -900,8 +909,10 @@ describe("a viewer's channel choices", () => {
     await library.choose(own(fhd), { audio, subtitles: "off" });
 
     expect((await (await restart()).channel(own(sd))).choices).toEqual({ audio, subtitles: "off" });
-    expect((await library.choose(own(fhd), { audio: null })).choices).toEqual({ subtitles: "off" });
-    expect((await library.choose(own(fhd), { subtitles: null })).choices).toBeUndefined();
+    expect((await listed(library.choose(own(fhd), { audio: null }))).choices).toEqual({
+      subtitles: "off",
+    });
+    expect((await listed(library.choose(own(fhd), { subtitles: null }))).choices).toBeUndefined();
     expect(await library.chosen()).toEqual([]);
   });
 
@@ -925,9 +936,9 @@ describe("a viewer's channel choices", () => {
     expect(await library.chosen()).toEqual([]);
 
     // The same channel named by two of its streams is one fallback, by its own id.
-    const channel = await library.choose(of(a, fhd), {
-      fallbacks: [of(b, hd), of(b, sd), of(b, "1000")],
-    });
+    const channel = await listed(
+      library.choose(of(a, fhd), { fallbacks: [of(b, hd), of(b, sd), of(b, "1000")] }),
+    );
 
     expect(channel.choices).toEqual({ fallbacks: [of(b, fhd), of(b, "1000")] });
     // Not a name: "Kwaliteit 1" of another subscription that wasn't named plays nowhere here.
@@ -948,6 +959,43 @@ describe("a viewer's channel choices", () => {
     expect((await library.channel(of(a, fhd))).choices).toBeUndefined();
   });
 
+  it("undoes the choices of a channel its provider no longer lists", async () => {
+    const provider = await fakeProvider({ channels: 60 });
+
+    let channels = [
+      { stream_id: 10, name: "First", category_id: "1" },
+      { stream_id: 11, name: "Second", category_id: "1" },
+      { stream_id: 12, name: "Third", category_id: "1" },
+    ];
+
+    const services = await started(await tempDir(), async (input, init) => {
+      const action = new URL(String(input)).searchParams.get("action");
+
+      if (action === "get_live_categories")
+        return Response.json([{ category_id: "1", category_name: "News" }]);
+
+      if (action === "get_live_streams") return Response.json(channels);
+
+      return fetch(input, init);
+    });
+
+    const { library, subscriptions } = services;
+    const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+    const gone = { subscriptionId, id: "12" };
+
+    await library.choose(gone, { name: "Kept", hidden: true });
+    channels = channels.slice(0, 2);
+    await library.refresh(subscriptionId);
+
+    expect(await library.chosen()).toMatchObject([{ choices: { channel: gone }, channel: null }]);
+    // Only undoing it all applies to a channel that isn't listed.
+    await expect(library.choose(gone, { hidden: false })).rejects.toMatchObject({
+      error: { kind: "channel-not-found" },
+    });
+    expect(await library.choose(gone, RESTORE_CHANNEL)).toBeNull();
+    expect(await library.chosen()).toEqual([]);
+  });
+
   it("offers no fallback the viewer may not see now", async () => {
     const { library, settings, own } = await connectedLibrary(300, true);
 
@@ -955,7 +1003,7 @@ describe("a viewer's channel choices", () => {
       error: { kind: "channel-not-found" },
     });
     await settings.update({ adultTitles: true });
-    expect((await library.choose(own(fhd), { fallbacks: [own("4000")] })).choices).toEqual({
+    expect((await listed(library.choose(own(fhd), { fallbacks: [own("4000")] }))).choices).toEqual({
       fallbacks: [own("4000")],
     });
     await settings.update({ adultTitles: false });

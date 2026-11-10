@@ -1834,4 +1834,41 @@ export const en = {
   "{channel} has sound": "{channel} has sound",
   "Couldn't close {channel}. Try again.": "Couldn't close {channel}. Try again.",
   "Couldn't return to single view. Try again.": "Couldn't return to single view. Try again.",
+  "Add fallback channel": "Add fallback channel",
+  "Changed channels": "Changed channels",
+  "Channel options": "Channel options",
+  "Couldn't read your changed channels.": "Couldn't read your changed channels.",
+  "Couldn't save. Nothing changed.": "Couldn't save. Nothing changed.",
+  "Couldn't search channels.": "Couldn't search channels.",
+  "Find a channel": "Find a channel",
+  "Find a fallback channel": "Find a fallback channel",
+  Forget: "Forget",
+  "From {subscription}: {channel}": "From {subscription}: {channel}",
+  Hidden: "Hidden",
+  "Hide from lists": "Hide from lists",
+  "If it doesn't play, try": "If it doesn't play, try",
+  "No channels match.": "No channels match.",
+  "Not kept for this channel": "Not kept for this channel",
+  Number: "Number",
+  "Options for {name}": "Options for {name}",
+  "Remembered here: {tracks}": "Remembered here: {tracks}",
+  "Restore channel": "Restore channel",
+  "Restore {name}": "Restore {name}",
+  "That channel isn't in your lists now.": "That channel isn't in your lists now.",
+  "The sound kept for this channel isn't here now.":
+    "The sound kept for this channel isn't here now.",
+  "The subtitles kept for this channel aren't here now.":
+    "The subtitles kept for this channel aren't here now.",
+  "This channel": "This channel",
+  "Tracks kept": "Tracks kept",
+  "{channel} and its fallback channels didn't play.":
+    "{channel} and its fallback channels didn't play.",
+  "{channel} didn't play. Its fallback from {subscription} plays instead.":
+    "{channel} didn't play. Its fallback from {subscription} plays instead.",
+  "{channel} didn't play. {fallback} from {subscription} plays instead.":
+    "{channel} didn't play. {fallback} from {subscription} plays instead.",
+  "{count} fallback channels": {
+    one: "{count} fallback channel",
+    other: "{count} fallback channels",
+  },
 } as const satisfies Readonly<Record<string, string | Plural>>;

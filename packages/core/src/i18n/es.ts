@@ -1965,4 +1965,41 @@ export const es: Translation = {
   "Couldn't close {channel}. Try again.": "No se pudo cerrar {channel}. Inténtalo de nuevo.",
   "Couldn't return to single view. Try again.":
     "No se pudo volver a la vista única. Inténtalo de nuevo.",
+  "Add fallback channel": "Añadir canal de respaldo",
+  "Changed channels": "Canales cambiados",
+  "Channel options": "Opciones del canal",
+  "Couldn't read your changed channels.": "No se pudieron leer tus canales cambiados.",
+  "Couldn't save. Nothing changed.": "No se pudo guardar. No ha cambiado nada.",
+  "Couldn't search channels.": "No se pudieron buscar canales.",
+  "Find a channel": "Buscar un canal",
+  "Find a fallback channel": "Buscar un canal de respaldo",
+  Forget: "Olvidar",
+  "From {subscription}: {channel}": "De {subscription}: {channel}",
+  Hidden: "Oculto",
+  "Hide from lists": "Ocultar en las listas",
+  "If it doesn't play, try": "Si no se reproduce, probar",
+  "No channels match.": "Ningún canal coincide.",
+  "Not kept for this channel": "No se guardó para este canal",
+  Number: "Número",
+  "Options for {name}": "Opciones de {name}",
+  "Remembered here: {tracks}": "Recordado aquí: {tracks}",
+  "Restore channel": "Restaurar canal",
+  "Restore {name}": "Restaurar {name}",
+  "That channel isn't in your lists now.": "Ese canal no está en tus listas ahora.",
+  "The sound kept for this channel isn't here now.":
+    "El sonido guardado para este canal no está disponible ahora.",
+  "The subtitles kept for this channel aren't here now.":
+    "Los subtítulos guardados para este canal no están disponibles ahora.",
+  "This channel": "Este canal",
+  "Tracks kept": "Pistas guardadas",
+  "{channel} and its fallback channels didn't play.":
+    "{channel} y sus canales de respaldo no se reprodujeron.",
+  "{channel} didn't play. Its fallback from {subscription} plays instead.":
+    "{channel} no se reprodujo. Su canal de respaldo de {subscription} se reproduce en su lugar.",
+  "{channel} didn't play. {fallback} from {subscription} plays instead.":
+    "{channel} no se reprodujo. {fallback} de {subscription} se reproduce en su lugar.",
+  "{count} fallback channels": {
+    one: "{count} canal de respaldo",
+    other: "{count} canales de respaldo",
+  },
 };

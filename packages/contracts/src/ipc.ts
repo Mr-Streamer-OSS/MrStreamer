@@ -822,8 +822,8 @@ export interface IpcOutputs {
   "library.channel": LiveChannel;
   "library.refresh": CatalogueStatus;
   "library.chosenChannels": readonly ChosenChannel[];
-  /** The channel as it shows after the change. */
-  "library.chooseForChannel": LiveChannel;
+  /** The channel as it shows after the change; null for one its provider no longer lists. */
+  "library.chooseForChannel": LiveChannel | null;
   /** Now and next per channel, by its `ownedKey`, for the channels the guide covers. */
   "guide.listings": Readonly<Record<string, Listing>>;
   /** The channel's programmes over the stretch asked for, as `GUIDE_SCHEDULE` says, in time order. */

@@ -1875,4 +1875,38 @@ export const nl: Translation = {
   "Couldn't close {channel}. Try again.": "{channel} sluiten mislukt. Probeer het opnieuw.",
   "Couldn't return to single view. Try again.":
     "Terug naar enkel beeld mislukt. Probeer het opnieuw.",
+  "Add fallback channel": "Reservezender toevoegen",
+  "Changed channels": "Aangepaste zenders",
+  "Channel options": "Zenderopties",
+  "Couldn't read your changed channels.": "Je aangepaste zenders konden niet worden gelezen.",
+  "Couldn't save. Nothing changed.": "Bewaren mislukt. Er is niets veranderd.",
+  "Couldn't search channels.": "Zoeken in zenders mislukt.",
+  "Find a channel": "Zoek een zender",
+  "Find a fallback channel": "Zoek een reservezender",
+  Forget: "Vergeten",
+  "From {subscription}: {channel}": "Van {subscription}: {channel}",
+  Hidden: "Verborgen",
+  "Hide from lists": "Verbergen in lijsten",
+  "If it doesn't play, try": "Speelt hij niet, probeer dan",
+  "No channels match.": "Geen zenders gevonden.",
+  "Not kept for this channel": "Niet bewaard voor deze zender",
+  Number: "Nummer",
+  "Options for {name}": "Opties voor {name}",
+  "Remembered here: {tracks}": "Hier onthouden: {tracks}",
+  "Restore channel": "Zender herstellen",
+  "Restore {name}": "{name} herstellen",
+  "That channel isn't in your lists now.": "Die zender staat nu niet in je lijsten.",
+  "The sound kept for this channel isn't here now.":
+    "Het geluid dat voor deze zender is bewaard, is er nu niet.",
+  "The subtitles kept for this channel aren't here now.":
+    "De ondertiteling die voor deze zender is bewaard, is er nu niet.",
+  "This channel": "Deze zender",
+  "Tracks kept": "Sporen bewaard",
+  "{channel} and its fallback channels didn't play.":
+    "{channel} en de reservezenders speelden niet af.",
+  "{channel} didn't play. Its fallback from {subscription} plays instead.":
+    "{channel} speelde niet af. De reservezender van {subscription} speelt in plaats daarvan.",
+  "{channel} didn't play. {fallback} from {subscription} plays instead.":
+    "{channel} speelde niet af. {fallback} van {subscription} speelt in plaats daarvan.",
+  "{count} fallback channels": { one: "{count} reservezender", other: "{count} reservezenders" },
 };
