@@ -1430,12 +1430,27 @@ function createLiveController(video: HTMLVideoElement) {
     const chosen = () =>
       subtitlesOff || store.getState().subtitle !== null || lastSubtitle !== null;
 
-    const preferences = await readPreferences().catch(() => null);
+    const channel = store.getState().channel;
+    const owner = selectedOwner;
+
+    // Guide Search supplies catalogue channels without the profile's saved choices.
+    const [preferences, kept] = await Promise.all([
+      readPreferences().catch(() => null),
+      channel && channel.choices === undefined
+        ? callForProfile(owner, "library.channel", { channel: ownedId(channel) })
+            .then((latest) => latest.choices ?? {})
+            .catch(() => undefined)
+        : channel?.choices,
+    ]);
+
     const wanted = preferences?.subtitleLanguage ?? null;
 
-    if (mine !== selection || revision !== tracksRevision || !currentProfile(selectedOwner)) return;
+    if (mine !== selection || revision !== tracksRevision || !currentProfile(owner)) return;
 
-    const kept = store.getState().channel?.choices;
+    if (channel && channel.choices === undefined && kept) {
+      store.setState({ channel: { ...channel, choices: kept } });
+    }
+
     const own = current?.engine.tracks;
 
     if (own && kept?.audio && !manualAudio) {

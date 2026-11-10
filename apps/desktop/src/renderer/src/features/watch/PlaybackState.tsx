@@ -432,6 +432,8 @@ function useFallback(channel: LiveChannel): string | null {
       : t("{channel} and its fallback channels didn't play.", { channel: current.chosen.title });
   }
 
+  if (sameOwned(current.chosen, current.playing)) return null;
+
   return t("{channel} didn't play. Its fallback from {subscription} plays instead.", {
     channel: current.chosen.title,
     subscription: nameOf(current.playing.subscriptionId) ?? "",

@@ -987,6 +987,29 @@ describe("named channel fallbacks in Watch", () => {
     expect(text()).toContain("and its fallback channels didn't play");
   });
 
+  it("retries the chosen channel without claiming an unlisted fallback is playing", async () => {
+    const opened = ipc.hold("playback.open");
+    const client = await watching(chosen);
+    client.setDefaultOptions({ queries: { retry: false } });
+    client.setQueryData(queries.channel(chosen).queryKey, chosen);
+
+    for (const id of ["een", "third"]) {
+      ipc
+        .hold("library.channel", (args) => args.channel.id === id)
+        .reject({ kind: "channel-not-found", channelId: id });
+    }
+
+    await act(async () => opened.reject({ kind: "stream", failure: noStream }));
+    await wait(1);
+    expect(text()).toContain("and its fallback channels didn't play");
+
+    await press("Retry");
+
+    expect(asked().map((call) => call.channel.id)).toEqual(["vrt", "vrt"]);
+    expect(text()).toContain("Tuning");
+    expect(text()).not.toContain("plays instead");
+  });
+
   it("still reaches saved alternatives when the original is no longer listed", async () => {
     const opened = ipc.hold("playback.open");
     const client = await watching(chosen);

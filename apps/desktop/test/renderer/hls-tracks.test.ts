@@ -12,6 +12,7 @@ import { ipc, SUBSCRIPTION } from "./support.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { player } from "../../src/renderer/src/player/player.ts";
+import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 import { streams, type Rendition } from "./hls-stand-in.ts";
 
@@ -617,3 +618,71 @@ it("uses profile subtitles until the saved language is proven, without rewriting
   await vi.waitFor(() => expect(player.state().subtitle?.language).toBe("fr"));
   expect(stream.subtitleTrack).toBe(1);
 });
+
+it("restores saved sound and subtitles for a guide-search channel without choices", async () => {
+  ipc.prefer({ audioLanguage: "en", subtitleLanguage: "en" });
+  ipc.always("library.channel", {
+    ...channel("search"),
+    choices: { audio: { id: 999, language: "es" }, subtitles: { id: 999, language: "de" } },
+  });
+  const count = streams.count();
+  const opened = ipc.hold("playback.open");
+  player.play(channel("search"));
+  await wait();
+  opened.resolve({
+    sessionId: "search",
+    channel: { subscriptionId: SUBSCRIPTION, id: "search" },
+    url: "http://127.0.0.1/search",
+    format: "hls",
+  });
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(count));
+  const stream = streams.latest();
+  stream.variant({ audio: SOUND, subtitles: SUBTITLES });
+  stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "Deutsch");
+  await vi.waitFor(() => {
+    expect(soundPlaying()).toBe("Español");
+    expect(player.state().subtitle?.language).toBe("de");
+  });
+  expect(stream.audioTrack).toBe(1);
+  expect(stream.subtitleTrack).toBe(1);
+  expect(saved()).toEqual([]);
+  expect(ipc.argsOf("library.chooseForChannel")).toEqual([]);
+});
+
+it.each(["channel", "profile"] as const)(
+  "drops saved choices arriving after a %s change",
+  async (change) => {
+    selectProfileOwner({ id: "default", revision: 1 });
+    ipc.prefer({ audioLanguage: "en", subtitleLanguage: "off" });
+    const pending = ipc.hold("library.channel");
+    const opened = ipc.hold("playback.open");
+    const count = streams.count();
+    player.play(channel("search"));
+    await wait();
+    opened.resolve({
+      sessionId: "search",
+      channel: { subscriptionId: SUBSCRIPTION, id: "search" },
+      url: "http://127.0.0.1/search",
+      format: "hls",
+    });
+    await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(count));
+    streams.latest().variant({ audio: SOUND, subtitles: SUBTITLES });
+    await vi.waitFor(() => expect(ipc.argsOf("library.channel")).not.toEqual([]));
+
+    if (change === "profile") {
+      player.clearForProfile();
+      selectProfileOwner({ id: "other", revision: 2 });
+    }
+
+    const next = await playing("next");
+    pending.resolve({
+      ...channel("search"),
+      choices: { audio: { id: 999, language: "es" }, subtitles: { id: 999, language: "de" } },
+    });
+    await wait();
+    expect(soundPlaying()).toBe("English");
+    expect(player.state().subtitle).toBeNull();
+    expect(next.audioTrack).toBe(0);
+    expect(next.subtitleTrack).toBe(-1);
+  },
+);
