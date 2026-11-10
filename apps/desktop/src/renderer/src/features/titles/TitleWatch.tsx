@@ -54,6 +54,8 @@ import { player } from "../../player/player.ts";
 import {
   episodeLine,
   offersNext,
+  recordingEdge,
+  recordingRanges,
   titlePlayer,
   useSubtitleNote,
   useTitlePlayer,
@@ -420,6 +422,7 @@ export function TitleWatch() {
               </Button>
             </Tooltip>
             <div className="ml-auto flex items-center gap-2">
+              <RecordingActions />
               <Tracks menu={menu} onMenu={setMenu} />
               {hasNext && (
                 <Button variant="media" onClick={() => titlePlayer.playNext()}>
@@ -489,11 +492,22 @@ function Scrubber() {
   const duration = useTitlePlayer((state) => state.duration);
   // On a receiver, after a skip: where it last said it was, until it has caught up.
   const confirmed = useTitlePlayer((state) => state.confirmed);
+  // A recording: how far it verifiably reaches when no length is known, and whether it grows, its
+  // length then being what it has so far.
+  const edge = useTitlePlayer(recordingEdge);
+  const recording = useTitlePlayer((state) => state.recording);
   const [dragging, setDragging] = useState<number | null>(null);
-  const shown = dragging ?? position;
+  const length = duration ?? edge;
+  const shown = Math.min(dragging ?? position, length ?? Infinity);
+  const growing = recording !== null && !recording.final;
 
-  if (!duration) {
-    return <div className="text-sm text-muted-foreground">{clock(position)}</div>;
+  if (!length) {
+    return (
+      <div className="flex items-baseline gap-4 text-sm text-muted-foreground tabular-nums">
+        {clock(position)}
+        {recording && <span className="text-xs">{t("Length not known")}</span>}
+      </div>
+    );
   }
 
   return (
@@ -502,7 +516,7 @@ function Scrubber() {
       <SliderPrimitive.Root
         value={shown}
         min={0}
-        max={duration}
+        max={length}
         step={1}
         onValueChange={(next) => setDragging(Array.isArray(next) ? (next[0] ?? 0) : next)}
         onValueCommitted={(next) => {
@@ -518,7 +532,13 @@ function Scrubber() {
               <span
                 aria-hidden
                 className="absolute top-1/2 size-3 -translate-1/2 rounded-full ring-2 ring-white/70"
-                style={{ left: `${(Math.min(confirmed, duration) / duration) * 100}%` }}
+                style={{ left: `${(Math.min(confirmed, length) / length) * 100}%` }}
+              />
+            )}
+            {growing && recording.status.kind === "recording" && (
+              <span
+                aria-hidden
+                className="absolute top-1/2 right-0 size-2 translate-x-[3px] -translate-y-1/2 rounded-full bg-destructive"
               />
             )}
             <SliderPrimitive.Thumb
@@ -528,8 +548,47 @@ function Scrubber() {
           </SliderPrimitive.Track>
         </SliderControl>
       </SliderPrimitive.Root>
-      <span className="w-16 text-muted-foreground">-{clock(duration - shown)}</span>
+      {growing ? (
+        <span className="min-w-16 text-xs font-semibold whitespace-nowrap">
+          {t("{time} so far", { time: clock(length) })}
+        </span>
+      ) : (
+        <span className="w-16 text-muted-foreground">-{clock(length - shown)}</span>
+      )}
     </div>
+  );
+}
+
+/**
+ * For a recording whose time goes on, that closing the player leaves it recording; while it grows,
+ * Go to latest, to the furthest a run of the chosen tracks verifiably starts, idle once there.
+ */
+function RecordingActions() {
+  const recording = useTitlePlayer((state) => state.recording);
+  const position = useTitlePlayer((state) => state.position);
+  const latest = useTitlePlayer((state) => recordingRanges(state).at(-1)?.to ?? null);
+
+  if (!recording) return null;
+  const live = recording.status.kind === "recording" || recording.status.kind === "paused";
+
+  return (
+    <>
+      {live && (
+        <span className="pr-2.5 text-xs text-muted-foreground">
+          {t("Closing the player keeps recording.")}
+        </span>
+      )}
+      {!recording.final && latest !== null && (
+        <Button
+          variant="media"
+          size="sm"
+          disabled={position >= latest - 10}
+          onClick={() => titlePlayer.goLatest()}
+        >
+          {t("Go to latest")}
+        </Button>
+      )}
+    </>
   );
 }
 
@@ -700,8 +759,10 @@ function State() {
     case "failed":
       // A copy's file that went from the app's folder.
       if (now.kind === "copy" && phase.problem.kind === "unavailable") {
-        title = t("Download missing");
-        body = t("Its file is no longer on this computer.");
+        title = now.recording ? t("This recording is no longer there.") : t("Download missing");
+        body = now.recording
+          ? t("Stopped at {position}.", { position: clock(position) })
+          : t("Its file is no longer on this computer.");
       } else {
         title = problemTitle(phase.problem);
         body = problemBody(phase.problem);
