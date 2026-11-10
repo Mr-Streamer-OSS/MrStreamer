@@ -383,8 +383,9 @@ export const ipcInputs = {
   "recordings.previewRetention": () =>
     type({ id: "string > 0", retention: RecordingRetentionSchema(), existing: "boolean" }),
   /**
-   * Turns rule `id`'s retention on, changes it, or with null turns it off. `seen` is what the
-   * viewer's preview listed to delete: it refuses to delete any other.
+   * Turns rule `id`'s retention on, changes it, or with null turns it off. `existing` is as for
+   * `recordings.previewRetention`, false when left out. `seen` is what the viewer's preview listed
+   * to delete: it refuses to delete any other.
    */
   "recordings.retain": () =>
     type({

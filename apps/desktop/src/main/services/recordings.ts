@@ -84,6 +84,7 @@ import {
 import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
+import { DAY_MS } from "@mrstreamer/core/catchup";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { t, type PlainKey } from "@mrstreamer/core/i18n";
@@ -140,8 +141,6 @@ const CHECK_MS = 60_000;
 
 /** How soon a schedule waiting for a connection asks again; one whose start failed, a minute. */
 const RETRY_MS = 10_000;
-
-const DAY_MS = 24 * 60 * 60_000;
 
 /** How far back a long absence writes missed results. */
 const MISSED_KEPT_MS = 7 * DAY_MS;
@@ -321,13 +320,14 @@ export class Recordings extends Context.Service<
     ): Effect.Effect<RetentionPreview, Failed>;
     /**
      * Turns rule `id`'s retention on or changes it, then deletes what it lets go now; null turns
-     * it off. Refuses, saving nothing, when it would delete one `seen` doesn't list, as the
-     * preview the viewer saw. Changed without `existing`, it keeps the recordings it covered.
+     * it off. `existing` is as for `previewRetention`. Refuses, saving nothing, when it would
+     * delete one `seen` doesn't list, as the preview the viewer saw.
      */
     retain(
       id: string,
       retention: RecordingRetention | null,
-      options?: { readonly existing?: boolean; readonly seen?: readonly string[] },
+      existing?: boolean,
+      seen?: readonly string[],
     ): Effect.Effect<RecordingRule, Failed>;
     /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
     readonly schedules: Effect.Effect<readonly ScheduledRecording[], Failed>;
@@ -2853,13 +2853,11 @@ function make(deps: RecordingsDeps) {
       const until = (each: StoredRecording) =>
         (each.ended ?? each.stop) + (retention.kind === "days" ? retention.days * DAY_MS : 0);
 
-      const over = new Set(
+      const going = (
         retention.kind === "count"
           ? covered.slice(retention.count)
-          : covered.filter((each) => until(each) <= now),
-      );
-
-      const going = covered.filter((each) => over.has(each)).toReversed();
+          : covered.filter((each) => until(each) <= now)
+      ).toReversed();
 
       return {
         remove: going.filter((each) => holdOf(each.id) === null),
@@ -2870,21 +2868,17 @@ function make(deps: RecordingsDeps) {
         }),
         next:
           retention.kind === "days"
-            ? Math.min(...covered.flatMap((each) => (over.has(each) ? [] : [until(each)])))
+            ? Math.min(...covered.flatMap((each) => (until(each) > now ? [until(each)] : [])))
             : Infinity,
       };
     };
 
     /**
      * Where a rule's retention starts, turned on or changed: with `existing`, from the first
-     * recording; else from where it started before, or now for one it never covered.
+     * recording; else from where it started before, or now for one that took none in before.
      */
-    const retentionFrom = (rule: KeptRule, existing: boolean | undefined) =>
-      existing
-        ? 0
-        : existing === undefined
-          ? (rule.retention?.from ?? Date.now())
-          : rule.retention?.from || Date.now();
+    const retentionFrom = (rule: KeptRule, existing: boolean) =>
+      existing ? 0 : rule.retention?.from || Date.now();
 
     /**
      * Deletes `record` for its rule's retention, unless something holds it as checked again just
@@ -2921,7 +2915,6 @@ function make(deps: RecordingsDeps) {
      * while a deletion failed; null for neither. Deletes nothing while either file can't be read.
      */
     const retainNow = Effect.gen(function* () {
-      const failed = [...retentionFailures].toSorted().join();
       /** What this pass tried to delete: a failure of any other is no longer due. */
       const tried = new Set<string>();
 
@@ -2944,12 +2937,14 @@ function make(deps: RecordingsDeps) {
         next = Math.min(next, found.next);
       }
 
-      for (const id of retentionFailures) if (!tried.has(id)) retentionFailures.delete(id);
+      // One no longer due, as one protected since, stops saying it failed.
+      const settled = [...retentionFailures].filter((id) => !tried.has(id));
+
+      for (const id of settled) retentionFailures.delete(id);
+
+      if (settled.length > 0) yield* publish;
 
       if (retentionFailures.size > 0) next = Math.min(next, Date.now() + CHECK_MS);
-
-      // One no longer listed as failed, as one protected since, says so too.
-      if ([...retentionFailures].toSorted().join() !== failed) yield* publish;
 
       return Number.isFinite(next) ? next : null;
     });
@@ -3771,7 +3766,8 @@ function make(deps: RecordingsDeps) {
       retain: (
         id: string,
         retention: RecordingRetention | null,
-        options: { readonly existing?: boolean; readonly seen?: readonly string[] } = {},
+        existing = false,
+        seen: readonly string[] = [],
       ) =>
         retaining(
           Effect.gen(function* () {
@@ -3790,17 +3786,15 @@ function make(deps: RecordingsDeps) {
                 const next: KeptRule = retention
                   ? {
                       ...rest,
-                      retention: { ...retention, from: retentionFrom(was, options.existing) },
+                      retention: { ...retention, from: retentionFrom(was, existing) },
                     }
                   : rest;
 
                 // Never more than the viewer saw: a preview since outgrown is asked for again.
-                const seen = new Set(options.seen);
-
                 if (
                   next.retention &&
                   retentionOf(id, next.retention, next.retention.from).remove.some(
-                    (each) => !seen.has(each.id),
+                    (each) => !seen.includes(each.id),
                   )
                 )
                   return yield* ruleFailure("The recordings to delete changed. Preview again.");

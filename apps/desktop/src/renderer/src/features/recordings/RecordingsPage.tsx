@@ -368,7 +368,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
                 channels={channels.filter((channel) =>
                   each.plan.channels.some((owned) => sameOwned(channel, owned)),
                 )}
-                recordings={(list.data ?? []).filter((one) => one.scheduled?.rule === each.id)}
+                recordings={recordings.filter((one) => one.scheduled?.rule === each.id)}
               />
             ))}
           </Section>
@@ -1158,11 +1158,7 @@ function RetentionPanel({
   const [existing, setExisting] = useState(saved?.from === 0);
 
   const typed =
-    keep === "count"
-      ? whole(count, RETENTION_LIMITS.count)
-      : keep === "days"
-        ? whole(days, RETENTION_LIMITS.days)
-        : null;
+    keep === "off" ? null : whole(keep === "count" ? count : days, RETENTION_LIMITS[keep]);
 
   // Null keeps everything; undefined is an amount out of range, which can't be saved.
   const retention: RecordingRetention | null | undefined =

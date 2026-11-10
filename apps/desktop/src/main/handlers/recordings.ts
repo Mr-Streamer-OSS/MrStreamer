@@ -133,10 +133,7 @@ export function recordingHandlers({
     "recordings.previewRetention": ({ id, retention, existing }) =>
       recordings.previewRetention(id, retention, existing),
     "recordings.retain": ({ id, retention, existing, seen }) =>
-      recordings.retain(id, retention, {
-        ...(existing !== undefined && { existing }),
-        ...(seen && { seen }),
-      }),
+      recordings.retain(id, retention, existing, seen),
     "recordings.schedules": () => recordings.schedules,
     "recordings.plan": ({ plan, id }) => recordings.plan(plan, id),
     "recordings.schedule": ({ plan, id }) => recordings.schedule(plan, id),

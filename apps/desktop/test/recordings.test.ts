@@ -6948,17 +6948,16 @@ describe("recording protection and retention", () => {
     });
 
     // Turned on without the preview, it saves and deletes nothing.
-    await expect(
-      first.recordings.retain(RULE, count, { existing: true, seen: [ids[0]!] }),
-    ).rejects.toMatchObject({
+    await expect(first.recordings.retain(RULE, count, true, [ids[0]!])).rejects.toMatchObject({
       error: { detail: "The recordings to delete changed. Preview again." },
     });
     expect(await listed(first.recordings)).toEqual([...ids, manual].toSorted());
     expect((await first.recordings.rules())[0]).not.toHaveProperty("retention");
 
-    expect(
-      await first.recordings.retain(RULE, count, { existing: true, seen: [ids[0]!, ids[1]!] }),
-    ).toMatchObject({ id: RULE, retention: { ...count, from: 0 } });
+    expect(await first.recordings.retain(RULE, count, true, [ids[0]!, ids[1]!])).toMatchObject({
+      id: RULE,
+      retention: { ...count, from: 0 },
+    });
     expect(await listed(first.recordings)).toEqual([ids[2], ids[3], manual].toSorted());
     expect(existsSync(join(root, ids[0]!))).toBe(false);
     expect((await first.recordings.storage()).used).toBe(3 * BYTES);
@@ -6994,7 +6993,7 @@ describe("recording protection and retention", () => {
 
     // Opened to play after the preview: it stays.
     await first.recordings.copy(ids[1]!);
-    await first.recordings.retain(RULE, keepOne, { existing: true, seen: preview.remove });
+    await first.recordings.retain(RULE, keepOne, true, preview.remove);
     expect(await listed(first.recordings)).toEqual(
       [ids[0], ids[1], ids[2], ids[4], expect.any(String)].toSorted(),
     );
@@ -7037,7 +7036,7 @@ describe("recording protection and retention", () => {
     const twoDays = { kind: "days", days: 2 } as const;
     const { remove } = await recordings.previewRetention(RULE, twoDays, true);
     expect(remove).toEqual([ids[0], ids[1]]);
-    await recordings.retain(RULE, twoDays, { existing: true, seen: remove });
+    await recordings.retain(RULE, twoDays, true, remove);
     expect(await listed(recordings)).toEqual([ids[2], ids[3], manual].toSorted());
   });
 
@@ -7054,7 +7053,7 @@ describe("recording protection and retention", () => {
 
       try {
         const { remove } = await recordings.previewRetention(RULE, keepOne, true);
-        await recordings.retain(RULE, keepOne, { existing: true, seen: remove });
+        await recordings.retain(RULE, keepOne, true, remove);
 
         const failed = (await recordings.list()).find((each) => each.id === ids[0]);
         expect(failed).toMatchObject({ status: { kind: "complete" }, retentionFailed: true });
