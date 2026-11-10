@@ -352,8 +352,15 @@ function useFallback(channel: LiveChannel): string | null {
     const error = problemError(phase.problem);
 
     if (!error) return;
-    const chosen = current?.chosen ?? channel;
+
+    const chosen =
+      current?.chosen ?? client.getQueryData(queries.channel(channel).queryKey) ?? channel;
+
     const tried = [...(current?.tried ?? []), ownedId(channel)];
+
+    // No named alternative means no fallback run, including for kids and refused streams.
+    if (!current && !fallbackAfter(chosen, error, tried)) return;
+
     let mine = true;
 
     void (async () => {
@@ -408,7 +415,7 @@ function useFallback(channel: LiveChannel): string | null {
       mine = false;
     };
     // Once per failure: the phase of each is its own.
-  }, [phase, output]);
+  }, [phase, output.kind]);
 
   if (output.kind !== "local") return null;
 

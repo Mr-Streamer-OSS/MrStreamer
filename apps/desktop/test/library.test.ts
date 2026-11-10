@@ -868,6 +868,14 @@ describe("a viewer's channel choices", () => {
 
       expect(read.title).toBe("Kwaliteit 1");
       expect(read.choices).toBeUndefined();
+
+      const chosen = await runtime.runPromise(
+        service.chosen.pipe(
+          Effect.provideService(AdmittedKids, { approved: [{ kind: "channel", ...own(fhd) }] }),
+        ),
+      );
+
+      expect(chosen).toEqual([]);
     } finally {
       await runtime.dispose();
     }

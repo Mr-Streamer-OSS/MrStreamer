@@ -397,19 +397,17 @@ function make(options: LibraryOptions) {
     };
 
     /** The viewer's channel choices as they apply to `lists`. */
+    const viewerChoices = Effect.gen(function* () {
+      const viewer = yield* viewingSettings(settings);
+      const policy = yield* Effect.serviceOption(AdmittedKids);
+
+      return policy._tag === "Some" && policy.value.approved !== null
+        ? []
+        : yield* viewer.channelChoices;
+    });
+
     const ownOf = (lists: Combined) =>
-      Effect.gen(function* () {
-        const viewer = yield* viewingSettings(settings);
-
-        const policy = yield* Effect.serviceOption(AdmittedKids);
-
-        return ownView(
-          policy._tag === "Some" && policy.value.approved !== null
-            ? []
-            : yield* viewer.channelChoices,
-          lists,
-        );
-      });
+      Effect.map(viewerChoices, (choices) => ownView(choices, lists));
 
     /** Whether Live TV's lists show channels for adults. */
     const adults = Effect.map(
@@ -776,7 +774,7 @@ function make(options: LibraryOptions) {
 
       chosen: Effect.gen(function* () {
         const { lists } = yield* visible;
-        const choices = yield* (yield* viewingSettings(settings)).channelChoices;
+        const choices = yield* viewerChoices;
         const own = ownView(choices, lists);
 
         return choices.flatMap((choice): ChosenChannel[] => {

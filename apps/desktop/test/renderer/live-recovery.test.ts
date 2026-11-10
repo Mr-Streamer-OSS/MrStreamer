@@ -907,6 +907,42 @@ describe("named channel fallbacks in Watch", () => {
 
   const third = { ...een, id: "third", title: "Third" };
 
+  it.each([404, 403])(
+    "keeps the ordinary HTTP %i failure when no fallback was configured",
+    async (status) => {
+      const opened = ipc.hold("playback.open");
+      const client = await watching();
+      client.setQueryData(queries.channel(vrt).queryKey, vrt);
+      await act(async () =>
+        opened.reject({ kind: "stream", failure: status === 404 ? noStream : refused(status) }),
+      );
+
+      expect(asked()).toHaveLength(1);
+      expect(text()).toContain(`HTTP ${status}`);
+      expect(text()).not.toContain("fallback channels");
+      expect(ipc.argsOf("library.chosenChannels")).toEqual([]);
+    },
+  );
+
+  it("does not read saved choices for an unlisted kids channel with no fallbacks", async () => {
+    selectProfileOwner({ id: "kids", revision: 1 });
+    const opened = ipc.hold("playback.open");
+    const client = await watching();
+    client.setDefaultOptions({ queries: { retry: false } });
+    client.removeQueries({ queryKey: queries.channel(vrt).queryKey });
+    ipc
+      .hold("library.channel", (args) => args.channel.id === "vrt")
+      .reject({ kind: "channel-not-found", channelId: "vrt" });
+    ipc.refuse("library.chosenChannels", { kind: "unexpected", detail: "not allowed" });
+    await act(async () => opened.reject({ kind: "channel-not-found", channelId: "vrt" }));
+    await wait(1);
+
+    expect(asked()).toHaveLength(1);
+    expect(ipc.argsOf("library.chosenChannels")).toEqual([]);
+    expect(text()).not.toContain("Couldn't read your changed channels.");
+    expect(text()).not.toContain("fallback channels");
+  });
+
   it("tries only the original channel's named alternatives, then reports exhaustion", async () => {
     const opened = ipc.hold("playback.open");
     const client = await watching(chosen);
