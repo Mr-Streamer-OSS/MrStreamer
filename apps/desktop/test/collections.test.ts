@@ -533,6 +533,7 @@ it.each([
     await run(a.service.change(a.context, { kind: "rename", id: "one", name: "Films" }));
 
     for (const change of [
+      { kind: "create", id: "newer", name: "Newer", rules },
       { kind: "delete", id: "newer" },
       { kind: "rules", id: "newer", rules },
       { kind: "member", id: "newer", title: movie, present: true },
@@ -552,6 +553,37 @@ it.each([
     ).toEqual({ rules: stored });
   },
 );
+
+it("reserves withheld collection names and order slots until their rules are readable again", async () => {
+  const { open } = fixture();
+  const a = await open();
+  await seed(a.service, a.context);
+  const rules = { kind: "movie" as const, filters: { quality: "4k" as const } };
+  await run(a.service.change(a.context, { kind: "create", id: "hidden", name: "Hidden", rules }));
+  await run(a.service.change(a.context, { kind: "create", id: "two", name: "Two" }));
+  a.db.prepare("update collection_rules set rules = ? where collection_id = 'hidden'").run("{");
+
+  for (const change of [
+    { kind: "create", id: "duplicate", name: "hidden" },
+    { kind: "rename", id: "two", name: " Hidden " },
+  ] as const)
+    expect(await run(Effect.flip(a.service.change(a.context, change)))).toMatchObject({
+      error: { kind: "list-name-taken" },
+    });
+
+  await run(a.service.change(a.context, { kind: "reorder", ids: ["two", "one"] }));
+  expect((await run(a.service.list(a.context))).map((list) => list.id)).toEqual(["two", "one"]);
+  await a.close();
+  const b = await open();
+  b.db
+    .prepare("update collection_rules set rules = ? where collection_id = 'hidden'")
+    .run(JSON.stringify(rules));
+  expect((await run(b.service.list(b.context))).map((list) => list.id)).toEqual([
+    "two",
+    "hidden",
+    "one",
+  ]);
+});
 
 it("re-evaluates saved smart rules through admitted catalogue reads after refresh", async () => {
   const provider = await fakeProvider({ titles: 1 });

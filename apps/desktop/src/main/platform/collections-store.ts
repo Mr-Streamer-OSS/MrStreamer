@@ -227,17 +227,18 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
         transaction(db, () => {
           if (!current()) throw new Error("Collection admission has ended.");
 
+          const before = read();
+
           if (
             change.kind === "create" &&
             db.prepare("select 1 from collection_receipts where id = ?").get(change.id)
           ) {
-            if (!db.prepare("select 1 from personal_collections where id = ?").get(change.id))
+            if (!before.some((list) => list.id === change.id))
               throw new Failed({ error: { kind: "no-list" } });
 
             return;
           }
 
-          const before = read();
           const found = "id" in change ? before.find((list) => list.id === change.id) : undefined;
 
           if (change.kind !== "create" && change.kind !== "reorder" && !found)
@@ -268,11 +269,14 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
                 throw new Error("Invalid collection name or id.");
 
               if (
-                before.some(
-                  (list) =>
-                    list.id !== change.id &&
-                    (normalize(list.name) || list.name) === (normalize(name) || name),
-                )
+                lists
+                  .all()
+                  .map((raw) => Row.assert(raw))
+                  .some(
+                    (list) =>
+                      list.id !== change.id &&
+                      (normalize(list.name) || list.name) === (normalize(name) || name),
+                  )
               )
                 throw new Failed({ error: { kind: "list-name-taken" } });
 
@@ -306,17 +310,24 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
               db.prepare("delete from collection_members where collection_id = ?").run(change.id);
               db.prepare("delete from personal_collections where id = ?").run(change.id);
               break;
-            case "reorder":
+            case "reorder": {
               exactOrder(
                 before.map((list) => list.id),
                 change.ids,
               );
-              change.ids.forEach((id, position) =>
+              // Move readable lists between their existing slots; withheld rows keep theirs.
+              const positions = db
+                .prepare("select id, position from personal_collections order by position, rowid")
+                .all()
+                .filter((row) => before.some((list) => list.id === row.id))
+                .map((row) => Number(row.position));
+              change.ids.forEach((id, index) =>
                 db
                   .prepare("update personal_collections set position = ? where id = ?")
-                  .run(position, id),
+                  .run(positions[index]!, id),
               );
               break;
+            }
             case "member": {
               const title = change.title;
 
