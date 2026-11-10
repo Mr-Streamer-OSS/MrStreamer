@@ -247,8 +247,9 @@ export function DetailsView({
 
   return (
     <Sheet onClose={closeDetails} bar={bar} scroller={scroller}>
+      {/* Inside the content's side padding and clear of Close, above whatever the sheet shows. */}
       {listed.error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="py-6 pr-16 pl-10 text-sm text-destructive">
           {describeError(appError(listed.error))}{" "}
           <button onClick={() => void listed.refetch()} className="text-white underline">
             {t("Try again")}
