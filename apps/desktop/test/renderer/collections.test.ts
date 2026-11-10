@@ -166,6 +166,9 @@ it("creates, renames, moves and deletes collections, each once stored", async ()
   expect(document.activeElement).toBe(button("New collection"));
 
   await choose("Family night", "Rename");
+  // A fresh field selects its name, so typing replaces it.
+  expect(document.activeElement).toBe(field());
+  expect([field().selectionStart, field().selectionEnd]).toEqual([0, "Family night".length]);
   await type("Friday night", "Escape");
   expect(saved.sent.map(({ kind }) => kind)).toEqual(["create"]);
   await choose("Family night", "Rename");
@@ -867,6 +870,13 @@ describe("a title's collections menu in its details", () => {
         },
         present: true,
       });
+
+      // Retry leaves with its alert, so the collections button takes the focus back.
+      if (operation === "create")
+        expect(document.activeElement).toBe(
+          document.querySelector("[aria-label='Collections for Harbour restored']"),
+        );
+
       await act(async () => retry.resolve(null));
       await vi.waitFor(() => expect(document.querySelector("[role=alert]")).toBeNull());
     },
@@ -901,6 +911,9 @@ describe("a title's collections menu in its details", () => {
     ipc.always("ondemand.titles", [film]);
     await act(async () => button("Try again").click());
     await vi.waitFor(() => expect(field().value).toBe("Private weekend"));
+    // A restored name returns focused with the caret after it, to go on typing.
+    expect(document.activeElement).toBe(field());
+    expect([field().selectionStart, field().selectionEnd]).toEqual([15, 15]);
     await type("Private weekend", "Enter");
     await vi.waitFor(() =>
       expect(ipc.argsOf("collections.change")[0]).toMatchObject({
@@ -1306,6 +1319,8 @@ it("keeps an unsent rename through privacy loading without showing it meanwhile"
   expect(document.body.innerHTML).not.toContain("Weekend");
   await act(async () => list.resolve([{ id: "c0", name: "Films", total: 1 }]));
   await vi.waitFor(() => expect(field().value).toBe("Weekend"));
+  expect(document.activeElement).toBe(field());
+  expect([field().selectionStart, field().selectionEnd]).toEqual([7, 7]);
   await type("Weekend", "Enter");
   await vi.waitFor(() =>
     expect(ipc.argsOf("collections.change")).toEqual([

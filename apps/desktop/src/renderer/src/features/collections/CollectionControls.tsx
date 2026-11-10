@@ -121,6 +121,7 @@ function useCommit(commit: CommitCollection, ready: boolean) {
  * name cancels. A refused save keeps the field and says so; Enter sends it again, leaving does not.
  * `onDraft` hands each edit to the owner, which passes it back as `draft` when the field returns
  * after unknown admission unmounted it; `initial` stays what an unchanged name is compared with.
+ * A fresh field selects its name to replace it; a returned draft puts the caret after it instead.
  */
 function NameField({
   initial,
@@ -140,6 +141,7 @@ function NameField({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(draft ?? initial);
+  const restored = useRef(draft !== undefined);
   const cancelled = useRef(false);
 
   const save = () => {
@@ -160,7 +162,10 @@ function NameField({
         maxLength={COLLECTION_NAME_MAX}
         aria-invalid={!!failed || undefined}
         value={name}
-        onFocus={(event) => event.currentTarget.select()}
+        onFocus={({ currentTarget: input }) => {
+          if (!restored.current) return input.select();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }}
         onChange={(event) => {
           setName(event.target.value);
           onDraft(event.target.value);
@@ -818,6 +823,8 @@ export function CollectionMembership({
           <button
             ref={created === null ? undefined : takeFocus}
             onClick={() => {
+              // This button leaves with its alert, so the collections button takes the focus.
+              refocus.current = true;
               setCreated(null);
 
               if (problem?.retry) void change.run({ ...unfinished, title });
