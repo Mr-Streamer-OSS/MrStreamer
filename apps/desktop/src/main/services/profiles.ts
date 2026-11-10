@@ -347,29 +347,49 @@ export function makeProfiles({
               )
             : original;
 
+        // Owns this handle's collection subscription and forwarder; dispose closes both.
+        const collectionScope = yield* Scope.make();
+
         const handle = {
           context,
-          dispose: () => runtime?.dispose() ?? Promise.resolve(),
+          dispose: async () => {
+            try {
+              await Effect.runPromise(Scope.close(collectionScope, Exit.void));
+            } finally {
+              await runtime?.dispose();
+            }
+          },
           one: yield* Semaphore.make(PROFILE_OPERATIONS),
           closed: false,
           erased: new Map<string, number>(),
         };
 
-        // Probe before caching or starting watches, so a failed open remains retryable.
+        // Probe before starting watches, so a failed open remains retryable.
         yield* Context.get(context, CustomListStore).lists.pipe(
           Effect.onError(() => Effect.promise(handle.dispose)),
         );
-        handles.set(id, handle);
+
+        // Subscribe before caching, so changes are buffered even before the forwarder consumes.
+        // A failed or canceled start disposes the uncached handle.
+        yield* Effect.gen(function* () {
+          const changes = yield* Scope.provide(collectionScope)(
+            Context.get(context, Collections).profileChanges,
+          );
+
+          yield* Effect.forkIn(
+            Stream.runForEach(changes, (owner) =>
+              PubSub.publish(events, { kind: "collections", owner }),
+            ),
+            collectionScope,
+          );
+          handles.set(id, handle);
+        }).pipe(Effect.onError(() => Effect.promise(handle.dispose)));
 
         const viewing = Context.get(context, ViewingRecord);
         const watchlist = Context.get(context, Watchlist);
         const lists = Context.get(context, CustomLists);
-        const collections = Context.get(context, Collections);
 
         const watches = [
-          Stream.runForEach(collections.profileChanges, (owner) =>
-            PubSub.publish(events, { kind: "collections", owner }),
-          ),
           Stream.runForEach(
             viewing.profileChanges ??
               Stream.map(viewing.changes, (sequence) => ({ owner: null, sequence })),

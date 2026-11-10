@@ -4,6 +4,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import type * as Scope from "effect/Scope";
 import { defined } from "@mrstreamer/core/defined";
 import { ViewingErasure } from "@mrstreamer/core/viewing/service";
 import type { Title } from "@mrstreamer/contracts/ondemand";
@@ -261,7 +262,8 @@ export class Collections extends Context.Service<
     ) => Effect.Effect<CollectionPage, Failed>;
     readonly memberships: (title: CollectionIdentity) => Effect.Effect<readonly string[], Failed>;
     readonly change: (change: CollectionChange) => Effect.Effect<void, Failed>;
-    readonly profileChanges: Stream.Stream<ActiveProfile>;
+    /** Subscribes in the caller's scope; later changes are buffered until consumed. */
+    readonly profileChanges: Effect.Effect<Stream.Stream<ActiveProfile>, never, Scope.Scope>;
   }
 >()("mrstreamer/Collections") {
   static readonly layer = Layer.effect(
@@ -506,7 +508,7 @@ export class Collections extends Context.Service<
             yield* module.change(visibility, change);
             yield* PubSub.publish(changes, owner);
           }),
-        profileChanges: Stream.fromPubSub(changes),
+        profileChanges: Effect.map(PubSub.subscribe(changes), Stream.fromSubscription),
       } satisfies Collections["Service"];
     }),
   );
