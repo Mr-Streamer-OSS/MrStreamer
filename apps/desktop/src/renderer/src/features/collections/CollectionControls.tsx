@@ -163,8 +163,8 @@ function NameField({
         aria-invalid={!!failed || undefined}
         value={name}
         onFocus={({ currentTarget: input }) => {
-          if (!restored.current) return input.select();
-          input.setSelectionRange(input.value.length, input.value.length);
+          if (restored.current) input.setSelectionRange(input.value.length, input.value.length);
+          else input.select();
         }}
         onChange={(event) => {
           setName(event.target.value);
@@ -742,7 +742,7 @@ export function CollectionMembership({
           saving={change.saving}
           initial={change.requested?.kind === "create" ? change.requested.name : ""}
           draft={creating.draft}
-          onDraft={(draft) => setCreating((current) => current && { ...current, draft })}
+          onDraft={(name) => setCreating((current) => current && { ...current, draft: name })}
           failed={change.failed?.kind === "create" ? (change.problem?.text ?? null) : null}
           onCancel={finish}
           onSave={(name) => void create(creating.id, name)}
