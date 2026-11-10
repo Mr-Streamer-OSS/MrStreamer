@@ -1,4 +1,3 @@
-import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { PaneRefusal } from "@mrstreamer/contracts/playback";
 import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { Profiles } from "../platform/profile-store.ts";
@@ -22,25 +21,6 @@ import type { Analytics } from "../analytics/service.ts";
 // The public player's latest successful open owns its diagnostic reads. Receiver and household
 // sessions never enter this record, and a new viewer cannot inspect the previous viewer's session.
 const playerSessions = new WeakMap<Playback["Service"], { id: string; owner: ActiveProfile }>();
-
-/**
- * The sound a live open asks for: the track the player names, else the one the viewer picked on
- * this channel before, matched by its id and then its language, else the profile's language.
- * When the stream has none of them, the stream's own first track plays (`liveAudio`).
- */
-function soundFor(
-  channel: LiveChannel,
-  audio: number | undefined,
-  audioLanguage: string | undefined,
-) {
-  const remembered = audio === undefined ? channel.choices?.audio : undefined;
-
-  return {
-    audio: audio ?? null,
-    savedAudio: remembered ?? null,
-    audioLanguage: audioLanguage ?? null,
-  };
-}
 
 export function playbackHandlers({
   playback,
@@ -100,7 +80,9 @@ export function playbackHandlers({
           return yield* playback.openPane(request, ownedId(channel), input.decoders, {
             variants,
             repair: input.repair ?? false,
-            ...soundFor(channel, input.audio, input.audioLanguage),
+            audio: input.audio ?? null,
+            audioLanguage: input.audioLanguage ?? null,
+            savedAudio: input.audio === undefined ? (channel.choices?.audio ?? null) : null,
           });
         }),
       ),
@@ -285,7 +267,9 @@ export function playbackHandlers({
                 owner,
                 archive: archive ?? null,
                 repair: repair ?? false,
-                ...soundFor(channel, audio, audioLanguage),
+                audio: audio ?? null,
+                audioLanguage: audioLanguage ?? null,
+                savedAudio: audio === undefined ? (channel.choices?.audio ?? null) : null,
                 preview: preview ?? false,
                 turn,
               });
