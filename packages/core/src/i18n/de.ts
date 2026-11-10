@@ -1593,6 +1593,11 @@ export const de: Translation = {
     "Jetzt neu starten stoppt die Aufnahme und behält, was aufgenommen ist.",
   "Choose a stop time within 12 hours.": "Wähle ein Ende innerhalb von 12 Stunden.",
   "Stop the recording before deleting it.": "Beende die Aufnahme, bevor du sie löschst.",
+  "Take protection off before deleting it.": "Hebe den Schutz auf, bevor du sie löschst.",
+  "A missed recording has no copy to protect.":
+    "Eine verpasste Aufnahme hat keine Kopie, die geschützt werden kann.",
+  "The recordings to delete changed. Preview again.":
+    "Die zu löschenden Aufnahmen haben sich geändert. Sieh dir die Vorschau erneut an.",
   "It is still recording.": "Die Aufnahme läuft noch.",
   Recordings: "Aufnahmen",
   Recording: "Aufnahme läuft",

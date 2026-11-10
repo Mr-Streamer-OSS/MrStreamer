@@ -1578,6 +1578,11 @@ export const nl: Translation = {
     "Nu herstarten beëindigt de opname en bewaart wat is opgenomen.",
   "Choose a stop time within 12 hours.": "Kies een eindtijd binnen 12 uur.",
   "Stop the recording before deleting it.": "Stop de opname voordat je hem verwijdert.",
+  "Take protection off before deleting it.": "Haal de bescherming eraf voordat je hem verwijdert.",
+  "A missed recording has no copy to protect.":
+    "Een gemiste opname heeft geen kopie om te beschermen.",
+  "The recordings to delete changed. Preview again.":
+    "De te verwijderen opnamen zijn veranderd. Bekijk het voorbeeld opnieuw.",
   "It is still recording.": "De opname loopt nog.",
   Recordings: "Opnames",
   Recording: "Opname loopt",

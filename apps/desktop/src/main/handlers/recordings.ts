@@ -64,6 +64,9 @@ export function recordingHandlers({
     | "start"
     | "stop"
     | "remove"
+    | "protect"
+    | "previewRetention"
+    | "retain"
     | "rules"
     | "previewRule"
     | "saveRule"
@@ -126,6 +129,14 @@ export function recordingHandlers({
     "recordings.previewRule": ({ plan, id }) => recordings.previewRule(plan, id),
     "recordings.saveRule": ({ plan, id }) => recordings.saveRule(plan, id),
     "recordings.cancelRule": ({ id }) => Effect.as(recordings.cancelRule(id), null),
+    "recordings.protect": ({ id, on }) => Effect.as(recordings.protect(id, on), null),
+    "recordings.previewRetention": ({ id, retention, existing }) =>
+      recordings.previewRetention(id, retention, existing),
+    "recordings.retain": ({ id, retention, existing, seen }) =>
+      recordings.retain(id, retention, {
+        ...(existing !== undefined && { existing }),
+        ...(seen && { seen }),
+      }),
     "recordings.schedules": () => recordings.schedules,
     "recordings.plan": ({ plan, id }) => recordings.plan(plan, id),
     "recordings.schedule": ({ plan, id }) => recordings.schedule(plan, id),

@@ -1656,6 +1656,11 @@ export const es: Translation = {
     "Reiniciar ahora detiene la grabación y conserva lo grabado.",
   "Choose a stop time within 12 hours.": "Elige una hora de fin dentro de 12 horas.",
   "Stop the recording before deleting it.": "Detén la grabación antes de eliminarla.",
+  "Take protection off before deleting it.": "Quita la protección antes de eliminarla.",
+  "A missed recording has no copy to protect.":
+    "Una grabación perdida no tiene copia que proteger.",
+  "The recordings to delete changed. Preview again.":
+    "Las grabaciones que se eliminarán han cambiado. Vuelve a ver la vista previa.",
   "It is still recording.": "Todavía se está grabando.",
   Recordings: "Grabaciones",
   Recording: "Grabando",

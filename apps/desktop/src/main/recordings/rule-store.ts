@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { type } from "arktype";
 import {
   RecordingPlanSchema,
+  RecordingRetentionSchema,
   RecordingRulePlanSchema,
   RECORDING_RULE_LIMITS,
 } from "@mrstreamer/contracts/recordings";
@@ -13,6 +14,8 @@ const schema = () =>
     rules: type({
       id: "string > 0",
       plan: RecordingRulePlanSchema(),
+      // Absent deletes nothing; one this build can't read refuses the whole file (see readRules).
+      "retention?": RecordingRetentionSchema().and({ from: "number.integer >= 0" }),
       occurrences: type({
         identity: "string > 0",
         "episodeIdentity?": "string > 0",

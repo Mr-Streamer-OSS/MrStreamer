@@ -6837,3 +6837,259 @@ it.runIf(hasTools)(
     ]);
   },
 );
+
+describe("recording protection and retention", () => {
+  const RULE = "rule-programme";
+  const HOUR = 60 * MINUTE;
+  const BYTES = 1000;
+
+  /**
+   * A data folder holding `count` ended recordings the rule made, a day apart, oldest first, each
+   * an hour long, ended `count - i` days ago; a manual recording older than all of them; and the
+   * rule, with `kept` as its saved fields.
+   */
+  async function seeded(
+    count: number,
+    { kept = {}, protect = [] }: { kept?: object; protect?: readonly number[] } = {},
+  ) {
+    const dataDir = await tempDir();
+    const root = join(dataDir, "recordings");
+    const now = Date.now();
+    const id = (i: number) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+    const manual = id(99);
+
+    const record = (each: string, start: number) => ({
+      id: each,
+      file: "a.ts",
+      channel: { subscriptionId: "gone", id: "1" },
+      channelName: "Channel",
+      title: "Programme",
+      start,
+      stop: start + HOUR,
+      ended: start + HOUR,
+      bytes: BYTES,
+      status: { kind: "complete" },
+    });
+
+    const ids = Array.from({ length: count }, (_, i) => id(i));
+
+    for (const each of [...ids, manual]) {
+      await mkdir(join(root, each), { recursive: true });
+      await writeFile(join(root, each, "a.ts"), Buffer.alloc(BYTES));
+    }
+
+    await writeFile(
+      join(root, "recordings.json"),
+      JSON.stringify({
+        version: 1,
+        recordings: [
+          record(manual, now - (count + 30) * DAY),
+          ...ids.map((each, i) => ({
+            ...record(each, now - (count - i) * DAY),
+            scheduled: {
+              schedule: `rule:${each}`,
+              rule: RULE,
+              from: now - (count - i) * DAY,
+              late: null,
+            },
+            // A mangled value still protects.
+            ...(protect.includes(i) && { protected: "mangled" }),
+          })),
+        ],
+      }),
+    );
+
+    await writeFile(
+      join(root, "rules.json"),
+      JSON.stringify({
+        version: 1,
+        rules: [
+          {
+            id: RULE,
+            plan: {
+              title: "Programme",
+              channels: [{ subscriptionId: "gone", id: "1" }],
+              mode: "every",
+              priority: 0,
+              padding: { before: 2, after: 5 },
+            },
+            occurrences: [],
+            ...kept,
+          },
+        ],
+      }),
+    );
+
+    const listed = async (recordings: { list(): Promise<readonly Recording[]> }) =>
+      (await recordings.list()).map((each) => each.id).toSorted();
+
+    return { dataDir, root, ids, manual, listed };
+  }
+
+  it("deletes nothing until a rule's retention is turned on, then only what its preview listed, also after a restart", async () => {
+    const { dataDir, root, ids, manual, listed } = await seeded(4);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    await first.recordings.check();
+    expect(await listed(first.recordings)).toEqual([...ids, manual].toSorted());
+    expect((await first.recordings.rules())[0]).not.toHaveProperty("retention");
+
+    // Recordings made before retention is turned on stay unless the viewer takes them in.
+    const count = { kind: "count", count: 2 } as const;
+    expect(await first.recordings.previewRetention(RULE, count, false)).toEqual({
+      remove: [],
+      bytes: 0,
+      held: [],
+    });
+    expect(await first.recordings.previewRetention(RULE, count, true)).toEqual({
+      remove: [ids[0], ids[1]],
+      bytes: 2 * BYTES,
+      held: [],
+    });
+
+    // Turned on without the preview, it saves and deletes nothing.
+    await expect(
+      first.recordings.retain(RULE, count, { existing: true, seen: [ids[0]!] }),
+    ).rejects.toMatchObject({
+      error: { detail: "The recordings to delete changed. Preview again." },
+    });
+    expect(await listed(first.recordings)).toEqual([...ids, manual].toSorted());
+    expect((await first.recordings.rules())[0]).not.toHaveProperty("retention");
+
+    expect(
+      await first.recordings.retain(RULE, count, { existing: true, seen: [ids[0]!, ids[1]!] }),
+    ).toMatchObject({ id: RULE, retention: { ...count, from: 0 } });
+    expect(await listed(first.recordings)).toEqual([ids[2], ids[3], manual].toSorted());
+    expect(existsSync(join(root, ids[0]!))).toBe(false);
+    expect((await first.recordings.storage()).used).toBe(3 * BYTES);
+    await first.quit();
+
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+    expect((await second.recordings.rules())[0]?.retention).toEqual({ ...count, from: 0 });
+    await second.recordings.check();
+    // The manual recording, older than any of them, stays.
+    expect(await listed(second.recordings)).toEqual([ids[2], ids[3], manual].toSorted());
+
+    // Turned off, it deletes nothing more.
+    expect(await second.recordings.retain(RULE, null)).not.toHaveProperty("retention");
+  });
+
+  it("keeps protected and played recordings, checked again just before each deletion", async () => {
+    const { dataDir, ids, listed } = await seeded(5, { protect: [0] });
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    await first.recordings.protect(ids[2]!, true);
+    const keepOne = { kind: "count", count: 1 } as const;
+
+    const preview = await first.recordings.previewRetention(RULE, keepOne, true);
+    expect(preview).toEqual({
+      remove: [ids[1], ids[3]],
+      bytes: 2 * BYTES,
+      held: [
+        { id: ids[0], why: "protected" },
+        { id: ids[2], why: "protected" },
+      ],
+    });
+
+    // Opened to play after the preview: it stays.
+    await first.recordings.copy(ids[1]!);
+    await first.recordings.retain(RULE, keepOne, { existing: true, seen: preview.remove });
+    expect(await listed(first.recordings)).toEqual(
+      [ids[0], ids[1], ids[2], ids[4], expect.any(String)].toSorted(),
+    );
+    const shown = await first.recordings.list();
+    expect(shown.find((each) => each.id === ids[0])?.protected).toBe(true);
+    expect(shown.find((each) => each.id === ids[1])?.protected).toBeUndefined();
+    await expect(first.recordings.remove(ids[2]!)).rejects.toMatchObject({
+      error: { detail: "Take protection off before deleting it." },
+    });
+    await first.quit();
+
+    // Played only counts for the run it was played in; protection is kept.
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+
+    const after = await until(
+      () => second.recordings.list(),
+      (list) => !list.some((each) => each.id === ids[1]),
+    );
+
+    expect(after.map((each) => each.id)).not.toContain(ids[1]);
+    expect(after.flatMap((each) => (each.protected ? [each.id] : []))).toEqual([ids[2], ids[0]]);
+
+    await second.recordings.protect(ids[2]!, false);
+    await second.recordings.check();
+    expect(
+      (
+        await until(
+          () => second.recordings.list(),
+          (list) => !list.some((each) => each.id === ids[2]),
+        )
+      ).map((each) => each.id),
+    ).not.toContain(ids[2]);
+  });
+
+  it("deletes by age only those that ended more than its days ago", async () => {
+    const { dataDir, ids, manual, listed } = await seeded(4);
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    const twoDays = { kind: "days", days: 2 } as const;
+    const { remove } = await recordings.previewRetention(RULE, twoDays, true);
+    expect(remove).toEqual([ids[0], ids[1]]);
+    await recordings.retain(RULE, twoDays, { existing: true, seen: remove });
+    expect(await listed(recordings)).toEqual([ids[2], ids[3], manual].toSorted());
+  });
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === "win32")(
+    "lists one it couldn't delete, still counting its room, and deletes it once it can",
+    async () => {
+      const { dataDir, root, ids } = await seeded(3);
+      const { recordings, quit } = await app(dataDir);
+      onTestFinished(quit);
+      // Its file can't be taken out of its folder.
+      const held = join(root, ids[0]!);
+      await chmod(held, 0o555);
+      const keepOne = { kind: "count", count: 1 } as const;
+
+      try {
+        const { remove } = await recordings.previewRetention(RULE, keepOne, true);
+        await recordings.retain(RULE, keepOne, { existing: true, seen: remove });
+
+        const failed = (await recordings.list()).find((each) => each.id === ids[0]);
+        expect(failed).toMatchObject({ status: { kind: "complete" }, retentionFailed: true });
+        expect((await recordings.list()).some((each) => each.id === ids[1])).toBe(false);
+        // What it couldn't delete still takes its room, beside the manual and newest ones.
+        expect((await recordings.storage()).used).toBe(3 * BYTES);
+      } finally {
+        await chmod(held, 0o755);
+      }
+
+      await recordings.check();
+
+      const after = await until(
+        () => recordings.list(),
+        (list) => !list.some((each) => each.id === ids[0]),
+      );
+
+      expect(after.some((each) => each.id === ids[0])).toBe(false);
+      expect(after.some((each) => each.retentionFailed)).toBe(false);
+      expect((await recordings.storage()).used).toBe(2 * BYTES);
+    },
+  );
+
+  it("deletes nothing while the rules it keeps can't be read", async () => {
+    const { dataDir, ids, manual, listed } = await seeded(3, {
+      kept: { retention: { kind: "count", count: 0, from: 0 } },
+    });
+
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    await recordings.check();
+    await expect(recordings.rules()).rejects.toBeTruthy();
+    await expect(
+      recordings.previewRetention(RULE, { kind: "count", count: 1 }, true),
+    ).rejects.toBeTruthy();
+    expect(await listed(recordings)).toEqual([...ids, manual].toSorted());
+  });
+});

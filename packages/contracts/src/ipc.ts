@@ -100,8 +100,10 @@ import {
 import type { Reminder, ReminderList } from "./reminders.ts";
 import {
   RecordingPlanSchema,
+  RecordingRetentionSchema,
   RecordingRulePlanSchema,
   type RecordingRule,
+  type RetentionPreview,
   type RecordingRulePreview,
   type Recording,
   type RecordingResumeList,
@@ -372,6 +374,25 @@ export const ipcInputs = {
   "recordings.previewRule": () => type({ plan: RecordingRulePlanSchema(), "id?": "string > 0" }),
   "recordings.saveRule": () => type({ plan: RecordingRulePlanSchema(), "id?": "string > 0" }),
   "recordings.cancelRule": () => type({ id: "string > 0" }),
+  /** Protects a recording from deletion, or with `on` false takes protection off. */
+  "recordings.protect": () => type({ id: "string > 0", on: "boolean" }),
+  /**
+   * What `retention` would delete now of rule `id`'s recordings, deleting nothing; `existing`
+   * takes in those made before it is turned on.
+   */
+  "recordings.previewRetention": () =>
+    type({ id: "string > 0", retention: RecordingRetentionSchema(), existing: "boolean" }),
+  /**
+   * Turns rule `id`'s retention on, changes it, or with null turns it off. `seen` is what the
+   * viewer's preview listed to delete: it refuses to delete any other.
+   */
+  "recordings.retain": () =>
+    type({
+      id: "string > 0",
+      retention: RecordingRetentionSchema().or("null"),
+      "existing?": "boolean",
+      "seen?": type("string > 0").array().atMostLength(10_000),
+    }),
   "recordings.schedules": none,
   /**
    * How a schedule would stand, saving nothing: as the one `id` names would, changed to `plan`,
@@ -924,6 +945,14 @@ export interface IpcOutputs {
   "recordings.saveRule": RecordingRule;
   /** Durably stops following future airings. */
   "recordings.cancelRule": null;
+  /** Once kept. Fails for a missed one, which has no copy, or when it can't be written. */
+  "recordings.protect": null;
+  "recordings.previewRetention": RetentionPreview;
+  /**
+   * The rule as saved, once what it deletes now is deleted. Fails, saving nothing, when it would
+   * delete a recording `seen` doesn't list; a deletion that fails shows on its recording.
+   */
+  "recordings.retain": RecordingRule;
   /** Fails for rule-made schedules, an unlisted channel or a plan with no time to come. */
   "recordings.plan": ScheduledRecording;
   /** As saved. Fails as `recordings.plan` does, or when it can't be written. */

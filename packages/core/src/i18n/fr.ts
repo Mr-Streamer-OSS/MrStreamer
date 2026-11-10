@@ -1659,6 +1659,11 @@ export const fr: Translation = {
     "Redémarrer maintenant arrête l'enregistrement et garde ce qui a été enregistré.",
   "Choose a stop time within 12 hours.": "Choisissez une heure de fin dans les 12 heures.",
   "Stop the recording before deleting it.": "Arrêtez l’enregistrement avant de le supprimer.",
+  "Take protection off before deleting it.": "Retirez la protection avant de le supprimer.",
+  "A missed recording has no copy to protect.":
+    "Un enregistrement manqué n’a pas de copie à protéger.",
+  "The recordings to delete changed. Preview again.":
+    "Les enregistrements à supprimer ont changé. Prévisualisez à nouveau.",
   "It is still recording.": "L’enregistrement est toujours en cours.",
   Recordings: "Enregistrements",
   Recording: "Enregistrement",

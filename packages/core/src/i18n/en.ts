@@ -1542,6 +1542,10 @@ export const en = {
     "Restarting now stops recording and keeps what was recorded.",
   "Choose a stop time within 12 hours.": "Choose a stop time within 12 hours.",
   "Stop the recording before deleting it.": "Stop the recording before deleting it.",
+  "Take protection off before deleting it.": "Take protection off before deleting it.",
+  "A missed recording has no copy to protect.": "A missed recording has no copy to protect.",
+  "The recordings to delete changed. Preview again.":
+    "The recordings to delete changed. Preview again.",
   "It is still recording.": "It is still recording.",
   Recordings: "Recordings",
   Recording: "Recording",
