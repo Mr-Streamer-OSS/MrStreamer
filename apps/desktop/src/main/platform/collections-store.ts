@@ -315,12 +315,14 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
                 before.map((list) => list.id),
                 change.ids,
               );
+
               // Move readable lists between their existing slots; withheld rows keep theirs.
               const positions = db
                 .prepare("select id, position from personal_collections order by position, rowid")
                 .all()
                 .filter((row) => before.some((list) => list.id === row.id))
                 .map((row) => Number(row.position));
+
               change.ids.forEach((id, index) =>
                 db
                   .prepare("update personal_collections set position = ? where id = ?")
@@ -328,6 +330,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
               );
               break;
             }
+
             case "member": {
               const title = change.title;
 
