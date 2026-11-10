@@ -1,8 +1,8 @@
-// The episodes an account marked by hand, as rules without storage: what a series is kept under,
-// what a mark, its Undo and leaving Continue watching change, and where a marked series goes on.
-// The viewing store keeps one row per marked episode and one per marked series, and runs these on
-// them when a change commits and when it rebuilds them from the events, so both add up to the
-// same.
+// The films and episodes an account marked by hand, as rules without storage: what a series is
+// kept under, what a mark, its Undo and leaving Continue watching change, and where a marked series
+// goes on. The viewing store keeps one row per marked movie, one per marked episode and one per
+// marked series, and runs these on them when a change commits and when it rebuilds them from the
+// events, so both add up to the same.
 //
 // A mark is kept apart from how far a file played. It names no file and no length, so it holds
 // when the provider puts another file in the episode's place, and taking it back leaves the
@@ -13,7 +13,13 @@ import type { Title } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { MarkedNext } from "@mrstreamer/contracts/viewing";
 import { continuation } from "./episodes.ts";
-import type { MarkEvent, SeriesListing, StoredMark } from "./record.ts";
+import type {
+  FilmMarkEvent,
+  MarkEvent,
+  SeriesListing,
+  StoredFilmMark,
+  StoredMark,
+} from "./record.ts";
 import type { RawProgress } from "./titles.ts";
 import { defined } from "../defined.ts";
 
@@ -53,12 +59,19 @@ export function seriesIdentity(series: OwnedId, title: Title | undefined): Serie
   return { key, keys: [...new Set([key, ...versions.map((id) => `id:${id}`)])], versions };
 }
 
-/** What the latest mark of a series replaced, kept while that mark can still be taken back. */
+/**
+ * What the latest mark of a series replaced, kept while that mark can still be taken back. The
+ * marks it made are those numbered `revision`: one episode's, or a season's or series' at once.
+ * One episode's keeps the shape builds before marks of several at once read and check, iOS and
+ * Android snapshots among them; several at once add `priors`, which those builds ignore.
+ */
 export type MarkUndo = {
   /** The mark it takes back. */
   readonly revision: number;
-  /** The episode's mark before it, or null when it had none. */
+  /** One episode's mark before it, or null when it had none, or when it marked several. */
   readonly prior: StoredMark | null;
+  /** When it marked several: their marks before it. An episode that had none has none here. */
+  readonly priors?: readonly StoredMark[];
   /** Whether the series was out of Continue watching then. */
   readonly hidden: boolean;
 };
@@ -96,7 +109,7 @@ export const noMarks: SeriesMarks = {
 
 /**
  * A series' marks after `event`, saved at `at` as the record's event numbered `sequence`. A mark
- * takes the place of the episode's mark before it, remembers that one for its Undo, and shows the
+ * takes the place of each episode's mark before it, remembers those for its Undo, and shows the
  * series in Continue watching again. Its Undo puts back exactly what it replaced; one that names
  * another mark than the latest changes nothing. What the series lists, read anew, changes no
  * mark and no Undo.
@@ -111,47 +124,111 @@ export function marked(
     return { ...state, versions: event.versions, listing: event.listing };
   }
 
-  const { season, episode } = event.title;
-  const others = state.marks.filter((each) => each.season !== season || each.episode !== episode);
+  if (event.type === "episode-mark-undone") {
+    const { undo } = state;
 
-  if (event.type === "episode-marked") {
-    const mark: StoredMark = {
-      series: event.series,
-      title: event.title,
-      season,
-      episode,
-      watched: event.watched,
-      at,
-      revision: sequence,
-    };
+    if (undo?.revision !== event.revision) return state;
+
+    const priors = undo.priors ?? (undo.prior ? [undo.prior] : []);
 
     return {
       ...state,
-      marks: [...others, mark],
-      versions: event.versions,
-      listing: event.listing,
-      hidden: false,
-      undo: {
-        revision: sequence,
-        prior:
-          state.marks.find((each) => each.season === season && each.episode === episode) ?? null,
-        hidden: state.hidden,
-      },
+      marks: [...state.marks.filter((each) => each.revision !== undo.revision), ...priors],
+      hidden: undo.hidden,
+      undo: null,
       changed: sequence,
     };
   }
 
-  const { undo } = state;
-
-  if (undo?.revision !== event.revision) return state;
+  const titles = event.type === "episode-marked" ? [event.title] : event.titles;
+  const of = (mark: StoredMark) => titles.some((title) => sameEpisode(title, mark));
+  const { watched, series } = event;
 
   return {
     ...state,
-    marks: [...others, ...(undo.prior ? [undo.prior] : [])],
-    hidden: undo.hidden,
-    undo: null,
+    marks: [
+      ...state.marks.filter((each) => !of(each)),
+      ...titles.map((title) => ({
+        series,
+        title,
+        season: title.season,
+        episode: title.episode,
+        watched,
+        at,
+        revision: sequence,
+      })),
+    ],
+    versions: event.versions,
+    listing: event.listing,
+    hidden: false,
+    undo:
+      event.type === "episode-marked"
+        ? { revision: sequence, prior: state.marks.find(of) ?? null, hidden: state.hidden }
+        : { revision: sequence, prior: null, priors: state.marks.filter(of), hidden: state.hidden },
     changed: sequence,
   };
+}
+
+/** Whether two name one episode, by its numbers. */
+function sameEpisode(
+  a: { readonly season: number; readonly episode: number },
+  b: { readonly season: number; readonly episode: number },
+): boolean {
+  return a.season === b.season && a.episode === b.episode;
+}
+
+/**
+ * A movie's mark after `event`, saved at `at` as the record's event numbered `sequence`, or null
+ * once it has none. A mark takes the place of the one before it and remembers it for its Undo;
+ * an Undo that names another mark than the movie's, or comes once it can't, changes nothing.
+ */
+export function filmMarked(
+  mark: StoredFilmMark | null,
+  event: FilmMarkEvent,
+  at: number,
+  sequence: number,
+): StoredFilmMark | null {
+  if (event.type === "movie-marked") {
+    const { title, watched } = event;
+
+    // The mark before, without what it replaced: an Undo takes back the latest mark alone.
+    const prior = mark && {
+      title: mark.title,
+      watched: mark.watched,
+      at: mark.at,
+      revision: mark.revision,
+    };
+
+    return { title, watched, at, revision: sequence, undo: { prior } };
+  }
+
+  if (mark?.revision !== event.revision || !mark.undo) return mark;
+  const { prior } = mark.undo;
+
+  return prior && { ...prior, undo: null };
+}
+
+/**
+ * Whether a movie's mark still says how it stands: no play of the movie began after it. The
+ * row's progress, under it, says nothing while it does.
+ */
+export function stands(
+  mark: Pick<StoredFilmMark, "at">,
+  row: Pick<RawProgress, "since"> | undefined,
+): boolean {
+  return !row || row.since <= mark.at;
+}
+
+/** How a movie stands, as an episode does (`EpisodeState` in ./episodes.ts): by its mark or play. */
+export function filmState(
+  mark: StoredFilmMark | undefined,
+  row: RawProgress | undefined,
+): "watched" | "partial" | "unwatched" {
+  if (mark && stands(mark, row)) return mark.watched ? "watched" : "unwatched";
+
+  if (row?.finished) return "watched";
+
+  return row && row.position > 0 ? "partial" : "unwatched";
 }
 
 /** A series' marks once it left Continue watching at `at`: out of it too, and its marks stay. */

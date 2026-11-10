@@ -1,8 +1,8 @@
 import type { UsageObservers } from "../analytics/observers.ts";
 // The viewing record on disk, in the SQLite database it shares with the watchlist (database.ts):
 // the events in order, the state they add up to per account, one row per movie or episode played,
-// one per episode marked by hand and one per marked series, with the episodes it listed and what
-// its latest mark replaced, the ids of commands already done and a few markers. Every command is
+// one per movie and per episode marked by hand and one per marked series, with the episodes it
+// listed and what its latest mark replaced, the ids of commands already done and a few markers. Every command is
 // one transaction. When the rules change (STATE_VERSION), the state is rebuilt from the events at
 // start. If the database can't open, the record reports failures and the rest of the app carries
 // on.
@@ -30,7 +30,9 @@ import type { UsageObservers } from "../analytics/observers.ts";
 // without `since`, which then read as a play begun when the row was saved, and never look at the
 // tables that hold the marks: a mark is no title row, so none of them takes it for a play. When
 // such a build erases an account it leaves that account's marks, which this one deletes at its
-// next start: none are kept without the events that made them.
+// next start: none are kept without the events that made them. Builds from before films were
+// marked, or several episodes at once, skip those events and never read `marked_movies`; their
+// differing state version rebuilds the marks from the events they know, and this one's again.
 import type { DatabaseSync } from "node:sqlite";
 import { RawTitleRef, titleKey } from "@mrstreamer/contracts/ondemand";
 import { CONTINUE_OFFERED } from "@mrstreamer/contracts/viewing";
@@ -52,6 +54,7 @@ import {
   type ChannelEvent,
   type MarkEvent,
   type StoredChannel,
+  type StoredFilmMark,
   type TitleEvent,
   type ViewingEvent,
   type ViewingState,
@@ -149,10 +152,16 @@ const SCHEMA = `
     at integer not null,
     primary key (account, series)
   );
+  create table if not exists marked_movies (
+    account text not null,
+    movie text not null,
+    mark text not null,
+    primary key (account, movie)
+  );
 `;
 
 /** The tables that hold an account's marks, each with an `account` column: erasing takes both. */
-const MARK_TABLES = ["marked_episodes", "marked_series"] as const;
+const MARK_TABLES = ["marked_episodes", "marked_series", "marked_movies"] as const;
 
 /** How many of an account's most recent titles Continue watching looks at. */
 const CONTINUE_WINDOW = 2000;
@@ -202,11 +211,20 @@ const EpisodeTitle = lazy(() =>
   }),
 );
 
+const MovieTitle = lazy(() => type({ kind: "'movie'", id: "string > 0" }));
+
+const FilmPayload = lazy(() =>
+  type("string.json.parse").pipe(
+    type({ title: MovieTitle(), "watched?": "boolean", "revision?": "number" }),
+  ),
+);
+
 const MarkPayload = lazy(() =>
   type("string.json.parse").pipe(
     type({
       series: "string > 0",
       "title?": EpisodeTitle(),
+      "titles?": EpisodeTitle().array(),
       "watched?": "boolean",
       "versions?": "string[]",
       "listing?": Listing(),
@@ -248,11 +266,27 @@ const SeriesRow = lazy(() =>
     changed: "number",
     undo: type("null").or(
       type("string.json.parse").pipe(
-        type({ revision: "number", prior: Mark().or("null"), hidden: "boolean" }),
+        type({
+          revision: "number",
+          prior: Mark().or("null"),
+          "priors?": Mark().array(),
+          hidden: "boolean",
+        }),
       ),
     ),
   }),
 );
+
+/** A movie's mark as its row keeps it, with the one before while it can be taken back. */
+const FilmMarkRow = lazy(() => {
+  const mark = type({ title: MovieTitle(), watched: "boolean", at: "number", revision: "number" });
+
+  return type({
+    mark: type("string.json.parse").pipe(
+      mark.and({ undo: type("null").or({ prior: mark.or("null") }) }),
+    ),
+  });
+});
 
 const StateRow = lazy(() => type({ favourites: "string", recent: "string", sequence: "number" }));
 
@@ -341,7 +375,7 @@ function prepare(db: DatabaseSync): void {
   // The same confirmed erasure also clears display details written by a newer build.
   const erased = db
     .prepare(
-      "select distinct account from marked_series as kept where not exists (select 1 from events where events.account = kept.account)",
+      "select distinct account from (select account from marked_series union select account from marked_movies) as kept where not exists (select 1 from events where events.account = kept.account)",
     )
     .all();
 
@@ -391,19 +425,39 @@ function eventOf(
     return { ...base, event: { type: channelType, channelId: row.channel_id } };
   }
 
+  if (row.type === "movie-marked" || row.type === "movie-mark-undone") {
+    const said = row.payload ? FilmPayload()(row.payload) : null;
+
+    if (!said || said instanceof type.errors) return null;
+    const { title, watched, revision } = said;
+
+    if (row.type === "movie-marked") {
+      return watched === undefined ? null : { ...base, event: { type: row.type, title, watched } };
+    }
+
+    return revision === undefined ? null : { ...base, event: { type: row.type, title, revision } };
+  }
+
   if (
     row.type === "episode-marked" ||
+    row.type === "episodes-marked" ||
     row.type === "episode-mark-undone" ||
     row.type === "series-listed"
   ) {
     const said = row.payload ? MarkPayload()(row.payload) : null;
 
     if (!said || said instanceof type.errors) return null;
-    const { series, title, watched, versions, listing, revision } = said;
+    const { series, title, titles, watched, versions, listing, revision } = said;
 
     if (row.type === "series-listed") {
       return versions && listing
         ? { ...base, event: { type: row.type, series, versions, listing } }
+        : null;
+    }
+
+    if (row.type === "episodes-marked") {
+      return titles && watched !== undefined && versions && listing
+        ? { ...base, event: { type: row.type, series, titles, watched, versions, listing } }
         : null;
     }
 
@@ -472,17 +526,19 @@ function rebuild(db: DatabaseSync): void {
     }
 
     db.exec(
-      "delete from state; delete from titles; delete from marked_episodes; delete from marked_series;",
+      "delete from state; delete from titles; delete from marked_episodes; delete from marked_series; delete from marked_movies;",
     );
 
     for (const [account, { channelEvents, sequence }] of records) {
       save(db, account, apply(emptyState, channelEvents), sequence);
     }
 
-    for (const [account, { rows, series }] of views) {
+    for (const [account, { rows, series, films }] of views) {
       for (const row of rows.values()) saveTitle(db, account, row);
 
       for (const [key, state] of series) saveSeries(db, account, key, state, "all");
+
+      for (const [id, mark] of films) saveFilm(db, account, id, mark);
     }
 
     db.prepare("insert or replace into meta (key, value) values ('state-version', ?)").run(
@@ -520,6 +576,12 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
     // The marked series that didn't leave Continue watching since, by when each was last marked.
     shown: db.prepare(
       "select series from marked_series where account = ? and hidden = 0 and at > 0 order by at desc limit ?",
+    ),
+    film: db.prepare("select mark from marked_movies where account = ? and movie = ?"),
+    films: db.prepare("select mark from marked_movies where account = ?"),
+    // Every movie's row, and the latest of each series version's episodes.
+    played: db.prepare(
+      "select * from titles where account = ? and (series_id is null or at = (select max(at) from titles as latest where latest.account = titles.account and latest.series_id = titles.series_id))",
     ),
   };
 
@@ -603,6 +665,16 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   const marksOf = (account: string, keys: readonly string[]): SeriesMarks[] =>
     keys.flatMap((key) => seriesOf(account, key) ?? []);
 
+  const filmMarks = (rows: readonly unknown[]): StoredFilmMark[] =>
+    rows.flatMap((raw) => {
+      const row = FilmMarkRow()(raw);
+
+      return row instanceof type.errors ? [] : [row.mark];
+    });
+
+  const filmsOf = (account: string, movieIds: readonly string[]): StoredFilmMark[] =>
+    movieIds.flatMap((id) => filmMarks([statements.film.get(account, id)].filter(Boolean)));
+
   /** The keys of the series of `account` that listed one of these versions when last marked. */
   const seriesIn = (account: string, seriesIds: readonly string[]): string[] =>
     statements.listed.all(account).flatMap((raw) => {
@@ -616,6 +688,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   const look: StoredLook = {
     titles: titlesOf,
     marks: marksOf,
+    films: filmsOf,
     marksIn: (account, seriesIds) =>
       marksOf(account, seriesIn(account, seriesIds)).flatMap(({ marks }) => marks),
   };
@@ -643,6 +716,8 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
         return state ? [[key, state] as const] : [];
       }),
     saveSeries: (key, state, changed) => saveSeries(db, account, key, state, changed),
+    film: (movieId) => filmsOf(account, [movieId])[0] ?? null,
+    saveFilm: (movieId, mark) => saveFilm(db, account, movieId, mark),
   });
 
   /**
@@ -691,10 +766,11 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
   const readOne = (account: string): AccountRecord => {
     const rows = titleRows(statements.recentTitles.all(account, CONTINUE_WINDOW));
+    const films = new Map(filmMarks(statements.films.all(account)).map((m) => [m.title.id, m.at]));
 
     return {
       ...listsOf(account),
-      continueWatching: continueWatching(rows),
+      continueWatching: continueWatching(rows, (id) => films.get(id) ?? null),
       recentTitles: rows
         .filter((row) => !row.hidden && (row.finished || row.position >= STARTED_SECONDS))
         .slice(0, 32)
@@ -749,14 +825,19 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
   /**
    * Appends `events`, each to its account's record and in the order given, and stores the state
-   * each account's add up to. Answers the channel events written, with their sequences.
+   * each account's add up to. Answers the channel events written, with their sequences, and the
+   * sequence of every event, in order.
    */
   const append = (
     commandId: string,
     at: number,
     events: readonly AccountEvent[],
-  ): { account: string; event: ChannelEvent; sequence: number }[] => {
+  ): {
+    channels: { account: string; event: ChannelEvent; sequence: number }[];
+    sequences: number[];
+  } => {
     const written: { account: string; event: ChannelEvent; sequence: number }[] = [];
+    const sequences: number[] = [];
     /** How far each account's record came, by account, in the order first written to. */
     const last = new Map<string, number>();
 
@@ -775,6 +856,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
       const sequence = Number(result.lastInsertRowid);
       last.set(account, sequence);
+      sequences.push(sequence);
 
       if (channel) written.push({ account, event, sequence });
       else project(stored(account), event, at, sequence);
@@ -785,20 +867,25 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       save(db, account, apply(listsOf(account).state, own), sequence);
     }
 
-    return written;
+    return { channels: written, sequences };
   };
 
   /**
    * Runs a write in one transaction, then notes where the channels it wrote stand. Only once it
    * has committed: one rolled back wrote nothing, and leaves what was worked out as it is.
+   * Answers the numbers of every event written, in order.
    */
-  const written = (write: () => ReturnType<typeof append>): void => {
-    for (const { account, event, sequence } of transaction(db, write)) {
+  const written = (write: () => ReturnType<typeof append>): readonly number[] => {
+    const { channels, sequences } = transaction(db, write);
+
+    for (const { account, event, sequence } of channels) {
       const placed = places.get(account);
 
       // An account not worked out yet reads these with the rest of its events.
       if (placed) place(placed, event.type, event.channelId, sequence);
     }
+
+    return sequences;
   };
 
   return {
@@ -806,14 +893,27 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
     titles: (account, filter) => attempt(() => titlesOf(account, filter)),
     marks: (account, keys) => attempt(() => look.marks(account, keys)),
     marksIn: (account, seriesIds) => attempt(() => look.marksIn(account, seriesIds)),
+    films: (account, movieIds) => attempt(() => filmsOf(account, movieIds)),
+    history: (account) =>
+      attempt(() => ({
+        rows: progressOf(statements.played.all(account)),
+        films: filmMarks(statements.films.all(account)),
+        series: statements.listed.all(account).flatMap((raw) => {
+          const key = raw["series"];
+          const state = type.keywords.string.root.allows(key) ? seriesOf(account, key) : null;
+
+          return (state && leading(state)) ?? [];
+        }),
+      })),
     commit: ({ accounts, commandId, at, decide, current }) =>
       attempt(() => {
         let favouriteAdded = false;
         const added = usage?.action("favourite_added");
-        written(() => {
+
+        const sequences = written(() => {
           if (current && !current()) throw new Failed({ error: { kind: "no-subscription" } });
 
-          if (statements.done.get(commandId)) return [];
+          if (statements.done.get(commandId)) return { channels: [], sequences: [] };
           const events = decide(read(accounts), look);
 
           // Thrown, so the transaction ends with nothing written.
@@ -839,13 +939,13 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
         if (favouriteAdded) added?.();
 
-        return read(accounts);
+        return { ...read(accounts), written: sequences };
       }),
     importOnce: ({ account, at, events }) =>
       attempt(() => {
         let imported = false;
         written(() => {
-          if (statements.imported.get()) return [];
+          if (statements.imported.get()) return { channels: [], sequences: [] };
           imported = true;
           statements.markImported.run(String(at));
 
@@ -855,7 +955,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
                 at,
                 events.map((event) => ({ account, event })),
               )
-            : [];
+            : { channels: [], sequences: [] };
         });
 
         return imported;
@@ -904,12 +1004,24 @@ function payloadOf(event: TitleEvent | MarkEvent): string {
         versions: event.versions,
         listing: event.listing,
       });
+    case "episodes-marked":
+      return JSON.stringify({
+        series: event.series,
+        titles: event.titles,
+        watched: event.watched,
+        versions: event.versions,
+        listing: event.listing,
+      });
     case "episode-mark-undone":
       return JSON.stringify({
         series: event.series,
         title: event.title,
         revision: event.revision,
       });
+    case "movie-marked":
+      return JSON.stringify({ title: event.title, watched: event.watched });
+    case "movie-mark-undone":
+      return JSON.stringify({ title: event.title, revision: event.revision });
     case "series-listed":
       return JSON.stringify({
         series: event.series,
@@ -976,6 +1088,26 @@ function saveSeries(
   }
 }
 
+/** Stores a movie's mark in place of the one it kept, or deletes it for null. */
+function saveFilm(
+  db: DatabaseSync,
+  account: string,
+  movieId: string,
+  mark: StoredFilmMark | null,
+): void {
+  if (!mark) {
+    db.prepare("delete from marked_movies where account = ? and movie = ?").run(account, movieId);
+
+    return;
+  }
+
+  db.prepare("insert or replace into marked_movies (account, movie, mark) values (?, ?, ?)").run(
+    account,
+    movieId,
+    JSON.stringify(mark),
+  );
+}
+
 function saveTitle(db: DatabaseSync, account: string, row: TitleRow): void {
   db.prepare(
     "insert or replace into titles (account, key, title, series_id, position, duration, finished, at, hidden, removed_at, since) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1003,6 +1135,8 @@ function closed(detail: string): ViewingStore["Service"] {
     titles: () => fail,
     marks: () => fail,
     marksIn: () => fail,
+    films: () => fail,
+    history: () => fail,
     commit: () => fail,
     importOnce: () => fail,
     erase: () => fail,

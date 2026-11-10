@@ -1,5 +1,5 @@
 // What the viewer keeps per account: favourite channels, the channels watched recently, how far
-// movies and episodes got, and the episodes marked watched or unwatched by hand. The main process
+// movies and episodes got, and the films and episodes marked watched or unwatched by hand. The main process
 // records them as events (see @mrstreamer/core/viewing); the UI reads this state, in which
 // everything names its subscription. It holds every saved subscription's at once: the favourites
 // in the order starred, whichever subscription each is from, and the rest by when it was watched.
@@ -144,3 +144,69 @@ export interface MarkedNext {
    */
   readonly resume: { readonly position: number; readonly duration: number } | null;
 }
+
+/**
+ * A movie, one version of a film, marked watched or unwatched by hand in one subscription. Like an
+ * episode's mark it names no length: how far the file played stays as it was, under the mark, and
+ * a play of the movie begun later replaces it.
+ */
+export interface FilmMark {
+  readonly movie: OwnedId;
+  readonly watched: boolean;
+  /** When it was marked: epoch milliseconds. */
+  readonly at: number;
+  /** Names this mark for Undo. */
+  readonly revision: number;
+}
+
+/**
+ * What one mark command covers, named outright. A film by every version of it the viewer means,
+ * each in its own subscription, as `TitleFilter.movies` names them; a season, or every episode
+ * the series lists, by one version of the series, whose subscription's marks hold for every
+ * version it lists.
+ */
+export type MarkScope =
+  | { readonly kind: "film"; readonly versions: readonly OwnedId[] }
+  | { readonly kind: "season"; readonly series: OwnedId; readonly season: number }
+  | { readonly kind: "series"; readonly series: OwnedId };
+
+/** A mark one command made, which Undo names: a movie's, or a series' episodes' at once. */
+export interface MarkMade {
+  readonly kind: "movie" | "series";
+  /** The movie, or the series version the episodes were marked in. */
+  readonly title: OwnedId;
+  readonly revision: number;
+}
+
+/** What a mark command did, all of it in one save. */
+export interface MarksChanged {
+  /** How many films' and episodes' marks it changed: none when each already stood so. */
+  readonly changed: number;
+  /** What Undo takes back, all at once; empty when it changed nothing. */
+  readonly made: readonly MarkMade[];
+}
+
+/**
+ * A film or series version in the viewing history, by when it was last played or marked. Each
+ * version is its own entry, in its own subscription: entries never share progress between files.
+ */
+export type HistoryEntry =
+  | {
+      readonly kind: "movie";
+      readonly movie: OwnedId;
+      /** How far it got, or null when it was only marked. Under a mark that stands, it says nothing. */
+      readonly progress: TitleProgress | null;
+      /** Its mark while it stands, no play having begun after it, else null. */
+      readonly mark: FilmMark | null;
+      /** When it was last played or marked: epoch milliseconds. */
+      readonly at: number;
+    }
+  | {
+      readonly kind: "series";
+      readonly series: OwnedId;
+      /** The episode of this version played last, or null when it was only marked. */
+      readonly progress: TitleProgress | null;
+      /** The latest mark made in this version, or null. */
+      readonly mark: EpisodeMark | null;
+      readonly at: number;
+    };

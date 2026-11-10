@@ -126,6 +126,43 @@ describe("the viewing record over the in-memory store", () => {
     expect(saved).not.toBeNull();
   });
 
+  it("keeps film and season marks, their Undo and the history across launches", async () => {
+    let saved: ViewingSnapshot | null = null;
+    const first = app(null, (next) => (saved = next));
+    const film = { kind: "movie" as const, subscriptionId: SUB, id: "m1" };
+    await first.run((record) => record.recordProgress("p1", film, 600, 5400, 1));
+
+    const filmMarked = await first.run((record) =>
+      record.markTitles("f1", { kind: "film", versions: [film] }, true),
+    );
+
+    const seasonMarked = await first.run((record) =>
+      record.markTitles("s1", { kind: "season", series, season: 1 }, true),
+    );
+
+    expect([filmMarked.changed, seasonMarked.changed]).toEqual([1, 3]);
+
+    const relaunched = app(saved, (next) => (saved = next));
+    const viewing = await relaunched.run((record) => record.state);
+    expect(viewing.continueWatching).toEqual([]);
+    expect(viewing.marked[0]?.next).toBeNull();
+
+    // Both marked within a moment of each other: which came first isn't what this is about.
+    const history = await relaunched.run((record) => record.history);
+    expect(history.map((entry) => entry.kind).toSorted()).toEqual(["movie", "series"]);
+    expect(history.find((entry) => entry.kind === "movie")?.mark).toMatchObject({ watched: true });
+
+    await relaunched.run((record) =>
+      record.undoMarks("u1", [...filmMarked.made, ...seasonMarked.made]),
+    );
+
+    const undone = app(saved, () => {});
+    expect((await undone.run((record) => record.episodes(series))).marks).toEqual([]);
+    expect(
+      (await undone.run((record) => record.state)).continueWatching.map(({ title }) => title.id),
+    ).toEqual(["m1"]);
+  });
+
   it("erases an account with everything it recorded", async () => {
     const kept: { snapshot: ViewingSnapshot | null } = { snapshot: null };
     const running = app(null, (next) => (kept.snapshot = next));

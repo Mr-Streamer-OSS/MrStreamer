@@ -2,7 +2,8 @@
 // Both are plain functions of their input. They never read the clock, fetch or make ids; the
 // service supplies time and ids, and the store keeps the events and the state they add up to.
 // How far movies and episodes got follows the rules in ./titles.ts, one row per title, and the
-// episodes marked by hand those in ./marks.ts and ./episodes.ts, one row per episode. A state is
+// films and episodes marked by hand those in ./marks.ts and ./episodes.ts, one row per film and
+// episode. A state is
 // one account's, by the provider's own ids: the service says which subscription's. Several
 // accounts' lists read as one name each entry's account beside its id.
 import type { RawTitleRef } from "@mrstreamer/contracts/ondemand";
@@ -11,8 +12,11 @@ import { RECENT_LIMIT, type EpisodeMark } from "@mrstreamer/contracts/viewing";
 /** The version events are written with. Readers skip events from a newer version. */
 export const EVENT_VERSION = 1;
 
-/** Rises when `apply` or the rules in ./titles.ts change, so stored state is rebuilt from the events. */
-export const STATE_VERSION = 1;
+/**
+ * Rises when `apply`, `project` or the rules in ./titles.ts and ./marks.ts change, so stored state
+ * is rebuilt from the events. 2: films marked by hand, and Undo of several episodes' marks at once.
+ */
+export const STATE_VERSION = 2;
 
 /**
  * What happened, by meaning: not which button was pressed. Builds from before movies and series
@@ -59,8 +63,22 @@ export type ViewingEvent =
       readonly listing: SeriesListing;
     }
   /**
-   * The mark of `series` that the event numbered `revision` made was taken back: its episode, and
-   * whether its series shows in Continue watching, are as before it.
+   * The viewer marked some episodes of one series watched or unwatched at once, as a season or the
+   * whole series: each as `episode-marked` would, all under one revision, which one Undo takes
+   * back. `titles` are the episodes whose mark it changed, in the version they were marked in.
+   * Builds from before it skip it, as they skip the Undo of it.
+   */
+  | {
+      readonly type: "episodes-marked";
+      readonly series: string;
+      readonly titles: readonly EpisodeTitle[];
+      readonly watched: boolean;
+      readonly versions: readonly string[];
+      readonly listing: SeriesListing;
+    }
+  /**
+   * The mark of `series` that the event numbered `revision` made was taken back: its episodes, and
+   * whether its series shows in Continue watching, are as before it. `title` is one of them.
    */
   | {
       readonly type: "episode-mark-undone";
@@ -68,6 +86,14 @@ export type ViewingEvent =
       readonly title: EpisodeTitle;
       readonly revision: number;
     }
+  /**
+   * The viewer marked a movie, one version of a film, watched or unwatched by hand. Like an
+   * episode's mark it names no length and leaves how far the file played as it is, under the
+   * mark: a play of the movie begun later replaces it. Builds from before it skip it.
+   */
+  | { readonly type: "movie-marked"; readonly title: MovieTitle; readonly watched: boolean }
+  /** The movie's mark the event numbered `revision` made was taken back: it stands as before. */
+  | { readonly type: "movie-mark-undone"; readonly title: MovieTitle; readonly revision: number }
   /**
    * The version a marked series was last marked in lists other episodes than it did then, or its
    * subscription other versions of it: where the series goes on is worked out from these from
@@ -83,6 +109,9 @@ export type ViewingEvent =
 /** An episode by the provider's own ids. */
 export type EpisodeTitle = Extract<RawTitleRef, { readonly kind: "episode" }>;
 
+/** A movie by the provider's own id. */
+export type MovieTitle = Extract<RawTitleRef, { readonly kind: "movie" }>;
+
 /**
  * The episodes a series version lists, by their numbers: its seasons in the provider's order,
  * specials (season 0) wherever they stand, each with its episodes' numbers in order.
@@ -96,9 +125,28 @@ export type SeriesListing = readonly {
 
 export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>;
 
+/** An episode's mark, several at once, one taken back, or what a marked series lists. */
 export type MarkEvent = Extract<ViewingEvent, { readonly series: string }>;
 
+/** A movie's mark, or one taken back: kept by the movie, beside how far it got. */
+export type FilmMarkEvent = Extract<ViewingEvent, { readonly type: `movie-${string}` }>;
+
 export type TitleEvent = Exclude<ViewingEvent, ChannelEvent | MarkEvent>;
+
+/** A movie's mark as an account's record keeps it. */
+export type StoredFilmMark = {
+  readonly title: MovieTitle;
+  readonly watched: boolean;
+  /** When it was marked: epoch milliseconds. A play of the movie begun later replaces it. */
+  readonly at: number;
+  /** Names this mark for Undo: the number of the event that made it. */
+  readonly revision: number;
+  /**
+   * The movie's mark before it, or null when it had none, while this one can still be taken back:
+   * until the movie is marked again, played or taken out of Continue watching. Null when it can't.
+   */
+  readonly undo: { readonly prior: Omit<StoredFilmMark, "undo"> | null } | null;
+};
 
 /** An episode's mark as an account's record keeps it: with the episode it was made on. */
 export type StoredMark = EpisodeMark & {
@@ -222,6 +270,11 @@ export function reordered(
 /** Whether an event is about how far a movie or episode got, or its place in Continue watching. */
 export function isTitleEvent(event: ViewingEvent): event is TitleEvent {
   return "title" in event && !isMarkEvent(event);
+}
+
+/** Whether an event is a movie's mark or one taken back. */
+export function isFilmMarkEvent(event: ViewingEvent): event is FilmMarkEvent {
+  return event.type === "movie-marked" || event.type === "movie-mark-undone";
 }
 
 /** Whether an event is an episode's mark, one taken back, or what a marked series lists. */

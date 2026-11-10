@@ -4,12 +4,14 @@
 // commits and on a rebuild's memory, and the in-memory store (./memory-store.ts) on plain data, so
 // every store reads as the events committed to it say.
 import { titleKey, type RawTitleRef } from "@mrstreamer/contracts/ondemand";
-import { left, marked, noMarks, type SeriesMarks } from "./marks.ts";
+import { filmMarked, left, marked, noMarks, type SeriesMarks } from "./marks.ts";
 import {
+  isFilmMarkEvent,
   isMarkEvent,
   type ChannelEvent,
   type MarkEvent,
   type StoredChannel,
+  type StoredFilmMark,
   type TitleEvent,
 } from "./record.ts";
 import { accepted, progressed, removalScope, removedKeys, type TitleRow } from "./titles.ts";
@@ -33,6 +35,10 @@ export interface Projected {
   readonly covering: (seriesId: string) => readonly (readonly [key: string, SeriesMarks])[];
   /** Stores what is kept under `key`, with the marks of `changed`. */
   readonly saveSeries: (key: string, state: SeriesMarks, changed: ChangedMarks) => void;
+  /** A movie's mark, by the provider's id. */
+  readonly film: (movieId: string) => StoredFilmMark | null;
+  /** Stores a movie's mark, or deletes it for null. */
+  readonly saveFilm: (movieId: string, mark: StoredFilmMark | null) => void;
 }
 
 /** Which marks of a series a change touched: every one, none, or one episode's. */
@@ -59,23 +65,37 @@ export function project(
   if (isMarkEvent(event)) {
     const state = marked(view.series(event.series), event, at, sequence);
 
-    // A mark and its Undo change one episode's mark, and what a series lists changes none.
-    return view.saveSeries(event.series, state, "title" in event ? event.title : "none");
+    // One episode's mark changes that episode's, what a series lists none, and the rest any.
+    const changed =
+      event.type === "episode-marked"
+        ? event.title
+        : event.type === "series-listed"
+          ? "none"
+          : "all";
+
+    return view.saveSeries(event.series, state, changed);
+  }
+
+  if (isFilmMarkEvent(event)) {
+    const { id } = event.title;
+
+    return view.saveFilm(id, filmMarked(view.film(id), event, at, sequence));
   }
 
   const { title } = event;
   const covering = title.kind === "episode" ? view.covering(title.seriesId) : [];
 
   if (event.type === "title-progress") {
-    const markedAt = latest(
-      covering.flatMap(([, { marks }]) =>
-        marks.flatMap((mark) =>
-          title.kind === "episode" && mark.season === title.season && mark.episode === title.episode
-            ? [mark.at]
-            : [],
-        ),
-      ),
-    );
+    const markedAt =
+      title.kind === "movie"
+        ? (view.film(title.id)?.at ?? null)
+        : latest(
+            covering.flatMap(([, { marks }]) =>
+              marks.flatMap((mark) =>
+                mark.season === title.season && mark.episode === title.episode ? [mark.at] : [],
+              ),
+            ),
+          );
 
     if (!accepted(view.row(titleKey(title)), { since: event.since, at }, markedAt)) return;
     const removedAt = latest([view.removedAt(title), ...covering.map(([, each]) => each.leftAt)]);
@@ -87,6 +107,11 @@ export function project(
   view.remove(title, removedKeys(title, rows), at);
 
   for (const [key, state] of covering) view.saveSeries(key, left(state, at), "none");
+
+  // A movie out of Continue watching can no longer be put back as it stood before its mark.
+  const film = title.kind === "movie" ? view.film(title.id) : null;
+
+  if (film?.undo) view.saveFilm(title.id, { ...film, undo: null });
 }
 
 /**
@@ -150,6 +175,8 @@ export interface Remembered {
   readonly removals: Map<string, number>;
   /** By the key each series' marks are kept under. */
   readonly series: Map<string, SeriesMarks>;
+  /** Each marked movie's mark, by the provider's id. */
+  readonly films: Map<string, StoredFilmMark>;
 }
 
 /**
@@ -159,9 +186,9 @@ export interface Remembered {
  * took out, so one that found no row leaves nothing behind there, and none here.
  */
 export function remembered(
-  held: Remembered = { rows: new Map(), removals: new Map(), series: new Map() },
+  held: Remembered = { rows: new Map(), removals: new Map(), series: new Map(), films: new Map() },
 ): Remembered & { readonly view: Projected } {
-  const { rows, removals, series } = held;
+  const { rows, removals, series, films } = held;
 
   const view: Projected = {
     row: (key) => rows.get(key),
@@ -188,7 +215,14 @@ export function remembered(
     series: (key) => series.get(key) ?? noMarks,
     covering: (seriesId) => [...series].filter(([, each]) => each.versions.includes(seriesId)),
     saveSeries: (key, state) => void series.set(key, state),
+    film: (movieId) => films.get(movieId) ?? null,
+    saveFilm: (movieId, mark) => {
+      // Moved to the end, as rows are, so the marks read in the order they were last written.
+      films.delete(movieId);
+
+      if (mark) films.set(movieId, mark);
+    },
   };
 
-  return { view, rows, removals, series };
+  return { view, rows, removals, series, films };
 }
