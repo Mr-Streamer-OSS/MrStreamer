@@ -501,6 +501,58 @@ it("persists smart rules, refreshes exact admitted membership and preserves manu
   );
 });
 
+it.each([
+  ["an unknown filter value", JSON.stringify({ kind: "movie", filters: { quality: "8k" } })],
+  ["unreadable JSON", '{"kind":"movie"'],
+  ["an unknown filter", JSON.stringify({ kind: "movie", filters: { quality: "4k", cast: ["A"] } })],
+  ["no filters", JSON.stringify({ kind: "movie", filters: {} })],
+  [
+    "a reversed range",
+    JSON.stringify({ kind: "movie", filters: { year: { min: 2020, max: 1990 } } }),
+  ],
+])(
+  "withholds a smart collection whose stored rules hold %s, keeping its bytes and other collections usable",
+  async (_, stored) => {
+    const { open } = fixture();
+    const a = await open();
+    await seed(a.service, a.context);
+    const rules = { kind: "movie" as const, filters: { quality: "4k" as const } };
+    await run(a.service.change(a.context, { kind: "create", id: "smart", name: "Smart", rules }));
+    await run(a.service.change(a.context, { kind: "create", id: "newer", name: "Newer", rules }));
+    a.db.prepare("update collection_rules set rules = ? where collection_id = 'newer'").run(stored);
+
+    const smart = new Map([
+      ["smart", [movie]],
+      ["newer", [movie, other]],
+    ]);
+
+    expect(await run(a.service.list({ ...a.context, smart }))).toEqual([
+      { id: "one", name: "one", total: 3 },
+      { id: "smart", name: "Smart", rules, total: 1 },
+    ]);
+    await run(a.service.change(a.context, { kind: "rename", id: "one", name: "Films" }));
+
+    for (const change of [
+      { kind: "delete", id: "newer" },
+      { kind: "rules", id: "newer", rules },
+      { kind: "member", id: "newer", title: movie, present: true },
+    ] as const)
+      expect(
+        await run(Effect.flip(a.service.change({ ...a.context, catalogue: [movie] }, change))),
+      ).toMatchObject({ error: { kind: "no-list" } });
+
+    await a.close();
+    const b = await open();
+    expect((await run(b.service.list(b.context))).map((list) => list.name)).toEqual([
+      "Films",
+      "Smart",
+    ]);
+    expect(
+      b.db.prepare("select rules from collection_rules where collection_id = 'newer'").get(),
+    ).toEqual({ rules: stored });
+  },
+);
+
 it("re-evaluates saved smart rules through admitted catalogue reads after refresh", async () => {
   const provider = await fakeProvider({ titles: 1 });
   const seed = provider.titles.movies[0]!;

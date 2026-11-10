@@ -170,6 +170,19 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
 
   reconcile();
 
+  // Rules as a write saves them: known keys only, some filter and no reversed range. Evaluation
+  // ignores what this version doesn't know, so stored rules failing this would pick more members.
+  const Rules = SmartCollectionRules()
+    .onDeepUndeclaredKey("reject")
+    .narrow(
+      ({ filters }) =>
+        Object.keys(filters).length > 0 &&
+        [filters.year, filters.runtime, filters.rating].every(
+          (range) => range?.min === undefined || range.max === undefined || range.min <= range.max,
+        ),
+    );
+
+  const StoredRules = type("string.json.parse").pipe(Rules);
   const lists = db.prepare("select id, name from personal_collections order by position, rowid");
 
   const members = db.prepare(
@@ -177,26 +190,30 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
   );
 
   const read = () =>
-    lists.all().map((raw) => {
+    lists.all().flatMap((raw) => {
       const row = Row.assert(raw);
 
       const saved = db
         .prepare("select rules from collection_rules where collection_id = ?")
         .get(row.id);
 
-      const rules = saved
-        ? SmartCollectionRules().assert(JSON.parse(type("string").assert(saved.rules)))
-        : undefined;
+      const rules = saved ? StoredRules(saved.rules) : undefined;
 
-      return {
-        ...row,
-        ...defined({ rules }),
-        members: members.all(row.id).map((raw) => {
-          const member = Member.assert(raw);
+      // Withheld from reads and commands, and kept as stored: read as manual or by the filters
+      // this version knows, it would show more than its rules allow.
+      if (rules instanceof type.errors) return [];
 
-          return { ...member, adult: member.adult !== 0 };
-        }),
-      };
+      return [
+        {
+          ...row,
+          ...defined({ rules }),
+          members: members.all(row.id).map((raw) => {
+            const member = Member.assert(raw);
+
+            return { ...member, adult: member.adult !== 0 };
+          }),
+        },
+      ];
     });
 
   return {
@@ -231,16 +248,9 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
             throw new Error("Smart collection membership is determined by its rules.");
 
           const saveRules = (id: string, rules: SmartCollectionRules) => {
-            const parsed = SmartCollectionRules().assert(rules);
+            const parsed = Rules(rules);
 
-            if (
-              !Object.keys(parsed.filters).length ||
-              [parsed.filters.year, parsed.filters.runtime, parsed.filters.rating].some(
-                (range) =>
-                  range?.min !== undefined && range.max !== undefined && range.min > range.max,
-              )
-            )
-              throw new Error("Invalid smart collection rules.");
+            if (parsed instanceof type.errors) throw new Error("Invalid smart collection rules.");
             db.prepare(
               "insert into collection_rules values (?, ?) on conflict(collection_id) do update set rules = excluded.rules",
             ).run(id, JSON.stringify(parsed));
