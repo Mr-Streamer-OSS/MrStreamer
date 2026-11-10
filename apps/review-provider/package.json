@@ -11,7 +11,7 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261025.1",
+    "@cloudflare/workers-types": "5.20261107.1",
     "@mrstreamer/core": "workspace:*",
     "esbuild": "0.28.2",
     "miniflare": "4.20260730.0"
