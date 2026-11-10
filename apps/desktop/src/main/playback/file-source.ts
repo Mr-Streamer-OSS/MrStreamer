@@ -154,22 +154,44 @@ export function recordingFile(path: string, source: RecordingFile): RecordingFil
     return extent;
   };
 
-  return {
-    read: async (signal) => {
+  let tail = Promise.resolve();
+
+  const read = (signal?: AbortSignal) => {
+    const next = tail.then(async () => {
       signal?.throwIfAborted();
       const extent = await source.read(signal);
       signal?.throwIfAborted();
 
       return verify(extent);
-    },
+    });
+
+    tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    if (!signal) return next;
+
+    return new Promise<RecordingExtent>((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+
+      if (signal.aborted) abort();
+      void next.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+  };
+
+  return {
+    read,
     wait: async (revision, signal) => {
       signal.throwIfAborted();
-      const next = await source.wait(revision, signal);
-      signal.throwIfAborted();
+      await source.wait(revision, signal);
+      // Wait outside the queue, then read current facts: the wake's extent may already be stale.
+      const next = await read(signal);
 
       if (next.revision <= revision) throw new Error("Recording revision did not advance.");
 
-      return verify(next);
+      return next;
     },
   };
 }
@@ -187,7 +209,10 @@ function recordingRequest(
 
     const extent =
       mode === "snapshot"
-        ? await (snapshot ??= source.read(init.signal ?? undefined))
+        ? await (snapshot ??= source.read(init.signal ?? undefined).catch((error) => {
+            snapshot = undefined;
+            throw error;
+          }))
         : await source.read(init.signal ?? undefined);
 
     const asked = new Headers(init.headers).get("range");
@@ -237,8 +262,19 @@ function recordingRequest(
 
         while (position < end) {
           signal.throwIfAborted();
-          // Check even a pinned snapshot, so truncation never becomes a successful short read.
-          await source.read(signal);
+
+          // Verify the pinned extent on disk without joining the media index's scan queue.
+          const found = await stat(path).catch(() => {
+            throw new Error("Recording file cannot be read.");
+          });
+
+          if (
+            !found.isFile() ||
+            found.dev !== current.device ||
+            found.ino !== current.inode ||
+            found.size < current.bytes
+          )
+            throw new Error("Recording file is missing, replaced or truncated.");
           const available = Math.min(current.bytes, end) - position;
 
           if (available > 0) {

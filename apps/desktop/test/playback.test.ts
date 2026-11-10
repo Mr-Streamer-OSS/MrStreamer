@@ -1,5 +1,6 @@
 import {
   fileRequest,
+  recordingFile,
   type RecordingExtent,
   type RecordingFile,
 } from "../src/main/playback/file-source.ts";
@@ -2279,6 +2280,153 @@ describe("growing copy readers", () => {
       clean: () => rm(root, { recursive: true, force: true }),
     };
   }
+
+  it("retries a snapshot after its first request is aborted during the read", async () => {
+    const file = await growing();
+    const entered = Promise.withResolvers<void>();
+    let first = true;
+
+    const request = fileRequest(file.path, "ts", {
+      ...file.source,
+      read: async (signal) => {
+        if (first) {
+          first = false;
+          entered.resolve();
+          await new Promise<void>((_, reject) => {
+            signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+          });
+        }
+
+        return file.source.read(signal);
+      },
+    });
+
+    const abort = new AbortController();
+
+    try {
+      const pending = request("", { signal: abort.signal });
+      const rejected = expect(pending).rejects.toThrow("probe disconnected");
+      await entered.promise;
+      abort.abort(new Error("probe disconnected"));
+      await rejected;
+      expect(await (await request("")).text()).toBe("first");
+    } finally {
+      await file.clean();
+    }
+  });
+
+  it("keeps concurrent recording reads in revision order when an earlier read is delayed", async () => {
+    const file = await growing();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let first = true;
+
+    const source = recordingFile(file.path, {
+      ...file.source,
+      read: async () => {
+        const extent = await file.source.read();
+
+        if (first) {
+          first = false;
+          entered.resolve();
+          await release.promise;
+        }
+
+        return extent;
+      },
+    });
+
+    try {
+      const earlier = source.read();
+
+      // Observe both outcomes immediately so a refused read cannot escape test cleanup.
+      const result = Promise.all([
+        earlier,
+        (async () => {
+          await entered.promise;
+          await appendFile(file.path, "second");
+          file.update({ bytes: 11 });
+          const later = source.read();
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          release.resolve();
+
+          return later;
+        })(),
+      ]);
+
+      await expect(result).resolves.toMatchObject([
+        { revision: 0, bytes: 5 },
+        { revision: 1, bytes: 11 },
+      ]);
+    } finally {
+      release.resolve();
+      await file.clean();
+    }
+  });
+
+  it("cancels a queued recording read without waiting for another reader", async () => {
+    const file = await growing();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+
+    const source = recordingFile(file.path, {
+      ...file.source,
+      read: async () => {
+        entered.resolve();
+        await release.promise;
+
+        return file.source.read();
+      },
+    });
+
+    const first = source.read();
+    await entered.promise;
+    const controller = new AbortController();
+    let refused = false;
+
+    const queued = source.read(controller.signal).catch(() => {
+      refused = true;
+    });
+
+    try {
+      controller.abort();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(refused).toBe(true);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([first, queued]);
+      await file.clean();
+    }
+  });
+
+  it("streams a captured extent without rescanning its source for each disk chunk", async () => {
+    const bytes = Buffer.alloc(512 * 1024, 7);
+    const file = await growing(bytes);
+    let reads = 0;
+
+    const request = fileRequest(
+      file.path,
+      "ts",
+      {
+        ...file.source,
+        read: async (signal) => {
+          reads++;
+
+          return file.source.read(signal);
+        },
+      },
+      "follow",
+    );
+
+    try {
+      const response = await request("", { headers: { range: `bytes=0-${bytes.length - 1}` } });
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+      // Reading already committed bytes must not compete with media indexing per 64 KiB.
+      expect(reads).toBe(1);
+    } finally {
+      await file.clean();
+    }
+  });
 
   it("bounds probes, follows append at temporary EOF and drains at final EOF", async () => {
     const file = await growing();

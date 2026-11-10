@@ -2896,7 +2896,7 @@ function make(deps: RecordingsDeps) {
         const path = fileOf(record);
         let previous: RecordingExtent | undefined;
 
-        const read = async (signal?: AbortSignal): Promise<RecordingExtent> => {
+        const readCurrent = async (signal?: AbortSignal): Promise<RecordingExtent> => {
           signal?.throwIfAborted();
 
           if (filesClosed) throw new Error("Recording owner closed.");
@@ -2908,7 +2908,8 @@ function make(deps: RecordingsDeps) {
           const current = records.get(id);
 
           // A settled writer must not publish its final status with an earlier byte snapshot.
-          if (current !== beforeRecord || active.get(id) !== beforeCapture) return read(signal);
+          if (current !== beforeRecord || active.get(id) !== beforeCapture)
+            return readCurrent(signal);
 
           if (!current || current.status.kind === "missed" || missing.has(id))
             throw new Error("Recording is unavailable.");
@@ -2943,6 +2944,19 @@ function make(deps: RecordingsDeps) {
           previous = { ...facts, revision };
 
           return previous;
+        };
+
+        // Assign revisions in observation order, including reads made by EOF waiters.
+        let tail = Promise.resolve();
+
+        const read = (signal?: AbortSignal) => {
+          const next = tail.then(() => readCurrent(signal));
+          tail = next.then(
+            () => undefined,
+            () => undefined,
+          );
+
+          return next;
         };
 
         const source: RecordingFile = {
