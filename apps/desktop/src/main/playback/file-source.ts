@@ -89,11 +89,13 @@ export interface RecordingExtent extends RecordingCopyState {
 /**
  * An H.264 IDR access unit with its parameter sets, and the program tables just before it: the
  * original bytes from `from` play from this picture on their own. `pts` is the picture's raw
- * 90 kHz transport time, which no wrap has changed.
+ * 90 kHz transport time, which no wrap has changed. `layout` is the program table that PAT
+ * leads to, as it was first read: points under the same table share one.
  */
 export interface RecordingAccess {
   readonly from: number;
   readonly pts: number;
+  readonly layout: Inspection;
 }
 
 /** More access points than a day of one-second groups of pictures is refused, not truncated. */
@@ -296,6 +298,8 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
   let tables: { readonly from: number; ready: boolean } | null = null;
   /** The video PES being examined for an access point. */
   let unit: (RecordingAccess & { data: Buffer; walked: number; sets: number }) | null = null;
+  /** Each program table the recording has had, by signature, as first read. */
+  const known = new Map<string, Inspection>();
   const access: RecordingAccess[] = [];
   let published: readonly RecordingAccess[] = [];
   /** The clock wrapped, or there were too many points: no access point is published again. */
@@ -312,7 +316,7 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
 
     if (verdict) {
       if (access.length >= ACCESS_LIMIT) refused = true;
-      else access.push({ from: unit.from, pts: unit.pts });
+      else access.push({ from: unit.from, pts: unit.pts, layout: unit.layout });
     }
 
     unit = null;
@@ -370,15 +374,24 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           const inspected = inspector.push(packet);
 
           if (inspected) {
-            if (layout && layout.signature !== inspected.signature) uncertain = true;
+            // A new table can carry the program on, as when a provider adds a sound track. Its
+            // clock is another stream when it moves to another PID, so the facts stop there.
+            if (
+              layout &&
+              layout.signature !== inspected.signature &&
+              clockOf(layout) !== clockOf(inspected)
+            )
+              uncertain = true;
             layout = inspected;
+
+            if (!known.has(inspected.signature)) known.set(inspected.signature, inspected);
 
             // The fresh inspector has read this PAT and its program table, both before here.
             if (tables) tables.ready = true;
           }
 
           const video = layout?.layout.video;
-          const selected = video?.pid ?? layout?.layout.audio[0]?.pid;
+          const selected = layout && clockOf(layout);
 
           if (pid !== selected) continue;
           const adaptation = (packet[3]! >> 4) & 3;
@@ -436,7 +449,8 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
           // How ffmpeg places a wrapped clock is not established; points stop there.
           if (unwrapped !== pts) refused = true;
 
-          if (before === null || refused || video?.codec !== "h264" || pid !== video.pid) continue;
+          if (before === null || !layout || refused || video?.codec !== "h264" || pid !== video.pid)
+            continue;
           const flags = pes[7]! >> 6;
 
           // A decoding time other than the picture's own would need reordering facts we lack.
@@ -448,7 +462,14 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
               timestamp(pes, 14) !== pts)
           )
             continue;
-          unit = { from: before, pts, data: Buffer.alloc(0), walked: 9 + pes[8]!, sets: 0 };
+          unit = {
+            from: before,
+            pts,
+            layout: known.get(layout.signature) ?? layout,
+            data: Buffer.alloc(0),
+            walked: 9 + pes[8]!,
+            sets: 0,
+          };
           examine(pes);
         }
 
@@ -509,6 +530,11 @@ function indexRecording(path: string, source: RecordingFile): RecordingFile {
       return indexed(() => source.read(signal), signal);
     },
   };
+}
+
+/** The PID whose timestamps a recording's media facts follow: its picture, else its first sound. */
+function clockOf(inspection: Inspection): number | undefined {
+  return inspection.layout.video?.pid ?? inspection.layout.audio[0]?.pid;
 }
 
 /** A PES header's 33-bit timestamp at `at`: the PTS at 9, the DTS at 14. */

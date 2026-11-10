@@ -119,7 +119,7 @@ import {
 } from "../playback/hls-ts-input.ts";
 import { paced, pacedEpochs } from "../playback/paced.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
-import type { StreamLayout } from "../playback/inspect.ts";
+import type { Inspection, StreamLayout } from "../playback/inspect.ts";
 import { CAPTION_PID, createCaptionCopy } from "../playback/caption-stream.ts";
 import {
   hlsAddresses,
@@ -473,6 +473,8 @@ type TitleOrigin =
       finalRecording?: { readonly revision: number; readonly duration: number | null };
       /** From the session's own probe; null when ffprobe reported no origin. */
       recordingClock?: RecordingClock | null;
+      /** Sound tracks later program tables added, once described (see `recordingTracks`). */
+      recordingTables?: RecordingTables;
     };
 
 interface TitleSessionState extends SessionBase {
@@ -2730,29 +2732,37 @@ function make(deps: PlaybackDeps) {
       // Where a recording's run starts in its file, when it doesn't start at the beginning.
       let landing: RecordingAccess | null = null;
 
+      // A recording's tracks as its program tables have them now, when they are verified.
+      let tracks: RecordingTracks | null = null;
+
       if (session.origin.kind === "copy" && session.origin.recording) {
         await session.origin.refreshRecording?.();
         const extent = await session.origin.recording.read(signal);
         signal.throwIfAborted();
 
-        if (run.start > 0) {
-          // Subtitles on a run from inside a recording are not aligned yet: refused, not dropped.
-          landing =
-            run.subtitle === null && session.probe
-              ? (recordingCoverage(extent, clock, session.probe, copiesVideo(session))?.at(
-                  run.start,
-                ) ?? null)
-              : null;
+        tracks = session.probe
+          ? recordingTracks(
+              extent,
+              clock,
+              session.probe,
+              copiesVideo(session),
+              session.origin.recordingTables,
+            )
+          : null;
 
-          if (!landing) {
-            response.writeHead(416).end();
+        // Without verified tracks, a recording plays only from 0, as a title does.
+        const from = tracks ? tracks.from(run) : run.start > 0 ? null : "file";
 
-            return;
-          }
+        if (from === null) {
+          response.writeHead(416).end();
+
+          return;
         }
+
+        if (from !== "file") landing = from;
       }
 
-      const probe = session.probe;
+      const probe = tracks?.probe ?? session.probe;
 
       if (!probe || !deps.ffmpeg) {
         session.failure = {
@@ -2780,7 +2790,7 @@ function make(deps: PlaybackDeps) {
         run,
         session.decoders,
         { source: lease.source, subtitles: lease.subtitles, start: lease.start },
-        landing && clock ? { pids: clock.pids } : undefined,
+        landing && tracks ? { pids: tracks.pids } : undefined,
       );
 
       const report = (outcome: "ok" | StreamFailure["kind"]) =>
@@ -3721,13 +3731,14 @@ function make(deps: PlaybackDeps) {
     /**
      * Reads what the session's file holds with ffprobe, through the session's source, unless it
      * is known from when the title was open before. What was read is known for the next time
-     * only when the file stayed the same one meanwhile.
+     * only when the file stayed the same one meanwhile. With `file`, it reads that file on disk
+     * instead, from byte `from` on, and keeps nothing.
      */
     async function probeTitle(
       session: TitleSessionState,
-      settledPath?: string,
+      file?: { readonly path: string; readonly from?: number },
     ): Promise<{ readonly probe: TitleProbe; readonly raw: Json | null }> {
-      const known = settledPath ? undefined : probes.get(session.probeKey);
+      const known = file ? undefined : probes.get(session.probeKey);
 
       if (known) return { probe: known, raw: null };
       const ffprobe = deps.ffprobe;
@@ -3756,7 +3767,11 @@ function make(deps: PlaybackDeps) {
       const output = await new Promise<string | null>((resolve) => {
         const child = execFile(
           ffprobe,
-          [...PROBE_ARGUMENTS, settledPath ?? `${base}/source/${session.token}`],
+          [
+            ...PROBE_ARGUMENTS,
+            ...(file?.from ? ["-skip_initial_bytes", String(file.from)] : []),
+            file?.path ?? `${base}/source/${session.token}`,
+          ],
           { timeout: PROBE_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
           (error, stdout) => {
             session.closed.signal.removeEventListener("abort", stop);
@@ -3804,7 +3819,7 @@ function make(deps: PlaybackDeps) {
         });
       }
 
-      if (!settledPath && session.identity.generation === generation) {
+      if (!file && session.identity.generation === generation) {
         probes.set(session.probeKey, probe);
 
         if (probes.size > PROBES_KEPT) probes.delete(probes.keys().next().value ?? "");
@@ -4133,8 +4148,14 @@ function make(deps: PlaybackDeps) {
           ? yield* Effect.tryPromise({ try: (signal) => source.read(signal), catch: failedWith })
           : undefined;
 
-        const coverage = extent
-          ? recordingCoverage(extent, origin.recordingClock, session.probe, copiesVideo(session))
+        const tracks = extent
+          ? recordingTracks(
+              extent,
+              origin.recordingClock,
+              session.probe,
+              copiesVideo(session),
+              origin.recordingTables,
+            )
           : null;
 
         const duration =
@@ -4153,7 +4174,11 @@ function make(deps: PlaybackDeps) {
               status: extent.status,
               final: extent.final,
               duration,
-              seekable: coverage?.seekable ?? extent.seekable,
+              seekable: tracks?.seekable ?? extent.seekable,
+              audioSeekable: tracks?.audioSeekable ?? [],
+              // A run from inside a recording takes no subtitles: what is on screen at its
+              // position is not recovered from the recorded bytes yet (serveTitle).
+              subtitleSeek: false,
               gaps: extent.gaps,
             }
           : undefined;
@@ -4164,8 +4189,8 @@ function make(deps: PlaybackDeps) {
           kind: origin.copyKind,
           ...defined({ owner: session.owner, recording }),
           duration,
-          audio: audioTracks(session.probe.audio),
-          subtitles: subtitleTracks(session.probe.subtitles),
+          audio: audioTracks((tracks?.probe ?? session.probe).audio),
+          subtitles: subtitleTracks((tracks?.probe ?? session.probe).subtitles),
         } satisfies CopyState;
       });
 
@@ -4283,26 +4308,69 @@ function make(deps: PlaybackDeps) {
             };
           let pending: Promise<void> | undefined;
           let layoutChanged = false;
+          const tables: RecordingTables = { added: [], described: new Set() };
+          origin.recordingTables = tables;
 
           origin.refreshRecording = () => {
             if (pending) return pending;
             pending = (async () => {
               const before = await source.read(session.closed.signal);
+
+              const tracks = recordingTracks(
+                before,
+                origin.recordingClock,
+                probe,
+                copiesVideo(session),
+                tables,
+              );
+
+              // A new table is followed only on a clock the index verified across it; once one
+              // isn't, the session's track ids stay refused.
               layoutChanged ||=
                 opened?.layout !== undefined &&
-                before.layout?.signature !== opened.layout.signature;
+                before.layout?.signature !== opened.layout.signature &&
+                !tracks;
 
               if (layoutChanged)
                 throw new Failed({
                   error: { kind: "unexpected", detail: "Recording track layout changed." },
                 });
 
+              const table = tracks?.undescribed;
+
+              // One bounded probe for each new table that names sound tracks the session lacks,
+              // from its first access point; a failure leaves it to the next refresh.
+              if (table) {
+                const { probe: read, raw } = await probeTitle(session, { path, from: table.from });
+                const pids = recordingClock(raw)?.pids;
+
+                // New ids follow every id the session has given.
+                let next = Math.max(
+                  probe.video?.id ?? -1,
+                  ...[...probe.audio, ...probe.subtitles].map((track) => track.id),
+                  ...tables.added.map((sound) => sound.facts.id),
+                );
+
+                for (const sound of table.sounds) {
+                  const facts = read.audio.find((track) => pids?.get(track.id) === sound.pid);
+
+                  if (facts)
+                    tables.added.push({
+                      facts: { ...facts, id: ++next },
+                      pid: sound.pid,
+                      key: sound.key,
+                    });
+                }
+
+                tables.described.add(table.signature);
+              }
+
               if (settled || !before.final) return;
               // Attempt once after settlement. A failed probe never turns a PTS span into duration.
               settled = true;
 
               if (!before.presentation) return;
-              const { probe: finalProbe } = await probeTitle(session, path);
+              const { probe: finalProbe } = await probeTitle(session, { path });
               const after = await source.read(session.closed.signal);
 
               if (
@@ -4997,25 +5065,82 @@ function copiesVideo(session: TitleSessionState): boolean {
   return session.decoders.has("h264") && !session.rejectedCopy;
 }
 
+type SeekRange = { readonly from: number; readonly to: number };
+
+/** A sound track a later program table added to a recording, as its own bounded probe read it. */
+interface AddedSound {
+  /** Its facts, under the id the session gives it. */
+  readonly facts: TitleProbe["audio"][number];
+  readonly pid: number;
+  readonly key: string;
+}
+
+/** What a recording copy's session has learned of program tables after its probe. */
+interface RecordingTables {
+  readonly added: AddedSound[];
+  /** Signatures of the tables whose new sound tracks were looked for. */
+  readonly described: Set<string>;
+}
+
+/** A recording's tracks as its verified program tables have them; see `recordingTracks`. */
+interface RecordingTracks {
+  /** The session's probe with only the tracks listed now: what its runs are planned from. */
+  readonly probe: TitleProbe;
+  /** Transport PIDs of the picture and the listed sound tracks, by id. */
+  readonly pids: ReadonlyMap<number, number>;
+  readonly seekable: readonly SeekRange[];
+  readonly audioSeekable: readonly {
+    readonly id: number;
+    readonly seekable: readonly SeekRange[];
+  }[];
+  /**
+   * Where a run reads from: "file" for the whole file as a title's run reads it, an access
+   * point to read the recording from, or null when the run is refused.
+   */
+  from(run: TitleRun): RecordingAccess | "file" | null;
+  /** The last point's table, when it names sound tracks the session hasn't looked for. */
+  readonly undescribed: {
+    readonly signature: string;
+    /** Its first access point's byte. */
+    readonly from: number;
+    readonly sounds: readonly { readonly pid: number; readonly key: string }[];
+  } | null;
+}
+
+/** A sound track's identity in a program table: its PID, codec, language and purpose. */
+function soundKey(sound: StreamLayout["audio"][number]): string {
+  return JSON.stringify([sound.pid, sound.codec, sound.language, sound.description]);
+}
+
+/** The identities of a table's sound tracks; access points under one table share it. */
+const soundKeys = new WeakMap<Inspection, ReadonlySet<string>>();
+
+function soundsOf(table: Inspection): ReadonlySet<string> {
+  let keys = soundKeys.get(table);
+
+  if (!keys) soundKeys.set(table, (keys = new Set(table.layout.audio.map(soundKey))));
+
+  return keys;
+}
+
 /**
- * Where runs of a recording opened while it records can start: from its first verified access
- * point to the last picture time read, in title seconds, and the point a run from `start` reads
- * from, the last at or before it, as a title's copied picture starts at the keyframe before. It
- * holds after the recording ends too. Null when any fact it needs is unverified: an interrupted
- * recording, no access point, no reported origin, a converted or reordered picture, or a track
- * ffprobe and the recorded tables don't name alike.
+ * The tracks a recording opened while it records lists, and where runs with them can start, in
+ * title seconds: from each access point whose table has the picture and the run's sound track,
+ * as their identity in the tables says, up to the next point that hasn't, or to the last picture
+ * time read. A track an earlier table had and the last point's doesn't is no longer listed, and
+ * runs with it are refused rather than given another PID's sound. Tracks a later table added are
+ * listed once described (`RecordingTables`), and a run from 0 with one starts at its first
+ * point. Null when any fact this needs is unverified: an interrupted recording, no access point,
+ * no reported origin, a converted or reordered picture.
  */
-function recordingCoverage(
+function recordingTracks(
   extent: RecordingExtent,
   clock: RecordingClock | null | undefined,
   probe: TitleProbe,
   copied: boolean,
-): {
-  readonly seekable: readonly { readonly from: number; readonly to: number }[];
-  at(start: number): RecordingAccess | null;
-} | null {
+  tables: RecordingTables | undefined,
+): RecordingTracks | null {
   const access = extent.access;
-  const layout = extent.layout?.layout;
   const video = probe.video;
 
   if (
@@ -5023,38 +5148,152 @@ function recordingCoverage(
     !access?.[0] ||
     !extent.presentation ||
     !clock ||
-    !layout?.video ||
     video?.codec !== "h264" ||
     video.reordered ||
-    !copied ||
-    clock.pids.get(video.id) !== layout.video.pid
+    !copied
   )
     return null;
-  const sounds = new Set(layout.audio.map((track) => track.pid));
+  const picture = clock.pids.get(video.id);
+  const time = (pts: number) => pts / 90_000 - clock.origin;
+  const end = extent.presentation.to - clock.origin;
+  const first = access[0];
+  const last = access.at(-1)!;
 
-  if (!probe.audio.every((track) => sounds.has(clock.pids.get(track.id) ?? -1))) return null;
-  const from = access[0].pts / 90_000 - clock.origin;
-  const to = extent.presentation.to - clock.origin;
+  if (picture === undefined || time(first.pts) < 0 || end < time(first.pts)) return null;
 
-  if (from < 0 || to < from) return null;
+  const has = (table: Inspection, key: string) => soundsOf(table).has(key);
+
+  const shows = (point: RecordingAccess) =>
+    point.layout.layout.video?.pid === picture && point.layout.layout.video.codec === "h264";
+
+  // The probe's tracks, as the first table that names each PID has it. A run of the whole file
+  // finds one at its probe id only when the file's first table has it.
+  const probed = probe.audio.map((facts) => {
+    const pid = clock.pids.get(facts.id);
+    const named = access.find((point) => point.layout.layout.audio.some((s) => s.pid === pid));
+    const sound = named?.layout.layout.audio.find((s) => s.pid === pid);
+    const key = sound ? soundKey(sound) : null;
+
+    return { facts, pid, key, file: key === null || has(first.layout, key) };
+  });
+
+  const sounds = [...probed, ...(tables?.added ?? []).map((added) => ({ ...added, file: false }))];
+
+  // A track no table names stays as the probe found it, from 0 only.
+  const listed = sounds.filter((sound) => sound.key === null || has(last.layout, sound.key));
+
+  const rangesOf = (valid: (point: RecordingAccess) => boolean) => {
+    const ranges: SeekRange[] = [];
+    let open: number | null = null;
+
+    for (const point of access) {
+      if (valid(point)) open ??= time(point.pts);
+      else if (open !== null) {
+        // Up to the tick before the point a run there would start from.
+        ranges.push({ from: open, to: time(point.pts - 1) });
+        open = null;
+      }
+    }
+
+    if (open !== null) ranges.push({ from: open, to: end });
+
+    return ranges;
+  };
+
+  const validFor = (key: string | null) => (point: RecordingAccess) =>
+    shows(point) && key !== null && has(point.layout, key);
+
+  const ranges = listed.map((sound) => ({
+    id: sound.facts.id,
+    seekable: rangesOf(validFor(sound.key)),
+  }));
+
+  const seekable =
+    ranges.length === 0
+      ? rangesOf(shows)
+      : ranges.map((each) => each.seekable).reduce((common, next) => overlap(common, next));
+
+  const subtitles = probe.subtitles.filter((track) => {
+    const pid = clock.pids.get(track.id);
+    const named = access.some((point) => point.layout.layout.subtitles.some((s) => s.pid === pid));
+
+    // PID-level: a subtitle a table named and the last point's table doesn't is gone.
+    return !named || last.layout.layout.subtitles.some((s) => s.pid === pid);
+  });
+
+  const known = new Set(sounds.map((sound) => sound.key));
+  const missing = last.layout.layout.audio.filter((sound) => !known.has(soundKey(sound)));
 
   return {
-    seekable: [{ from, to }],
-    at: (start) => {
-      if (start < from || start > to) return null;
-      const time = clock.origin + start;
+    probe: { ...probe, audio: listed.map((sound) => sound.facts), subtitles },
+    pids: new Map([
+      [video.id, picture],
+      ...listed.flatMap((sound) =>
+        sound.pid === undefined ? [] : [[sound.facts.id, sound.pid] as const],
+      ),
+    ]),
+    seekable,
+    audioSeekable: ranges.filter((each) => !sameRanges(each.seekable, seekable)),
+    undescribed:
+      missing.length > 0 && !tables?.described.has(last.layout.signature)
+        ? {
+            signature: last.layout.signature,
+            from: access.find((point) => point.layout === last.layout)!.from,
+            sounds: missing.map((sound) => ({ pid: sound.pid, key: soundKey(sound) })),
+          }
+        : null,
+    from: (run) => {
+      // As `titlePlan` picks a run's sound track.
+      const sound = listed.find((each) => each.facts.id === run.audio) ?? listed[0] ?? null;
+
+      if (run.audio !== null && sound?.facts.id !== run.audio) return null;
+
+      if (run.subtitle !== null && !subtitles.some((track) => track.id === run.subtitle))
+        return null;
+
+      if (run.start === 0 && (sound === null || sound.file)) return "file";
+
+      // A run from inside a recording takes no subtitles: refused, not dropped.
+      if (run.subtitle !== null) return null;
+      const valid = sound ? validFor(sound.key) : shows;
+
+      if (run.start === 0) return access.find(valid) ?? null;
+
+      if (!rangesOf(valid).some((range) => run.start >= range.from && run.start <= range.to))
+        return null;
+      const at = clock.origin + run.start;
       let landing: RecordingAccess | null = null;
 
       for (const point of access) {
         // Title seconds count from the same reported origin as x-start, so a position at a
         // point's own title time is that point; the margin covers only float rounding.
-        if (point.pts / 90_000 <= time + 1e-9 && (!landing || point.pts > landing.pts))
+        if (point.pts / 90_000 <= at + 1e-9 && (!landing || point.pts > landing.pts))
           landing = point;
       }
 
+      // Within a range, the point before is one the range starts from or carries on.
       return landing;
     },
   };
+}
+
+/** Where two sorted lists of ranges both hold. */
+function overlap(one: readonly SeekRange[], other: readonly SeekRange[]): SeekRange[] {
+  return one.flatMap((a) =>
+    other.flatMap((b) => {
+      const from = Math.max(a.from, b.from);
+      const to = Math.min(a.to, b.to);
+
+      return from <= to ? [{ from, to }] : [];
+    }),
+  );
+}
+
+function sameRanges(one: readonly SeekRange[], other: readonly SeekRange[]): boolean {
+  return (
+    one.length === other.length &&
+    one.every((range, index) => range.from === other[index]?.from && range.to === other[index].to)
+  );
 }
 
 /** Writes the session's recording from byte `from` on to `input`, until it ends or `signal`. */

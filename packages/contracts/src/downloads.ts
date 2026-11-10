@@ -140,6 +140,24 @@ export interface RecordingCopyState {
   readonly gaps: readonly RecordingGap[];
 }
 
+/**
+ * A recording's facts as one open session plays it. `seekable` is where a run without a subtitle
+ * may start other than at 0, in title seconds, with any of the session's sound tracks.
+ */
+export interface RecordingSessionState extends RecordingCopyState {
+  /**
+   * Where a run with one sound track may start instead, by `AudioTrack.id`, for each track whose
+   * range differs from `seekable`: one the recorded program added or dropped on the way. A run
+   * from 0 with a track added on the way starts where its range does.
+   */
+  readonly audioSeekable: readonly {
+    readonly id: number;
+    readonly seekable: readonly { readonly from: number; readonly to: number }[];
+  }[];
+  /** Whether those ranges hold with a subtitle chosen too; when not, a run with one starts at 0. */
+  readonly subtitleSeek: boolean;
+}
+
 /** State of one exact open copy session; authorization must use its captured owner and kind/id. */
 export type CopyState = Pick<
   CopySession,
@@ -148,7 +166,7 @@ export type CopyState = Pick<
 
 /** What plays a downloaded copy: like a title session, of a file on this computer. */
 export interface CopySession {
-  readonly recording?: RecordingCopyState;
+  readonly recording?: RecordingSessionState;
   /** Captured when the copy was opened; old clients may omit it. */
   readonly owner?: ActiveProfile;
   readonly sessionId: string;
