@@ -25,6 +25,7 @@ import { CollectionsPage } from "../../src/renderer/src/features/collections/Col
 import { TitleCollections } from "../../src/renderer/src/features/collections/TitleCollections.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
+import { collectionQueries } from "../../src/renderer/src/features/collections/collections.ts";
 import {
   CollectionMembership,
   CollectionNav,
@@ -389,9 +390,10 @@ function mainCollections(
   let kept = initial.map((each, index) => ({ id: `c${index}`, ...each }));
   const find = (id: string) => kept.find((each) => each.id === id);
 
-  ipc.answer("collections.list", () =>
-    kept.map(({ id, name, members }) => ({ id, name, total: members.length })),
-  );
+  const summaries = () =>
+    kept.map(({ id, name, members }) => ({ id, name, total: members.length }));
+
+  ipc.answer("collections.list", summaries);
   ipc.answer("collections.page", ({ id, offset, limit }) => {
     const members = find(id)?.members ?? [];
 
@@ -420,7 +422,7 @@ function mainCollections(
     return null;
   });
 
-  return { find };
+  return { find, summaries };
 }
 
 // happy-dom lays nothing out, and the grid draws only the rows that fit: it gets a height.
@@ -749,7 +751,11 @@ describe("a title's collections menu in its details", () => {
   it.each(["create", "member"] as const)(
     "suspends a retained title after an actual refetch error and retries its %s with fresh facts",
     async (operation) => {
-      mainCollections([{ name: "Private films", members: [] }], [{ ...film, id: "4k" }]);
+      const main = mainCollections(
+        [{ name: "Private films", members: [] }],
+        [{ ...film, id: "4k" }],
+      );
+
       const lists = ipc.hold("collections.list");
       const memberships = ipc.hold("collections.memberships");
       const client = await details();
@@ -760,21 +766,34 @@ describe("a title's collections menu in its details", () => {
         close();
       };
 
-      // Text also matches the loading placeholder; both reads must admit the real trigger.
+      // The loading placeholder shares the trigger's text; only the admitted trigger is labelled.
+      const admitted = () =>
+        document.querySelector<HTMLButtonElement>("[aria-label='Collections for Night Harbour']");
+
       await vi.waitFor(() => expect(button("Add to collection")).toBeTruthy());
       expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
+      expect(admitted()).toBeNull();
       await act(async () => button("Add to collection").click());
       expect(() => button("New collection")).toThrow();
-      await act(async () => lists.resolve([{ id: "c0", name: "Private films", total: 0 }]));
-      expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
-      await act(async () => memberships.resolve([]));
+      await act(async () => lists.resolve(main.summaries()));
       await vi.waitFor(() =>
-        expect(
-          document.querySelector("[aria-label='Collections for Night Harbour']"),
-        ).not.toBeNull(),
+        expect(client.getQueryData(collectionQueries.list().queryKey)).toEqual(main.summaries()),
       );
-      expect(button("Add to collection").hasAttribute("disabled")).toBe(false);
-      await act(async () => button("Add to collection").click());
+      // React Query hands stored data to its views on a zero-delay timer; let that render land.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(button("Add to collection").hasAttribute("disabled")).toBe(true);
+      expect(admitted()).toBeNull();
+      await act(async () => memberships.resolve([]));
+
+      // Both reads admit the enabled trigger.
+      const trigger = await vi.waitFor(() => {
+        const found = admitted();
+        expect(found?.disabled).toBe(false);
+
+        return found!;
+      });
+
+      await act(async () => trigger.click());
       const held = ipc.hold("collections.change");
 
       if (operation === "create") {
@@ -1969,16 +1988,16 @@ describe("a smart collection in the Collections tab", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(field()));
     await type("Friday films", "End");
     // Browser pointer focus transfers only if mouse-down was not prevented by the button.
-    const retry = button("Save rules");
+    const save = button("Save rules");
     await act(async () => {
       const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
-      retry.dispatchEvent(down);
+      save.dispatchEvent(down);
 
-      if (!down.defaultPrevented) retry.focus();
+      if (!down.defaultPrevented) save.focus();
     });
     expect(document.querySelector("h1")?.textContent).toBe("Friday films");
     const saving = ipc.hold("collections.change");
-    await act(async () => retry.click());
+    await act(async () => save.click());
     expect(options().disabled).toBe(true);
     expect(button("Discard").hasAttribute("disabled")).toBe(true);
     expect(ipc.argsOf("collections.change")).toEqual([first, { ...first, name: "Friday films" }]);
