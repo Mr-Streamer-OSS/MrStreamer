@@ -1583,6 +1583,48 @@ export const nl: Translation = {
     "Een gemiste opname heeft geen kopie om te beschermen.",
   "The recordings to delete changed. Preview again.":
     "De te verwijderen opnamen zijn veranderd. Bekijk het voorbeeld opnieuw.",
+  // Recording protection and retention on the Recordings page.
+  Protected: "Beschermd",
+  Protect: "Beschermen",
+  "Take protection off": "Bescherming opheffen",
+  "It's protected": "Hij is beschermd",
+  Retention: "Bewaartermijn",
+  "Retention for {title}": "Bewaartermijn voor {title}",
+  "Until I delete them": "Tot ik ze verwijder",
+  "By count": "Op aantal",
+  "By age, in days": "Op leeftijd, in dagen",
+  "{min} to {max}": "{min} tot {max}",
+  "Recordings to keep": "Aantal opnames om te bewaren",
+  "Days to keep": "Aantal dagen om te bewaren",
+  "Include those recorded before now": "Ook opnames van eerder meenemen",
+  "Deletes nothing now.": "Verwijdert nu niets.",
+  "Keeps for now": "Blijft voorlopig",
+  "Opened to play since Mr. Streamer started":
+    "Geopend om af te spelen sinds Mr. Streamer is gestart",
+  "Its end isn't saved yet": "Het einde is nog niet bewaard",
+  "Turn on": "Aanzetten",
+  "Turn off": "Uitzetten",
+  "Retention couldn't delete it. It tries again within a minute.":
+    "De bewaartermijn kon hem niet verwijderen. Binnen een minuut wordt het opnieuw geprobeerd.",
+  "Recordings stay until you delete them or their rule's retention does. Partial ones play, skipping what was missed.":
+    "Opnames blijven tot je ze verwijdert of de bewaartermijn van hun regel dat doet. Gedeeltelijke opnames worden afgespeeld en slaan de gemiste delen over.",
+  "keeps the last {count}": {
+    one: "bewaart alleen de laatste",
+    other: "bewaart de laatste {count}",
+  },
+  "keeps {count} days": { one: "bewaart {count} dag", other: "bewaart {count} dagen" },
+  "Deletes {count} now, {size}": {
+    one: "Verwijdert er nu {count}, {size}",
+    other: "Verwijdert er nu {count}, {size}",
+  },
+  "Delete {count} and turn on": {
+    one: "{count} verwijderen en aanzetten",
+    other: "{count} verwijderen en aanzetten",
+  },
+  "Delete {count} and save": {
+    one: "{count} verwijderen en opslaan",
+    other: "{count} verwijderen en opslaan",
+  },
   "It is still recording.": "De opname loopt nog.",
   Recordings: "Opnames",
   Recording: "Opname loopt",

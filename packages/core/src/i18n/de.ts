@@ -1598,6 +1598,45 @@ export const de: Translation = {
     "Eine verpasste Aufnahme hat keine Kopie, die geschützt werden kann.",
   "The recordings to delete changed. Preview again.":
     "Die zu löschenden Aufnahmen haben sich geändert. Sieh dir die Vorschau erneut an.",
+  // Recording protection and retention on the Recordings page.
+  Protected: "Geschützt",
+  Protect: "Schützen",
+  "Take protection off": "Schutz aufheben",
+  "It's protected": "Sie ist geschützt",
+  Retention: "Aufbewahrung",
+  "Retention for {title}": "Aufbewahrung für {title}",
+  "Until I delete them": "Bis ich sie lösche",
+  "By count": "Nach Anzahl",
+  "By age, in days": "Nach Alter, in Tagen",
+  "{min} to {max}": "{min} bis {max}",
+  "Recordings to keep": "Anzahl zu behaltender Aufnahmen",
+  "Days to keep": "Anzahl zu behaltender Tage",
+  "Include those recorded before now": "Auch bisherige Aufnahmen einbeziehen",
+  "Deletes nothing now.": "Löscht jetzt nichts.",
+  "Keeps for now": "Bleibt vorerst",
+  "Opened to play since Mr. Streamer started":
+    "Seit dem Start von Mr. Streamer zum Abspielen geöffnet",
+  "Its end isn't saved yet": "Ihr Ende ist noch nicht gespeichert",
+  "Turn on": "Einschalten",
+  "Turn off": "Ausschalten",
+  "Retention couldn't delete it. It tries again within a minute.":
+    "Die Aufbewahrung konnte sie nicht löschen. Innerhalb einer Minute wird es erneut versucht.",
+  "Recordings stay until you delete them or their rule's retention does. Partial ones play, skipping what was missed.":
+    "Aufnahmen bleiben, bis du sie löschst oder die Aufbewahrung ihrer Regel es tut. Unvollständige spielen ab und überspringen, was fehlt.",
+  "keeps the last {count}": { one: "behält nur die letzte", other: "behält die letzten {count}" },
+  "keeps {count} days": { one: "behält {count} Tag", other: "behält {count} Tage" },
+  "Deletes {count} now, {size}": {
+    one: "Löscht jetzt {count}, {size}",
+    other: "Löscht jetzt {count}, {size}",
+  },
+  "Delete {count} and turn on": {
+    one: "{count} löschen und einschalten",
+    other: "{count} löschen und einschalten",
+  },
+  "Delete {count} and save": {
+    one: "{count} löschen und speichern",
+    other: "{count} löschen und speichern",
+  },
   "It is still recording.": "Die Aufnahme läuft noch.",
   Recordings: "Aufnahmen",
   Recording: "Aufnahme läuft",
