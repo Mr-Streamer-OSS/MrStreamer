@@ -2879,6 +2879,102 @@ function make(deps: RecordingsDeps) {
         }),
       );
 
+    /**
+     * A recording's own file as it is written: committed extent, status and gaps, indexed for its
+     * program and media time. Fails when it is unknown or missed.
+     */
+    const recordingSource = (id: string) =>
+      Effect.gen(function* () {
+        yield* usable;
+        const record = records.get(id);
+
+        if (!record || record.status.kind === "missed")
+          return yield* new Failed({
+            error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
+          });
+        const path = fileOf(record);
+        let previous: RecordingExtent | undefined;
+
+        const read = async (signal?: AbortSignal): Promise<RecordingExtent> => {
+          signal?.throwIfAborted();
+
+          if (filesClosed) throw new Error("Recording owner closed.");
+          const beforeRecord = records.get(id);
+          const beforeCapture = active.get(id);
+          const committed = beforeCapture?.bytes() ?? beforeRecord?.bytes;
+          const found = await stat(path);
+          signal?.throwIfAborted();
+          const current = records.get(id);
+
+          // A settled writer must not publish its final status with an earlier byte snapshot.
+          if (current !== beforeRecord || active.get(id) !== beforeCapture) return read(signal);
+
+          if (!current || current.status.kind === "missed" || missing.has(id))
+            throw new Error("Recording is unavailable.");
+          const capture = active.get(id);
+          const bytes = committed ?? current.bytes;
+
+          if (!found.isFile() || found.size < bytes)
+            throw new Error("Recording file is missing, replaced or truncated.");
+
+          const status =
+            isLive(current) && !capture
+              ? { kind: "paused" as const, why: openGap(current)?.why ?? ("away" as const) }
+              : current.status;
+
+          const facts = {
+            bytes,
+            mediaRevision: current.gaps?.length ?? 0,
+            device: found.dev,
+            inode: found.ino,
+            status,
+            final: !isLive(current) && !capture,
+            duration: null,
+            seekable: [],
+            gaps: current.gaps ?? [],
+          };
+
+          const revision =
+            previous && isDeepStrictEqual({ ...previous, revision: 0 }, { ...facts, revision: 0 })
+              ? previous.revision
+              : (previous?.revision ?? -1) + 1;
+
+          previous = { ...facts, revision };
+
+          return previous;
+        };
+
+        const source: RecordingFile = {
+          read,
+          wait: async (revision, signal) => {
+            for (;;) {
+              signal.throwIfAborted();
+              // Subscribe before reading: an append during stat cannot fall between check and wait.
+              const change = Promise.withResolvers<void>();
+              const wake = () => change.resolve();
+              const abort = () => change.resolve();
+              fileListeners.add(wake);
+              signal.addEventListener("abort", abort, { once: true });
+
+              try {
+                const next = await read(signal);
+
+                if (next.revision > revision) return next;
+                await change.promise;
+              } finally {
+                fileListeners.delete(wake);
+                signal.removeEventListener("abort", abort);
+              }
+            }
+          },
+        };
+
+        const file = recordingFile(path, source, true);
+        yield* Effect.tryPromise({ try: (signal) => file.read(signal), catch: failedWith });
+
+        return file;
+      });
+
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
       connections: (
@@ -3059,108 +3155,13 @@ function make(deps: RecordingsDeps) {
           // Room it took may let a paused one go on.
           yield* retryPaused;
         }),
-      file: (id: string) =>
-        Effect.gen(function* () {
-          yield* usable;
-          const record = records.get(id);
-
-          if (!record || record.status.kind === "missed")
-            return yield* new Failed({
-              error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
-            });
-          const path = fileOf(record);
-          let previous: RecordingExtent | undefined;
-
-          const read = async (signal?: AbortSignal): Promise<RecordingExtent> => {
-            signal?.throwIfAborted();
-
-            if (filesClosed) throw new Error("Recording owner closed.");
-            const beforeRecord = records.get(id);
-            const beforeCapture = active.get(id);
-            const committed = beforeCapture?.bytes() ?? beforeRecord?.bytes;
-            const found = await stat(path);
-            signal?.throwIfAborted();
-            const current = records.get(id);
-
-            // A settled writer must not publish its final status with an earlier byte snapshot.
-            if (current !== beforeRecord || active.get(id) !== beforeCapture) return read(signal);
-
-            if (!current || current.status.kind === "missed" || missing.has(id))
-              throw new Error("Recording is unavailable.");
-            const capture = active.get(id);
-            const bytes = committed ?? current.bytes;
-
-            if (!found.isFile() || found.size < bytes)
-              throw new Error("Recording file is missing, replaced or truncated.");
-
-            const status =
-              isLive(current) && !capture
-                ? { kind: "paused" as const, why: openGap(current)?.why ?? ("away" as const) }
-                : current.status;
-
-            const facts = {
-              bytes,
-              mediaRevision: current.gaps?.length ?? 0,
-              device: found.dev,
-              inode: found.ino,
-              status,
-              final: !isLive(current) && !capture,
-              duration: null,
-              seekable: [],
-              gaps: current.gaps ?? [],
-            };
-
-            const revision =
-              previous && isDeepStrictEqual({ ...previous, revision: 0 }, { ...facts, revision: 0 })
-                ? previous.revision
-                : (previous?.revision ?? -1) + 1;
-
-            previous = { ...facts, revision };
-
-            return previous;
-          };
-
-          const source: RecordingFile = {
-            read,
-            wait: async (revision, signal) => {
-              for (;;) {
-                signal.throwIfAborted();
-                // Subscribe before reading: an append during stat cannot fall between check and wait.
-                const change = Promise.withResolvers<void>();
-                const wake = () => change.resolve();
-                const abort = () => change.resolve();
-                fileListeners.add(wake);
-                signal.addEventListener("abort", abort, { once: true });
-
-                try {
-                  const next = await read(signal);
-
-                  if (next.revision > revision) return next;
-                  await change.promise;
-                } finally {
-                  fileListeners.delete(wake);
-                  signal.removeEventListener("abort", abort);
-                }
-              }
-            },
-          };
-
-          const file = recordingFile(path, source, true);
-          yield* Effect.tryPromise({ try: (signal) => file.read(signal), catch: failedWith });
-
-          return file;
-        }),
+      file: recordingSource,
       copy: (id: string, captured?: ActiveProfile) =>
         Effect.gen(function* () {
           const owner = captured ? personal.of(captured) : yield* personal.admit;
           const record = records.get(id);
 
           if (!record || record.status.kind === "missed") return null;
-
-          if (isLive(record))
-            return yield* new Failed({
-              error: { kind: "unexpected", detail: t("It is still recording.") },
-            });
 
           // Its file may have gone since the list was read: the list says so at once.
           const there = yield* Effect.promise(() =>
@@ -3182,6 +3183,19 @@ function make(deps: RecordingsDeps) {
           }
 
           if (missing.delete(id)) yield* publish;
+          // One still recording plays as it grows, once its own index has read its program.
+          const growing = isLive(record) ? yield* recordingSource(id) : undefined;
+
+          if (
+            growing &&
+            !(yield* Effect.tryPromise({
+              try: (signal) => growing.read(signal),
+              catch: failedWith,
+            })).layout
+          )
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: t("It is still recording.") },
+            });
 
           return {
             id,
@@ -3191,6 +3205,7 @@ function make(deps: RecordingsDeps) {
             container: "ts",
             title: { kind: "movie", id },
             progress: yield* owner.read("recording", id, record.progress ?? null),
+            ...(growing && { recording: growing }),
           } satisfies LocalCopy;
         }),
       resume: (captured?: ActiveProfile) =>

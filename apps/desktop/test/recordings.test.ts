@@ -2271,8 +2271,10 @@ describe.skipIf(!hasTools)("recordings", () => {
       const captured = await profiles.switch(created.id);
       await recordings.recordProgress(id, 11, 90, captured);
       await profiles.switch(original.id);
-      await expect(recordings.copy(id, captured)).rejects.toMatchObject({
-        error: { detail: "It is still recording." },
+      // Its copy, admitted while it records, carries the captured viewer's own progress.
+      expect((await recordings.copy(id, captured))?.progress).toEqual({
+        position: 11,
+        duration: 90,
       });
       const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
 
@@ -2760,7 +2762,6 @@ describe.skipIf(!hasTools)("recordings", () => {
         progress: { position: 0, duration: 90, at: expect.any(Number) },
       },
     ]);
-    await expect(recordings.copy(id)).rejects.toMatchObject({ error: { kind: "unexpected" } });
     await roster.remove(subscriptionId, true);
     await runtime.dispose();
     const restarted = runtimeFor(mainLayer(config));
@@ -5810,7 +5811,8 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
 
     if (started.kind !== "started") return;
     const id = started.recording.id;
-    await expect(recordings.copy(id)).rejects.toBeTruthy();
+    // Its program is read, so its copy plays while it records.
+    expect(await recordings.copy(id)).toMatchObject({ id, kind: "recording" });
     const source = await recordings.file(id);
     const first = await source.read();
     expect(first).toMatchObject({
@@ -6289,6 +6291,55 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
       );
     } finally {
       await response.body?.cancel().catch(() => {});
+      await playback.closeCopy(id, "recording");
+      await recordings.stop(id);
+    }
+
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("admits an active recording's copy once its program is read, and plays it from a nonzero position", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+
+    const { recordings, channel, playback, provider } = await connected({
+      streams: (_source, out) => {
+        out.write(bytes);
+      },
+    });
+
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
+    if (started.kind !== "started") throw new Error("Recording did not start");
+    const id = started.recording.id;
+    const source = await recordings.file(id);
+    const signal = AbortSignal.timeout(5000);
+
+    await until(
+      () => source.read(signal),
+      (current) => current.bytes === bytes.length,
+      5000,
+    );
+
+    const copy = await recordings.copy(id);
+    expect(copy).toMatchObject({ id, kind: "recording" });
+    const session = await playback.openCopy(copy!, ["h264", "aac"]);
+
+    try {
+      expect((await playback.copyState(session.sessionId))?.recording).toMatchObject({
+        final: false,
+        seekable: [{}],
+      });
+
+      const response = await fetch(session.url + "?start=1.1", {
+        signal: AbortSignal.timeout(4000),
+      });
+
+      try {
+        expect(response.status).toBe(200);
+      } finally {
+        await response.body?.cancel().catch(() => {});
+      }
+    } finally {
       await playback.closeCopy(id, "recording");
       await recordings.stop(id);
     }

@@ -2422,7 +2422,8 @@ it("keeps metadata absent without a key for both adult and kids viewers", async 
   });
 });
 
-async function namespaceRecording() {
+/** One recording of the subtitles fixture; `stop: false` leaves it recording. */
+async function namespaceRecording({ stop = true }: { readonly stop?: boolean } = {}) {
   const f = await fixture({ live: true, copyPlayback: true });
 
   const channel = f.provider.catalogue.channels.find(
@@ -2441,10 +2442,65 @@ async function namespaceRecording() {
     expect(recording?.bytes).toBeGreaterThan(0);
     id = recording!.id;
   });
-  expect(await f.call(f.adult, "recordings.stop", { id })).toMatchObject({ ok: true });
+
+  if (stop) expect(await f.call(f.adult, "recordings.stop", { id })).toMatchObject({ ok: true });
 
   return { ...f, id };
 }
+
+it("namespace opens an active recording's copy only under its exact approval, for the admitted owner", async () => {
+  const f = await namespaceRecording({ stop: false });
+
+  try {
+    await f.app.runPromise(
+      f.sessions.setPolicy({
+        current: f.adult,
+        newPin: "1234",
+        profiles: [{ id: f.kid.id, approved: [{ kind: "download", id: f.id }] }],
+      }),
+    );
+    const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+    expect(
+      await f.call(kid, "playback.openCopy", { copy: f.id, decoders: ["h264", "aac"] }),
+    ).toMatchObject({
+      ok: false,
+      error: { detail: "Kids policy: this content or action is not approved." },
+    });
+    const adult = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+    await f.app.runPromise(
+      f.sessions.setPolicy({
+        current: adult,
+        pin: "1234",
+        profiles: [{ id: kid.id, approved: [{ kind: "recording", id: f.id }] }],
+      }),
+    );
+    const again = await f.app.runPromise(f.sessions.switch(kid.id, adult));
+
+    const opened = await f.call(again, "playback.openCopy", {
+      copy: f.id,
+      decoders: ["h264", "aac"],
+    });
+
+    const { sessionId } = type({ sessionId: "string" }).assert(opened.ok ? opened.value : null);
+    expect(await f.call(again, "playback.copyState", { sessionId })).toMatchObject({
+      ok: true,
+      value: {
+        sessionId,
+        kind: "recording",
+        copy: f.id,
+        owner: again,
+        recording: { final: false },
+      },
+    });
+    const back = await f.app.runPromise(f.sessions.switch(f.adult.id, again, "1234"));
+    expect(await f.call(back, "playback.copyState", { sessionId })).toEqual({
+      ok: true,
+      value: null,
+    });
+  } finally {
+    await f.app.runPromise(f.recordings.stop(f.id));
+  }
+});
 
 it("namespace resume binds the admitted owner and filters exact local recording approval after provider removal", async () => {
   const f = await namespaceRecording();
