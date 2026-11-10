@@ -2220,12 +2220,12 @@ describe("growing copy readers", () => {
     const root = await tempDir();
     const path = join(root, "capture.ts");
     await writeFile(path, bytes);
-    const found = await stat(path);
+    const found = await stat(path, { bigint: true });
 
     let extent: RecordingExtent = {
       revision: 0,
-      device: found.dev,
-      inode: found.ino,
+      device: found.dev.toString(),
+      inode: found.ino.toString(),
       bytes: bytes.length,
       status: { kind: "recording" },
       final: false,
@@ -2591,8 +2591,9 @@ describe("growing copy readers", () => {
 
         expect(changed.length - beforeWrites).toBeLessThanOrEqual(1);
         await expect.poll(() => changed.length, { timeout: 2000 }).toBe(beforeWrites + 1);
+        const waitsBeforeClose = file.waits;
         file.update({});
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await expect.poll(() => file.waits).toBeGreaterThan(waitsBeforeClose);
         await local.closeCopy("kept-recording");
         await file.cancelled;
         expect((await file.source.read()).final).toBe(false);

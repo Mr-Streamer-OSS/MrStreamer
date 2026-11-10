@@ -70,8 +70,8 @@ export function fileRequest(
 /** Main-only facts about one file incarnation; bytes are a committed, half-open extent. */
 export interface RecordingExtent extends RecordingCopyState {
   readonly bytes: number;
-  readonly device: number;
-  readonly inode: number;
+  readonly device: string;
+  readonly inode: string;
   /** Local program/track facts, never copied into public recording state. */
   readonly layout?: Inspection;
   /** Recorder interruption history; wall-clock gaps do not describe media intervals. */
@@ -127,14 +127,14 @@ export function recordingFile(path: string, source: RecordingFile): RecordingFil
   let previous: RecordingExtent | undefined;
 
   const verify = async (extent: RecordingExtent) => {
-    const found = await stat(path).catch(() => {
+    const found = await stat(path, { bigint: true }).catch(() => {
       throw new Error("Recording file cannot be read.");
     });
 
     if (
       !found.isFile() ||
-      found.dev !== extent.device ||
-      found.ino !== extent.inode ||
+      found.dev.toString() !== extent.device ||
+      found.ino.toString() !== extent.inode ||
       !Number.isSafeInteger(extent.bytes) ||
       extent.bytes < 0 ||
       found.size < extent.bytes ||
@@ -253,9 +253,9 @@ function recordingRequest(
       const file = await open(path, "r");
 
       try {
-        const found = await file.stat();
+        const found = await file.stat({ bigint: true });
 
-        if (found.dev !== extent.device || found.ino !== extent.inode)
+        if (found.dev.toString() !== extent.device || found.ino.toString() !== extent.inode)
           throw new Error("Recording file was replaced.");
         let current = extent;
         let position = start;
@@ -264,14 +264,14 @@ function recordingRequest(
           signal.throwIfAborted();
 
           // Verify the pinned extent on disk without joining the media index's scan queue.
-          const found = await stat(path).catch(() => {
+          const found = await stat(path, { bigint: true }).catch(() => {
             throw new Error("Recording file cannot be read.");
           });
 
           if (
             !found.isFile() ||
-            found.dev !== current.device ||
-            found.ino !== current.inode ||
+            found.dev.toString() !== current.device ||
+            found.ino.toString() !== current.inode ||
             found.size < current.bytes
           )
             throw new Error("Recording file is missing, replaced or truncated.");
@@ -381,9 +381,13 @@ export function indexRecording(path: string, source: RecordingFile): RecordingFi
     const file = await open(path, "r");
 
     try {
-      const found = await file.stat();
+      const found = await file.stat({ bigint: true });
 
-      if (found.dev !== extent.device || found.ino !== extent.inode || found.size < extent.bytes)
+      if (
+        found.dev.toString() !== extent.device ||
+        found.ino.toString() !== extent.inode ||
+        found.size < extent.bytes
+      )
         throw new Error("Recording file is missing, replaced or truncated.");
 
       while (position < extent.bytes) {

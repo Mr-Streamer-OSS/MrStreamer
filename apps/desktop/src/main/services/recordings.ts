@@ -439,6 +439,7 @@ function make(deps: RecordingsDeps) {
         );
 
     const records = new Map<string, StoredRecording>();
+    const recordingFiles = new Map<string, RecordingFile>();
     /**
      * New recordings still starting, written to recordings.json from before they capture, so a
      * crash meanwhile leaves one that goes on when the app runs again. Nothing else here sees them
@@ -564,6 +565,7 @@ function make(deps: RecordingsDeps) {
 
         if (failed) {
           records.delete(record.id);
+          recordingFiles.delete(record.id);
           failedFolders.set(record.id, folderOf(record));
 
           return;
@@ -634,6 +636,7 @@ function make(deps: RecordingsDeps) {
      */
     const forgetStart = (record: StoredRecording) => {
       records.delete(record.id);
+      recordingFiles.delete(record.id);
       failedFolders.set(record.id, folderOf(record));
       unsaved.recordings = true;
     };
@@ -803,6 +806,7 @@ function make(deps: RecordingsDeps) {
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         filesClosed = true;
+        recordingFiles.clear();
         notifyFiles();
       }),
     );
@@ -2891,6 +2895,14 @@ function make(deps: RecordingsDeps) {
           return yield* new Failed({
             error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
           });
+        const cached = recordingFiles.get(id);
+
+        if (cached) {
+          yield* Effect.tryPromise({ try: (signal) => cached.read(signal), catch: failedWith });
+
+          return cached;
+        }
+
         const path = fileOf(record);
         let previous: RecordingExtent | undefined;
 
@@ -2901,7 +2913,7 @@ function make(deps: RecordingsDeps) {
           const beforeRecord = records.get(id);
           const beforeCapture = active.get(id);
           const committed = beforeCapture?.bytes() ?? beforeRecord?.bytes;
-          const found = await stat(path);
+          const found = await stat(path, { bigint: true });
           signal?.throwIfAborted();
           const current = records.get(id);
 
@@ -2925,8 +2937,8 @@ function make(deps: RecordingsDeps) {
           const facts = {
             bytes,
             mediaRevision: current.gaps?.length ?? 0,
-            device: found.dev,
-            inode: found.ino,
+            device: found.dev.toString(),
+            inode: found.ino.toString(),
             status,
             final: !isLive(current) && !capture,
             duration: null,
@@ -2982,6 +2994,7 @@ function make(deps: RecordingsDeps) {
         };
 
         const file = indexRecording(path, recordingFile(path, source));
+        recordingFiles.set(id, file);
         yield* Effect.tryPromise({ try: (signal) => file.read(signal), catch: failedWith });
 
         return file;
@@ -3150,6 +3163,7 @@ function make(deps: RecordingsDeps) {
               }),
           });
           records.delete(id);
+          recordingFiles.delete(id);
           const written = yield* Effect.result(save);
 
           if (written._tag === "Failure") {

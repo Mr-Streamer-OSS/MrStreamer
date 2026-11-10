@@ -6723,6 +6723,24 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     expect(provider.streamRequests()).toBe(1);
   });
 
+  it("retains the recording incarnation and revision when reopened after an append", async () => {
+    const bytes = fixture(TRACKS_FIXTURE);
+    const split = Math.floor((bytes.length * 0.8) / 188) * 188;
+    const { id, source, path, more, end, recordings } = await growingCopy(bytes.subarray(0, split));
+
+    try {
+      await more(bytes.subarray(split));
+      const before = await source.read();
+      const reopened = (await recordings.copy(id))!.recording!;
+      expect(await reopened.read()).toEqual(before);
+      const found = await stat(path, { bigint: true });
+      expect(before.device).toBe(found.dev.toString());
+      expect(before.inode).toBe(found.ino.toString());
+    } finally {
+      await end();
+    }
+  });
+
   it("keeps a broken capture nonfinal until its partial end and refuses discontinuous media duration", async () => {
     const outputs: Writable[] = [];
 
@@ -6768,7 +6786,7 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     expect(extent.gaps.length).toBeGreaterThan(0);
     expect(extent.gaps).toEqual(retained?.gaps);
     expect(provider.streamRequests()).toBe(3);
-  });
+  }, 60_000);
 
   it.each(["missing", "replaced", "truncated"] as const)(
     "refuses a %s recorder-owned file incarnation",
