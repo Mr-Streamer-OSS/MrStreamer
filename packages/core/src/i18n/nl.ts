@@ -1928,4 +1928,21 @@ export const nl: Translation = {
   "{channel} didn't play. {fallback} from {subscription} plays instead.":
     "{channel} speelde niet af. {fallback} van {subscription} speelt in plaats daarvan.",
   "{count} fallback channels": { one: "{count} reservezender", other: "{count} reservezenders" },
+  Follow: "Volgen",
+  Following: "Volgend",
+  "New episodes": "Nieuwe afleveringen",
+  "Mark seen": "Als gezien markeren",
+  "Couldn't follow.": "Volgen mislukt.",
+  "Couldn't stop following.": "Niet meer volgen mislukt.",
+  "Couldn't mark seen.": "Als gezien markeren mislukt.",
+  "Couldn't read whether you follow this series.": "Kon niet lezen of je deze serie volgt.",
+  "Couldn't check for new episodes. The next refresh tries again.":
+    "Nieuwe afleveringen konden niet worden gecontroleerd. De volgende vernieuwing probeert het opnieuw.",
+  "New episodes couldn't be read.": "Nieuwe afleveringen konden niet worden gelezen.",
+  "Mark new episodes of {name} seen": "Nieuwe afleveringen van {name} als gezien markeren",
+  "Stop following {name}": "{name} niet meer volgen",
+  "{count} new episodes": {
+    one: "{count} nieuwe aflevering",
+    other: "{count} nieuwe afleveringen",
+  },
 };

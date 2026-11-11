@@ -48,13 +48,14 @@ import { useFit } from "../../lib/use-fit.ts";
 import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
-import { call } from "../../lib/ipc.ts";
+import { call, profileOwner } from "../../lib/ipc.ts";
 import { homeRows, type HomeRowId } from "./rows.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 import { listTitle, useHomeDiscovery, useListChannels, useShowList } from "../live/lists.ts";
 import { PAGE } from "../titles/CollectionGrid.tsx";
 import { openCollection } from "../titles/TitlesPage.tsx";
 import { HomeTitle } from "./HomeTitle.tsx";
+import { NewEpisodeAlert, NewEpisodesError, useNewEpisodes } from "./NewEpisodes.tsx";
 import {
   isLive,
   outcome,
@@ -160,6 +161,8 @@ export function HomeScreen({ active }: { active: boolean }) {
     enabled: onDemand && needs("watchlist"),
   }).data;
 
+  // Followed series with news lead the title rows, while any series lists are there to follow.
+  const alerts = useNewEpisodes(onDemand && visible);
   const continuing = useContinueWatching(undefined, allowed("continue"));
   const recordingPlaces = useRecordingResume(allowed("continue"));
   const recordingList = useRecordings().data;
@@ -529,6 +532,22 @@ export function HomeScreen({ active }: { active: boolean }) {
         )
       )}
       <div ref={grid} className="space-y-7 px-10 pt-2 pb-16">
+        {alerts.isError ? (
+          <NewEpisodesError error={alerts.error} retry={() => void alerts.refetch()} />
+        ) : (
+          !!alerts.data?.length && (
+            <div data-home-row="new-episodes">
+              <Section title={t("New episodes")} tileRem={POSTER_REM} compact={compact(3)}>
+                {alerts.data.map((follow) => (
+                  <NewEpisodeAlert
+                    key={JSON.stringify([profileOwner(), ownedKey(follow.series)])}
+                    follow={follow}
+                  />
+                ))}
+              </Section>
+            </div>
+          )
+        )}
         {displayed.map((row) => (
           <div key={row.id} data-home-row={row.id}>
             {content[row.id]}

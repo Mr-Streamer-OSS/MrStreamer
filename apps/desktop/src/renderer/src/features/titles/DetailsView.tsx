@@ -4,7 +4,8 @@
 // at once, without asking. Save puts the movie or the whole series on the watchlist and takes it
 // off again; it goes by the title in the lists, so it works before the details arrive. Beside it,
 // the collections menu puts the version that plays in the viewer's collections and takes it out
-// (see features/collections/TitleCollections.tsx). A title
+// (see features/collections/TitleCollections.tsx). A series' Follow keeps the viewer told of
+// the episodes later refreshes list for that version, here and on Home (FollowSeries.tsx). A title
 // with several versions plays the one picked with the arrow beside Play, else the one it was
 // opened on, as from the 4K tab, else the one that suits best; the sheet shows that version, so a
 // series lists its episodes. The versions can be of several subscriptions: the menu then names
@@ -82,6 +83,7 @@ import { SeriesDownload } from "../downloads/SeriesDownload.tsx";
 import { transferred, useDownloadOf } from "../../lib/downloads.ts";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 import { TitleCollections } from "../collections/TitleCollections.tsx";
+import { FollowSeries } from "./FollowSeries.tsx";
 import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
 import { RelatedTitles } from "./RelatedTitles.tsx";
 import { VersionMenu } from "./VersionMenu.tsx";
@@ -570,6 +572,10 @@ function SeriesActions({
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
 
+  const follow = (
+    <FollowSeries title={versions.title} pending={versions.pending} version={versions.playing} />
+  );
+
   const download = (
     <SeriesDownload
       key={ownedKey(versions.playing)}
@@ -594,6 +600,7 @@ function SeriesActions({
             pending={versions.pending}
             version={versions.playing}
           />
+          {follow}
         </div>
         <SaveError state={saving} />
         {error && (
@@ -622,6 +629,7 @@ function SeriesActions({
             pending={versions.pending}
             version={versions.playing}
           />
+          {follow}
         </div>
         <SaveError state={saving} />
         <p className="mt-6 text-[0.9375rem] text-muted-foreground">{t("No episodes yet.")}</p>
@@ -653,6 +661,7 @@ function SeriesActions({
       onRemove={listed ? () => removal.mutate(details.title) : null}
       removeError={removal.error}
       download={download}
+      follow={follow}
     />
   );
 }
@@ -668,6 +677,7 @@ function Actions({
   onRemove,
   removeError,
   download,
+  follow,
 }: {
   versions: Versions;
   /** Another version's details are on their way: nothing plays until they're here. */
@@ -683,6 +693,8 @@ function Actions({
   removeError: Error | null;
   /** The selected movie or series download action, beside Play and Watchlist. */
   download?: ReactNode;
+  /** A series' Follow, after Save and the collections menu. */
+  follow?: ReactNode;
 }) {
   const { title, playing, automatic } = versions;
   const all = title?.versions ?? [];
@@ -732,6 +744,7 @@ function Actions({
         {download}
         <SaveButton state={saving} />
         <TitleCollections title={title} pending={versions.pending} version={playing} />
+        {follow}
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>
             {t("Remove from Continue watching")}
