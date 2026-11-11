@@ -117,6 +117,7 @@ import type { UpdateStatus } from "./updates.ts";
 import type { EpisodeMark, SeriesViewing, TitleProgress, Viewing } from "./viewing.ts";
 import type { CustomList } from "./custom-lists.ts";
 import { WATCHLIST_SORTS, type WatchlistPage } from "./watchlist.ts";
+import type { SeriesFollow } from "./ondemand.ts";
 
 /** Publication metadata is never stored in Preferences or shared with the iOS file schema. */
 export interface PreferenceSnapshot {
@@ -687,6 +688,14 @@ export const ipcInputs = {
   "watchlist.save": () => type({ kind: titleKind(), version: owned() }),
   /** A saved entry by its own id, as `WatchlistEntry` names it. */
   "watchlist.remove": () => type({ entry: owned() }),
+  /** Whether the viewer follows this exact series version. */
+  "follows.state": () => type({ series: owned() }),
+  /** Follows or stops following this exact series version. */
+  "follows.set": () => type({ series: owned(), following: "boolean" }),
+  /** Marks what is new of this followed series version seen. */
+  "follows.seen": () => type({ series: owned() }),
+  /** Followed series with new episodes, for Home. */
+  "follows.alerts": none,
   "collections.list": none,
   "collections.page": () =>
     type({ id: listId(), offset: "number.integer >= 0", limit: "0 < number.integer <= 200" }),
@@ -1116,6 +1125,20 @@ export interface IpcOutputs {
    * any more. One already gone changes nothing.
    */
   "watchlist.remove": null;
+  /** The follow of this exact version, or null when the viewer doesn't follow it. */
+  "follows.state": SeriesFollow | null;
+  /**
+   * Following stores what the provider lists of its episodes now, so only later ones are new;
+   * reading them fails, storing nothing, when the provider can't be asked. Answers the follow,
+   * or null once stopped. Fails with `title-not-found` when the lists don't have the version.
+   */
+  "follows.set": SeriesFollow | null;
+  "follows.seen": null;
+  /**
+   * Followed series with new episodes, the latest news first. Leaves out titles for adults and
+   * versions a kids profile isn't approved for. Asks the provider nothing.
+   */
+  "follows.alerts": readonly SeriesFollow[];
   /** The viewer's collections, in their order, each with how many members the viewer may see. */
   "collections.list": readonly CollectionSummary[];
   "collections.page": PersonalCollectionPage;
@@ -1276,6 +1299,8 @@ export interface IpcEvents {
   "watchlist.changed": null;
   /** This owner's collections or their members changed. Carries no names, titles or counts. */
   "collections.changed": { readonly owner: ActiveProfile };
+  /** This owner's followed series or their new episodes changed. Carries no titles or counts. */
+  "follows.changed": { readonly owner: ActiveProfile };
   /** A channel list was made, renamed, moved or deleted, or its channels changed. */
   "customLists.changed": null;
   /** The update moved on, for example a download's progress. */

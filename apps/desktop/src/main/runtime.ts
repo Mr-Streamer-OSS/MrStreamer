@@ -39,6 +39,7 @@ import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { xmltvFetch } from "./providers/xmltv.ts";
 import { CustomLists } from "./services/custom-lists.ts";
 import { Collections } from "./services/collections.ts";
+import { SeriesFollows } from "./services/series-follows.ts";
 import { Downloads, type DownloadsDeps } from "./services/downloads.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
@@ -108,6 +109,7 @@ export type MainServices =
   | Watchlist
   | CustomLists
   | Collections
+  | SeriesFollows
   | Licences
   | DetailCache
   | VerifiedFiles
@@ -293,8 +295,8 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     ),
   );
 
-  // One connection for viewing, saved titles, channel lists, verified tracks and downloaded
-  // subtitle cues.
+  // One connection for viewing, saved titles, channel lists, followed series, verified tracks and
+  // downloaded subtitle cues.
   const stores = personalStoresLayer({
     dataDir,
     profileId: DEFAULT_PROFILE_ID,
@@ -344,6 +346,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const customLists = CustomLists.layer.pipe(Layer.provide(stores));
   const collections = Collections.layer.pipe(Layer.provide(stores), Layer.provide(services));
+  const follows = SeriesFollows.layer.pipe(Layer.provide(stores), Layer.provide(services));
 
   // Downloads and recordings keep resume positions under the active profile.
   const sessions = ProfileSessions.layer({
@@ -352,7 +355,16 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     ...defined({ usage: config.usage }),
   }).pipe(
     Layer.provide(
-      Layer.mergeAll(database, viewingPorts, stores, viewing, watchlist, customLists, collections),
+      Layer.mergeAll(
+        database,
+        viewingPorts,
+        stores,
+        viewing,
+        watchlist,
+        customLists,
+        collections,
+        follows,
+      ),
     ),
     Layer.provide(services),
   );
@@ -392,6 +404,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         watchlist,
         customLists,
         collections,
+        follows,
         output,
         onlineSubtitles,
         downloads,

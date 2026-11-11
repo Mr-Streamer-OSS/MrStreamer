@@ -91,6 +91,7 @@ import {
   SUBTITLE_RESULTS_TABLE,
 } from "./saved-subtitles.ts";
 import { WATCHLIST_TABLES } from "./watchlist-store.ts";
+import { prepareSeriesFollows, SERIES_FOLLOW_TABLES } from "./series-follows-store.ts";
 import { CUSTOM_LIST_MEMBERS_TABLE, prepareCustomLists } from "./custom-lists-store.ts";
 import { lazy } from "@mrstreamer/contracts/lazy";
 
@@ -320,6 +321,7 @@ function prepare(db: DatabaseSync): void {
   prepareSavedSubtitles(db);
   // With the events its anchors are among: the channels of an account an older build erased go.
   prepareCustomLists(db);
+  prepareSeriesFollows(db);
   // Records from before movies and series lack the payload column, and later ones the time a
   // title left Continue watching. Checked and added under the write lock, since two copies of the
   // app can start at once.
@@ -861,8 +863,8 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
         return imported;
       }),
     // The events go too, so no rebuild, here or in an older build, brings anything back, and so
-    // does what the account saved to its watchlist and put in the viewer's channel lists, which
-    // the same file keeps. The account's key and titles don't linger in the file either.
+    // does what the account saved to its watchlist, the series it follows and what it put in the
+    // viewer's channel lists, which the same file keeps. The account's key and titles don't linger in the file either.
     erase: (account) =>
       attempt(() => {
         places.delete(account);
@@ -874,6 +876,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
             "titles",
             ...MARK_TABLES,
             ...WATCHLIST_TABLES,
+            ...SERIES_FOLLOW_TABLES,
             CUSTOM_LIST_MEMBERS_TABLE,
             VERIFIED_FILES_TABLE,
             DETAIL_CACHE_TABLE,

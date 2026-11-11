@@ -573,6 +573,20 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
       online(input.kind, input.version) ? handlers["watchlist.saved"](input, frame) : denied(),
     "watchlist.save": (input, frame) =>
       online(input.kind, input.version) ? handlers["watchlist.save"](input, frame) : denied(),
+    "follows.state": (input, frame) =>
+      online("series", input.series) ? handlers["follows.state"](input, frame) : denied(),
+    "follows.set": (input, frame) =>
+      online("series", input.series) ? handlers["follows.set"](input, frame) : denied(),
+    "follows.seen": (input, frame) =>
+      online("series", input.series) ? handlers["follows.seen"](input, frame) : denied(),
+    "follows.alerts": (input, frame) =>
+      Effect.map(handlers["follows.alerts"](input, frame), (alerts) =>
+        alerts.flatMap((follow) => {
+          const allowed = follow.title && title(follow.title);
+
+          return allowed ? [{ ...follow, title: allowed }] : [];
+        }),
+      ),
     "viewing.get": (input, frame) => Effect.map(handlers["viewing.get"](input, frame), viewing),
     "viewing.setFavourite": (input, frame) =>
       online("channel", input.channel)
