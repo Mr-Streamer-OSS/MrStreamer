@@ -113,8 +113,8 @@ export interface Recording {
    */
   readonly protected?: true;
   /**
-   * Its rule's retention couldn't delete it, as while its file is held open or its disk refuses:
-   * it still takes its room, and the next check tries again.
+   * Retention could not finish deleting it, including saving the inventory after its folder went.
+   * Files still present take their room; the next check retries completion, also after restart.
    */
   readonly retentionFailed?: true;
 }

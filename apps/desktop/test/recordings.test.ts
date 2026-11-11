@@ -21,6 +21,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import * as fs from "node:fs/promises";
 import type { Writable } from "node:stream";
 import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
 import { DEFAULT_SUBTITLE_TIMING } from "@mrstreamer/contracts/online-subtitles";
@@ -65,6 +66,10 @@ import {
   testConfig,
   testSecrets,
 } from "./support.ts";
+
+vi.mock("node:fs/promises", async (original) => ({
+  ...(await original<typeof import("node:fs/promises")>()),
+}));
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
@@ -6007,7 +6012,12 @@ describe.runIf(hasTools)("recorder-owned file checkpoint", () => {
     expect(activeSession.audio).toHaveLength(2);
     const appended = source.wait(first.revision, AbortSignal.timeout(5000));
     (await output.promise).write(bytes.subarray(split));
-    const next = await appended;
+    // One HTTP write can produce several committed file checkpoints.
+    let next = await appended;
+
+    while (next.bytes < bytes.length)
+      next = await source.wait(next.revision, AbortSignal.timeout(5000));
+
     expect(next.bytes).toBe(bytes.length);
     expect(next.duration).toBeGreaterThan(first.duration!);
     expect((await playback.copyState(activeSession.sessionId))?.recording?.duration).toBe(
@@ -6974,7 +6984,7 @@ describe("recording protection and retention", () => {
     expect(await second.recordings.retain(RULE, null)).not.toHaveProperty("retention");
   });
 
-  it("keeps protected and played recordings, checked again just before each deletion", async () => {
+  it("keeps protected recordings and copies opened after preview", async () => {
     const { dataDir, ids, listed } = await seeded(5, { protect: [0] });
     const first = await app(dataDir);
     onTestFinished(first.quit);
@@ -7027,6 +7037,225 @@ describe("recording protection and retention", () => {
         )
       ).map((each) => each.id),
     ).not.toContain(ids[2]);
+  });
+
+  it("waits for destructive work before Stop following answers and rechecks playback at the final claim", async () => {
+    const { dataDir, root, ids } = await seeded(4);
+    const { recordings, quit } = await app(dataDir);
+    const count = { kind: "count", count: 1 } as const;
+    const preview = await recordings.previewRetention(RULE, count, true);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const original = fs.rm;
+
+    const adapter = vi.spyOn(fs, "rm").mockImplementation(async (path, options) => {
+      if (path === join(root, ids[0]!)) {
+        entered.resolve();
+        await release.promise;
+      }
+
+      if (ids.some((id) => path === join(root, id))) events.push("delete");
+
+      return original(path, options);
+    });
+
+    onTestFinished(async () => {
+      release.resolve();
+      await saving.catch(() => {});
+      await quit();
+      adapter.mockRestore();
+    });
+    const saving = recordings.retain(RULE, count, true, preview.remove);
+    await entered.promise;
+    await expect(recordings.copy(ids[0]!)).rejects.toMatchObject({
+      error: { detail: "This recording is no longer there." },
+    });
+    // This copy was already selected for deletion, but has not reached its final claim.
+    expect(await recordings.copy(ids[1]!)).not.toBeNull();
+    const cancelling = recordings.cancelRule(RULE).then(() => events.push("cancel"));
+    // A public read lets cancellation run up to its contested permit.
+    await recordings.rules();
+    release.resolve();
+    await Promise.all([saving, cancelling]);
+    expect(events).toEqual(["delete", "delete", "cancel"]);
+    expect((await recordings.list()).some((each) => each.id === ids[1])).toBe(true);
+  });
+
+  it("never expands the approved save sweep when a missing copy returns during policy persistence", async () => {
+    const { dataDir, root, ids } = await seeded(4);
+    const hidden = join(dataDir, "hidden");
+    await rename(join(root, ids[0]!), hidden);
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    const count = { kind: "count", count: 1 } as const;
+    const preview = await recordings.previewRetention(RULE, count, true);
+    expect(preview.remove).toEqual([ids[1], ids[2]]);
+    const original = fs.rename;
+
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === join(root, "rules.json") && existsSync(hidden))
+        await original(hidden, join(root, ids[0]!));
+
+      return original(from, to);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    await recordings.retain(RULE, count, true, preview.remove);
+    expect((await recordings.list()).map((each) => each.id)).toContain(ids[0]);
+    expect(existsSync(join(root, ids[0]!, "a.ts"))).toBe(true);
+    adapter.mockRestore();
+    await recordings.check();
+    await until(
+      () => recordings.list(),
+      (list) => !list.some((each) => each.id === ids[0]),
+    );
+  });
+
+  it("keeps metadata deletion failure visible and retries it automatically across restart", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const count = { kind: "count", count: 1 } as const;
+    const preview = await first.recordings.previewRetention(RULE, count, true);
+    const original = fs.rename;
+
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === join(root, "recordings.json") && !existsSync(join(root, ids[0]!)))
+        throw new Error("inventory replacement refused after folder removal");
+
+      return original(from, to);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    await first.recordings.retain(RULE, count, true, preview.remove);
+    expect((await first.recordings.list()).find((each) => each.id === ids[0])).toMatchObject({
+      retentionFailed: true,
+    });
+    await first.recordings.check();
+    expect((await first.recordings.list()).find((each) => each.id === ids[0])).toMatchObject({
+      retentionFailed: true,
+    });
+    expect((await first.recordings.storage()).used).toBe(2 * BYTES);
+    await first.quit();
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+    await second.recordings.check();
+    expect((await second.recordings.list()).find((each) => each.id === ids[0])).toMatchObject({
+      retentionFailed: true,
+    });
+    adapter.mockRestore();
+    await second.recordings.check();
+    await until(
+      () => second.recordings.list(),
+      (list) => !list.some((each) => each.id === ids[0]),
+    );
+    expect((await second.recordings.storage()).used).toBe(2 * BYTES);
+    await second.quit();
+    const third = await app(dataDir);
+    onTestFinished(third.quit);
+    expect((await third.recordings.list()).map((each) => each.id)).not.toContain(ids[0]);
+  });
+
+  it("settles a claimed folder removal before shutdown and recovers its failed inventory write", async () => {
+    const { dataDir, root, ids } = await seeded(2, {
+      kept: { retention: { kind: "count", count: 1, from: 0 } },
+    });
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const originalRm = fs.rm;
+    const originalRename = fs.rename;
+
+    const removal = vi.spyOn(fs, "rm").mockImplementation(async (path, options) => {
+      if (path === join(root, ids[0]!)) {
+        entered.resolve();
+        await release.promise;
+        await originalRm(path, options);
+        events.push("removed");
+
+        return;
+      }
+
+      return originalRm(path, options);
+    });
+
+    const writes = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === join(root, "recordings.json") && !existsSync(join(root, ids[0]!)))
+        throw new Error("inventory replacement refused");
+
+      return originalRename(from, to);
+    });
+
+    const first = await app(dataDir);
+    onTestFinished(async () => {
+      release.resolve();
+      await first.quit();
+      removal.mockRestore();
+      writes.mockRestore();
+    });
+    await entered.promise;
+    const quitting = first.quit().then(() => events.push("quit"));
+    // Let scope interruption reach the pending filesystem operation before it settles.
+    await stat(join(root, ids[0]!, "a.ts"));
+    release.resolve();
+    await quitting;
+    expect(events).toEqual(["removed", "quit"]);
+    removal.mockRestore();
+    writes.mockRestore();
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+    await until(
+      () => second.recordings.list(),
+      (list) => !list.some((each) => each.id === ids[0]),
+    );
+  });
+
+  it("holds an ended recording until its end can be saved", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const manifest = join(root, "recordings.json");
+    const kept = await readRecordings(manifest);
+
+    if (kept.kind !== "read") throw new Error("Seed inventory unreadable");
+    await writeFile(
+      manifest,
+      JSON.stringify({
+        version: 1,
+        recordings: kept.items.map((each) =>
+          each.id === ids[0]
+            ? { ...each, status: { kind: "recording" }, ended: null, stop: Date.now() + HOUR }
+            : each,
+        ),
+      }),
+    );
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    const original = fs.rename;
+
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === manifest) throw new Error("inventory replacement refused");
+
+      return original(from, to);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2 * HOUR);
+    onTestFinished(() => clock.mockRestore());
+    await recordings.check();
+    await until(
+      () => recordings.list(),
+      (list) => list.some((each) => each.id === ids[0] && each.unsaved),
+    );
+    const count = { kind: "count", count: 1 } as const;
+    expect(await recordings.previewRetention(RULE, count, true)).toMatchObject({
+      remove: [],
+      held: [{ id: ids[0], why: "unsaved" }],
+    });
+    expect(existsSync(join(root, ids[0]!, "a.ts"))).toBe(true);
+    adapter.mockRestore();
+    await recordings.check();
+    expect((await recordings.previewRetention(RULE, count, true)).remove).toEqual([ids[0]]);
   });
 
   it("deletes by age only those that ended more than its days ago", async () => {

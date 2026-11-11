@@ -1309,7 +1309,7 @@ function RetentionPanel({
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
                     {t("{start} to {end}", {
                       start: formatDate(coverageStart(each), "time"),
-                      end: formatDate(each.stop, "time"),
+                      end: formatDate(each.ended ?? each.stop, "time"),
                     })}
                   </span>
                   <span className="text-muted-foreground tabular-nums">
@@ -1365,7 +1365,12 @@ function RetentionPanel({
             checked={existing}
             onChange={(event) => change(() => setExisting(event.target.checked))}
           />
-          {t("Include those recorded before now")}
+          {saved?.from
+            ? t("Include recordings started before {date}, {time}", {
+                date: formatDate(saved.from, "date"),
+                time: formatDate(saved.from, "time"),
+              })
+            : t("Include those recorded before now")}
         </label>
       )}
       <div

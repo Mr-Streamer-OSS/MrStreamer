@@ -1596,6 +1596,8 @@ export const nl: Translation = {
   "{min} to {max}": "{min} tot {max}",
   "Recordings to keep": "Aantal opnames om te bewaren",
   "Days to keep": "Aantal dagen om te bewaren",
+  "Include recordings started before {date}, {time}":
+    "Ook opnames gestart vóór {date}, {time} meenemen",
   "Include those recorded before now": "Ook opnames van eerder meenemen",
   "Deletes nothing now.": "Verwijdert nu niets.",
   "Keeps for now": "Blijft voorlopig",

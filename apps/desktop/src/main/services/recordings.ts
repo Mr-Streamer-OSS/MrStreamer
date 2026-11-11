@@ -682,8 +682,11 @@ function make(deps: RecordingsDeps) {
     const played = new Set<string>();
     /** Recordings retention is deleting now: playback refuses them meanwhile. */
     const removing = new Set<string>();
+
     /** Recordings retention couldn't delete, for the list to say so until a deletion works. */
-    const retentionFailures = new Set<string>();
+    const retentionFailures = new Set(
+      [...records.values()].flatMap((each) => (each.retentionDeleting ? [each.id] : [])),
+    );
 
     /**
      * Drops a failed start's record (see FAILED) whose mark couldn't be read as the app started,
@@ -842,6 +845,7 @@ function make(deps: RecordingsDeps) {
             progress: _progress,
             protected: _protected,
             retentionFailed: _failed,
+            retentionDeleting: _deleting,
             ...rest
           } = record;
 
@@ -2787,7 +2791,8 @@ function make(deps: RecordingsDeps) {
     /**
      * Deletes an ended recording's folder, then its record. The file goes first: one that stays,
      * as one Windows holds open, keeps its record to delete again, and a record whose file went
-     * lists it as missing until it is deleted. Its room counts as free only once it went.
+     * lists it as missing until it is deleted. Retention writes its intent first, so a failed
+     * metadata write or restart retries completion. Its room counts as free only once it went.
      */
     const deleteRecord = (record: StoredRecording) =>
       Effect.gen(function* () {
@@ -2898,7 +2903,25 @@ function make(deps: RecordingsDeps) {
         });
 
         if (claimed)
-          yield* deleteRecord(record).pipe(
+          yield* Effect.gen(function* () {
+            let pending = record;
+
+            if (!record.retentionDeleting) {
+              pending = { ...record, retentionDeleting: true };
+              records.set(record.id, pending);
+              const written = yield* Effect.result(save);
+
+              if (written._tag === "Failure") {
+                records.set(record.id, record);
+
+                return yield* written.failure;
+              }
+            }
+
+            yield* deleteRecord(pending);
+          }).pipe(
+            // Once claimed, shutdown waits for the durable intent and filesystem work to settle.
+            Effect.uninterruptible,
             Effect.ensuring(Effect.sync(() => removing.delete(record.id))),
           );
       }).pipe(
@@ -2914,40 +2937,54 @@ function make(deps: RecordingsDeps) {
      * Deletes what each rule's retention lets go now, answering when the next goes by age, or soon
      * while a deletion failed; null for neither. Deletes nothing while either file can't be read.
      */
-    const retainNow = Effect.gen(function* () {
-      /** What this pass tried to delete: a failure of any other is no longer due. */
-      const tried = new Set<string>();
+    const retainNow = (approved?: { rule: string; seen: readonly string[] }) =>
+      Effect.gen(function* () {
+        /** What this pass tried to delete: a failure of any other is no longer due. */
+        const tried = new Set<string>();
 
-      const retained = (read.kind === "read" ? (rules ?? []) : []).flatMap(({ id, retention }) =>
-        retention ? [{ id, retention }] : [],
-      );
+        const retained = (read.kind === "read" ? (rules ?? []) : []).flatMap(({ id, retention }) =>
+          retention && (!approved || approved.rule === id) ? [{ id, retention }] : [],
+        );
 
-      let next = Infinity;
+        let next = Infinity;
 
-      if (retained.length > 0) yield* look;
+        // A saved deletion intent owns completion even if the rule was subsequently turned off.
+        // Retry independently of missing files: the folder may already have gone before save failed.
+        const pending = [...records.values()].filter((each) => each.retentionDeleting);
 
-      for (const { id, retention } of retained) {
-        const found = retentionOf(id, retention, retention.from);
-
-        for (const record of found.remove) {
+        for (const record of pending) {
           tried.add(record.id);
           yield* retire(record);
         }
 
-        next = Math.min(next, found.next);
-      }
+        if (retained.length > 0) yield* look;
 
-      // One no longer due, as one protected since, stops saying it failed.
-      const settled = [...retentionFailures].filter((id) => !tried.has(id));
+        for (const { id, retention } of retained) {
+          const found = retentionOf(id, retention, retention.from);
 
-      for (const id of settled) retentionFailures.delete(id);
+          for (const record of found.remove) {
+            if (tried.has(record.id) || (approved && !approved.seen.includes(record.id))) continue;
+            tried.add(record.id);
+            yield* retire(record);
+          }
 
-      if (settled.length > 0) yield* publish;
+          next = Math.min(next, found.next);
+        }
 
-      if (retentionFailures.size > 0) next = Math.min(next, Date.now() + CHECK_MS);
+        // One no longer due, as one protected since, stops saying it failed.
+        const settled = [...retentionFailures].filter(
+          (id) =>
+            !tried.has(id) && (!approved || records.get(id)?.scheduled?.rule === approved.rule),
+        );
 
-      return Number.isFinite(next) ? next : null;
-    });
+        for (const id of settled) retentionFailures.delete(id);
+
+        if (settled.length > 0) yield* publish;
+
+        if (retentionFailures.size > 0) next = Math.min(next, Date.now() + CHECK_MS);
+
+        return Number.isFinite(next) ? next : null;
+      });
 
     const checkOnce = scheduling(checkNow).pipe(
       Effect.catchDefect((defect) =>
@@ -2963,7 +3000,7 @@ function make(deps: RecordingsDeps) {
         for (;;) {
           const checked = yield* checkOnce;
 
-          const retained = yield* retaining(retainNow).pipe(
+          const retained = yield* retaining(retainNow()).pipe(
             Effect.catchDefect((defect) =>
               Effect.andThen(
                 Effect.logWarning("[recordings] retention failed", defect),
@@ -3734,14 +3771,16 @@ function make(deps: RecordingsDeps) {
         ),
       cancelRule: (id: string) =>
         Effect.tap(
-          scheduling(
-            Effect.gen(function* () {
-              yield* rulesUsable;
-              const rule = rules?.find((each) => each.id === id);
-              yield* persistRules((rules ?? []).filter((each) => each.id !== id));
+          retaining(
+            scheduling(
+              Effect.gen(function* () {
+                yield* rulesUsable;
+                const rule = rules?.find((each) => each.id === id);
+                yield* persistRules((rules ?? []).filter((each) => each.id !== id));
 
-              for (const each of rule?.occurrences ?? []) schedules.delete(each.id);
-            }),
+                for (const each of rule?.occurrences ?? []) schedules.delete(each.id);
+              }),
+            ),
           ),
           () => wake,
         ),
@@ -3805,7 +3844,7 @@ function make(deps: RecordingsDeps) {
               }),
             );
 
-            yield* retainNow;
+            yield* retainNow({ rule: id, seen });
 
             return ruleView(rule);
           }),

@@ -1559,6 +1559,8 @@ export const en = {
   "{min} to {max}": "{min} to {max}",
   "Recordings to keep": "Recordings to keep",
   "Days to keep": "Days to keep",
+  "Include recordings started before {date}, {time}":
+    "Include recordings started before {date}, {time}",
   "Include those recorded before now": "Include those recorded before now",
   "Deletes nothing now.": "Deletes nothing now.",
   "Keeps for now": "Keeps for now",

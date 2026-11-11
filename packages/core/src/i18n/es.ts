@@ -1674,6 +1674,8 @@ export const es: Translation = {
   "{min} to {max}": "{min} a {max}",
   "Recordings to keep": "Grabaciones que conservar",
   "Days to keep": "Días que conservar",
+  "Include recordings started before {date}, {time}":
+    "Incluir grabaciones iniciadas antes de {date}, {time}",
   "Include those recorded before now": "Incluir las grabadas hasta ahora",
   "Deletes nothing now.": "Ahora no elimina nada.",
   "Keeps for now": "Se conservan por ahora",
