@@ -831,19 +831,14 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
   /**
    * Appends `events`, each to its account's record and in the order given, and stores the state
-   * each account's add up to. Answers the channel events written, with their sequences, and the
-   * sequence of every event, in order.
+   * each account's add up to. Answers the channel events written with their sequences.
    */
   const append = (
     commandId: string,
     at: number,
     events: readonly AccountEvent[],
-  ): {
-    channels: { account: string; event: ChannelEvent; sequence: number }[];
-    sequences: number[];
-  } => {
+  ): { account: string; event: ChannelEvent; sequence: number }[] => {
     const written: { account: string; event: ChannelEvent; sequence: number }[] = [];
-    const sequences: number[] = [];
     /** How far each account's record came, by account, in the order first written to. */
     const last = new Map<string, number>();
 
@@ -862,7 +857,6 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
       const sequence = Number(result.lastInsertRowid);
       last.set(account, sequence);
-      sequences.push(sequence);
 
       if (channel) written.push({ account, event, sequence });
       else project(stored(account), event, at, sequence);
@@ -873,16 +867,15 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       save(db, account, apply(listsOf(account).state, own), sequence);
     }
 
-    return { channels: written, sequences };
+    return written;
   };
 
   /**
    * Runs a write in one transaction, then notes where the channels it wrote stand. Only once it
    * has committed: one rolled back wrote nothing, and leaves what was worked out as it is.
-   * Answers the numbers of every event written, in order.
    */
-  const written = (write: () => ReturnType<typeof append>): readonly number[] => {
-    const { channels, sequences } = transaction(db, write);
+  const written = (write: () => ReturnType<typeof append>): void => {
+    const channels = transaction(db, write);
 
     for (const { account, event, sequence } of channels) {
       const placed = places.get(account);
@@ -890,8 +883,6 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       // An account not worked out yet reads these with the rest of its events.
       if (placed) place(placed, event.type, event.channelId, sequence);
     }
-
-    return sequences;
   };
 
   return {
@@ -916,10 +907,10 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
         let favouriteAdded = false;
         const added = usage?.action("favourite_added");
 
-        const sequences = written(() => {
+        written(() => {
           if (current && !current()) throw new Failed({ error: { kind: "no-subscription" } });
 
-          if (statements.done.get(commandId)) return { channels: [], sequences: [] };
+          if (statements.done.get(commandId)) return [];
           const events = decide(read(accounts), look);
 
           // Thrown, so the transaction ends with nothing written.
@@ -947,7 +938,6 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
         return {
           ...read(accounts),
-          written: sequences,
           recorded: statements.commandEvents.all(commandId).flatMap((raw) => eventOf(raw) ?? []),
         };
       }),
@@ -955,7 +945,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       attempt(() => {
         let imported = false;
         written(() => {
-          if (statements.imported.get()) return { channels: [], sequences: [] };
+          if (statements.imported.get()) return [];
           imported = true;
           statements.markImported.run(String(at));
 
@@ -965,7 +955,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
                 at,
                 events.map((event) => ({ account, event })),
               )
-            : { channels: [], sequences: [] };
+            : [];
         });
 
         return imported;

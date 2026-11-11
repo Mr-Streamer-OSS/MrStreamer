@@ -364,7 +364,7 @@ export function memoryViewingStore(deps: {
     commit: ({ accounts: wanted, commandId, at, decide }) =>
       attempt(() => {
         if (receipts.has(commandId))
-          return { ...read(wanted), written: [], recorded: receiptEvents[commandId] ?? [] };
+          return { ...read(wanted), recorded: receiptEvents[commandId] ?? [] };
         const events = decide(read(wanted), look);
 
         // Thrown, so the transaction stores nothing, the command's id neither.
@@ -384,7 +384,6 @@ export function memoryViewingStore(deps: {
 
         return {
           ...read(wanted),
-          written: events.map((_event, index) => first + index),
           recorded: receiptEvents[commandId] ?? [],
         };
       }),
