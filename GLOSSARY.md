@@ -34,6 +34,12 @@ A named group of movies and series selected by the viewer.
 **Smart collection**:
 A named group of movies and series selected by saved filtering rules as the available catalogue changes.
 
+**Followed series**:
+A series from one source that a viewer asked to hear about when new episodes are listed. Following does not save it to the watchlist.
+
+**New-episode alert**:
+A notice in the app that a followed series lists episodes the viewer has not been told of yet. It lasts until the viewer has seen it.
+
 **Recording retention rule**:
 An optional policy that removes eligible recordings according to their age or how many are kept, while preserving protected recordings.
 
