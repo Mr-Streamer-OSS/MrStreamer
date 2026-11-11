@@ -5,6 +5,7 @@ Every subscription's movies and series in one place, each film once, with detail
 - **Find.** For you, filters for quality and language, genres and streaming services.
 - **Watchlist.** **Save** keeps a movie or a whole series for later.
 - **Collections.** Your own named collections of movies and series, a title in as many as you like.
+- **Follow.** A followed series tells you of new episodes in its details and on Home.
 - **Continue.** Continue watching and the next episode pick up where you stopped.
 - **One connection.** Opening a movie or episode stops the live channel first.
 
@@ -130,6 +131,21 @@ When no provider lists a saved title any more, it stays on the watchlist, dimmed
 Saved titles for adults show, and count, only while **For adults** is on in Settings > Movies and series. They stay saved while it is off.
 
 The watchlist is kept on your computer, with the subscription each title was saved from, like favourites. **Remove**, on a subscription in Settings > Subscriptions, keeps what it saved for when you add the same account again, unless you tick the box that deletes it. A title you saved from another subscription as well stays on the list.
+
+## Following a series
+
+_Hear about new episodes of a series without opening it._
+
+**Follow** in a series' details follows the version that plays, from that subscription, and then reads **Following**. Mr. Streamer remembers the episodes it lists now, and tells you when a later refresh of your lists brings more: in the details, below the buttons, as **2 new episodes** with their numbers and names, and on Home in **New episodes**, above the other rows. Each viewing profile follows its own series.
+
+- Your lists refresh when Mr. Streamer starts, twice a day while it runs, and when you refresh a subscription. Nothing checks while the app is closed, and there are no system notifications.
+- An episode counts once. Refreshing again, or a provider uploading the same episode again, adds nothing.
+- A provider renaming the series keeps it followed. When the provider stops listing it, Home marks it **Unavailable**, keeps what was new, and offers **Stop following**.
+- When the episodes can't be read, the details say so and keep what they knew; the next refresh tries again. If following fails, the details say why and nothing is followed.
+- Home leaves out series for adults. A kids profile only follows approved series.
+- **Mark seen**, in the details or on Home, clears the new episodes. **Following** stops following.
+
+Every control is a button, so Tab, Enter and Space reach all of it.
 
 ## Collections
 

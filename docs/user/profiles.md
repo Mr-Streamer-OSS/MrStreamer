@@ -2,7 +2,7 @@
 
 Use local viewing profiles to keep each viewer's lists, progress and preferences separate. Default keeps the personal state saved before profiles were introduced, in its original files.
 
-Each profile keeps its own favourites, recent channels, channel lists, Watchlist, movie and episode progress, watched marks, downloaded-copy and recording progress, and viewing preferences. Subtitle selection, Off and visibility are personal too.
+Each profile keeps its own favourites, recent channels, channel lists, Watchlist, followed series with their new episodes, movie and episode progress, watched marks, downloaded-copy and recording progress, and viewing preferences. Subtitle selection, Off and visibility are personal too.
 
 Subscriptions, guides, downloaded files, recordings, subtitle timing and usage-statistics consent are shared by the installation. Switching stops interactive playback after saving its progress; household downloads and recordings continue.
 
