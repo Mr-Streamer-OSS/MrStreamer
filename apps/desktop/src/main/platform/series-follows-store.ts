@@ -4,7 +4,8 @@
 // is, so a renamed series stays followed and a series another subscription lists is another one.
 //
 // An episode row with no `found_at` is known: listed when the series was followed, or seen since.
-// One with a time is new since then, until the viewer has seen it. An episode is one by its
+// One with a time is unseen; only listed rows show it as new. Withdrawal keeps that time so a
+// partial or empty provider answer cannot mark it seen. An episode is one by its
 // season and number, so a file the provider uploads again is not new; one without a number goes
 // by its file id. Each change is one transaction, so a refresh read twice finds nothing new the
 // second time.
@@ -45,6 +46,7 @@ const SCHEMA = `
     number integer not null,
     title text not null,
     found_at integer,
+    listed integer not null default 1,
     primary key (account, series_id, key)
   );
 `;
@@ -128,8 +130,9 @@ export class SeriesFollowsStore extends Context.Service<
     ) => Effect.Effect<boolean, Failed>;
     /**
      * Takes what a read of its episodes says: an episode not kept yet is new from `at`, a new one
-     * the provider lists no more goes, and the name, year and list entry are taken over. Answers
-     * whether the follow changed in a way the viewer sees, or false when it isn't followed.
+     * the provider lists no more is hidden until re-listed, and the name, year and list entry
+     * are taken over. Answers whether the follow changed in a way the viewer sees, or false
+     * when it isn't followed.
      */
     readonly checked: (facts: SeriesFacts) => Effect.Effect<boolean, Failed>;
     /**
@@ -147,6 +150,10 @@ export class SeriesFollowsStore extends Context.Service<
 /** Makes the tables, for this store and for the viewing record that erases them. */
 export function prepareSeriesFollows(db: DatabaseSync): void {
   db.exec(SCHEMA);
+  const columns = db.prepare("pragma table_info(series_follow_episodes)").all();
+
+  if (!columns.some((column) => column["name"] === "listed"))
+    db.exec("alter table series_follow_episodes add column listed integer not null default 1");
 }
 
 /** The store on the profile's database. */
@@ -184,12 +191,12 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
   const statements = {
     follows: db.prepare("select * from series_follows where account = ?"),
     newEpisodes: db.prepare(
-      `select * from series_follow_episodes where account = ? and found_at is not null
+      `select * from series_follow_episodes where account = ? and found_at is not null and listed = 1
        order by season, number, episode_id`,
     ),
     follow: db.prepare("select * from series_follows where account = ? and series_id = ?"),
     keys: db.prepare(
-      "select key, found_at from series_follow_episodes where account = ? and series_id = ?",
+      "select key, found_at, listed from series_follow_episodes where account = ? and series_id = ?",
     ),
     insert: db.prepare(
       `insert into series_follows
@@ -208,7 +215,10 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
        (account, series_id, key, episode_id, season, number, title, found_at)
        values (?, ?, ?, ?, ?, ?, ?, ?)
        on conflict (account, series_id, key) do update set
-         episode_id = excluded.episode_id, title = excluded.title`,
+         episode_id = excluded.episode_id, title = excluded.title, listed = 1`,
+    ),
+    withdraw: db.prepare(
+      "update series_follow_episodes set listed = 0 where account = ? and series_id = ?",
     ),
     seen: db.prepare(
       `update series_follow_episodes set found_at = null
@@ -226,23 +236,32 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
     return row instanceof type.errors ? null : row;
   };
 
-  /** Writes `episodes`: those not kept yet as found `at`, or null for known. Answers how many. */
+  /** Reconciles listed visibility, preserving discovery times and seen identities across withdrawals. */
   const take = (facts: SeriesFacts, foundAt: number | null) => {
     const kept = new Map(
-      statements.keys
-        .all(facts.account, facts.seriesId)
-        .map((row) => [String(row["key"]), row["found_at"] !== null]),
+      statements.keys.all(facts.account, facts.seriesId).map((row) => [
+        String(row["key"]),
+        {
+          unseen: row["found_at"] !== null,
+          listed: row["listed"] === 1,
+        },
+      ]),
     );
 
     let added = 0;
+    let restored = 0;
+    statements.withdraw.run(facts.account, facts.seriesId);
     const listed = new Set<string>();
 
     for (const episode of facts.episodes) {
       const key = episodeKey(episode);
 
-      listed.add(key);
+      if (!listed.has(key)) {
+        if (!kept.has(key)) added += 1;
+        else if (kept.get(key)?.unseen && !kept.get(key)?.listed) restored += 1;
+      }
 
-      if (!kept.has(key)) added += 1;
+      listed.add(key);
       statements.episode.run(
         facts.account,
         facts.seriesId,
@@ -255,18 +274,12 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
       );
     }
 
-    // A new episode the provider took back is no news any more. Known ones stay known, so one
-    // listed again later is not new either.
-    let dropped = 0;
+    // Missing rows keep their identity and discovery time, but stay hidden until re-listed.
+    const dropped = [...kept].filter(
+      ([key, row]) => row.unseen && row.listed && !listed.has(key),
+    ).length;
 
-    for (const [key, unseen] of kept) {
-      if (unseen && !listed.has(key)) {
-        statements.seen.run(facts.account, facts.seriesId, key);
-        dropped += 1;
-      }
-    }
-
-    return { added, dropped };
+    return { added, dropped, restored };
   };
 
   return {
@@ -365,9 +378,15 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
             facts.account,
             facts.seriesId,
           );
-          const { added, dropped } = take(facts, facts.at);
+          const { added, dropped, restored } = take(facts, facts.at);
 
-          return added > 0 || dropped > 0 || before.failed === 1 || before.name !== facts.name;
+          return (
+            added > 0 ||
+            dropped > 0 ||
+            restored > 0 ||
+            before.failed === 1 ||
+            before.name !== facts.name
+          );
         }),
       ),
     failed: (account, seriesId, at) =>

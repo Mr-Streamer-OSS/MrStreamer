@@ -54,14 +54,9 @@ import {
   type EpisodeAbout,
   type TitleAbout,
 } from "@mrstreamer/core/metadata/tmdb";
-import {
-  movieDetails,
-  seasonEpisodes,
-  seriesDetails,
-  seriesEpisodeOrder,
-} from "@mrstreamer/core/ondemand/details";
+import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
-import { titleName } from "@mrstreamer/core/ondemand/names";
+import { episodeName, titleName } from "@mrstreamer/core/ondemand/names";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { qualityHint } from "@mrstreamer/core/ondemand/filters";
 import type { FilterOptions, TitleFilters } from "@mrstreamer/contracts/title-filters";
@@ -250,10 +245,13 @@ export class OnDemand extends Context.Service<
     season(series: OwnedId, season: number): Effect.Effect<readonly EpisodeDetails[], Failed>;
     /**
      * A listed series version's episodes as its provider lists them for the current lists, in
-     * their order: shared with its details, so the provider is asked at most once per accepted
-     * refresh. Never details kept from earlier lists: when the provider can't answer, it fails.
+     * their order, before display grouping merges files. Shared with details, so the provider is
+     * asked at most once per accepted refresh. Never details kept from earlier lists: when the
+     * provider can't answer, it fails.
      */
-    listedEpisodes(series: OwnedId): Effect.Effect<readonly Episode[], Failed>;
+    listedEpisodes(
+      series: OwnedId,
+    ): Effect.Effect<readonly Pick<Episode, "id" | "season" | "number" | "title">[], Failed>;
     /** Titles by any of their versions, from the lists alone. */
     titles(kind: TitleKind, versions: readonly OwnedId[]): Effect.Effect<readonly Title[], Failed>;
     /** Trusted loaded catalogue currency; current is synchronous, including inside a transaction. */
@@ -1828,8 +1826,13 @@ function make(deps: OnDemandDeps) {
         }),
 
       listedEpisodes: (series: OwnedId) =>
-        Effect.map(detailsOf("series", series, false), ({ shown }) =>
-          shown.kind === "series" ? seriesEpisodeOrder(shown) : [],
+        Effect.map(detailsOf("series", series, false), ({ raw }) =>
+          raw.episodes.map((episode) => ({
+            id: episode.id,
+            season: episode.season,
+            number: episode.number,
+            title: episodeName(episode.name, episode.number),
+          })),
         ),
 
       season: (series: OwnedId, number: number) =>

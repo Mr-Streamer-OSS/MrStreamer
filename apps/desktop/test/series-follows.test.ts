@@ -172,6 +172,42 @@ describe("followed series", { timeout: 20_000 }, () => {
     expect(await viewer.state(FILES)).toBeNull();
   });
 
+  it("keeps every unnumbered file new until seen, including across later additions", async () => {
+    const app = await followsApp();
+    const viewer = await app.admitted();
+    await viewer.follow(FILES);
+
+    const unnumbered = (series: FakeSeries, ids: number[], later: number): FakeSeries => ({
+      ...series,
+      added: series.added + later,
+      seasons: [
+        [...series.seasons[0]!, ...ids.map((id) => ({ ...series.seasons[0]![0]!, id, number: 0 }))],
+      ],
+    });
+
+    relist(app.provider, { [FILES]: (series) => unnumbered(series, [800_012, 800_013], 60) });
+    await app.refresh();
+    await vi.waitFor(async () =>
+      expect(news(await viewer.state(FILES))).toEqual([
+        { id: "800012", season: 1, number: 0 },
+        { id: "800013", season: 1, number: 0 },
+      ]),
+    );
+    relist(app.provider, {
+      [FILES]: (series) => unnumbered(series, [800_012, 800_013, 800_014], 120),
+    });
+    await app.refresh();
+    await vi.waitFor(async () =>
+      expect(news(await viewer.state(FILES))).toEqual([
+        { id: "800012", season: 1, number: 0 },
+        { id: "800013", season: 1, number: 0 },
+        { id: "800014", season: 1, number: 0 },
+      ]),
+    );
+    await viewer.seen(FILES, (await viewer.state(FILES))!.newEpisodes);
+    expect(await viewer.alerts()).toEqual([]);
+  });
+
   it("marks only displayed episodes seen when another arrives in the same millisecond", async () => {
     const app = await followsApp();
     const viewer = await app.admitted();
@@ -199,24 +235,52 @@ describe("followed series", { timeout: 20_000 }, () => {
     }
   });
 
-  it("keeps withdrawn episodes known when the provider lists them again", async () => {
-    const app = await followsApp();
-    const viewer = await app.admitted();
-    await viewer.follow(FILES);
-    relist(app.provider, { [FILES]: (series) => withEpisode(series, 800_012) });
-    await app.refresh();
-    await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toHaveLength(1));
-    relist(app.provider, { [FILES]: (series) => ({ ...series, added: series.added + 120 }) });
-    await app.refresh();
-    await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toEqual([]));
-    const withdrawnCheck = (await viewer.state(FILES))!.lastCheck.at;
-    relist(app.provider, { [FILES]: (series) => withEpisode(series, 800_012, 180) });
-    await app.refresh();
-    await vi.waitFor(async () =>
-      expect((await viewer.state(FILES))?.lastCheck.at).not.toBe(withdrawnCheck),
-    );
-    expect(news(await viewer.state(FILES))).toEqual([]);
-  });
+  it.each(["partial", "empty"])(
+    "restores unseen episodes after a %s listing without rediscovering them",
+    async (listing) => {
+      const app = await followsApp();
+      const viewer = await app.admitted();
+      await viewer.follow(FILES);
+      relist(app.provider, { [FILES]: (series) => withEpisode(series, 800_012) });
+      await app.refresh();
+      await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toHaveLength(1));
+      const discovered = (await viewer.state(FILES))!.newEpisodes;
+      relist(app.provider, {
+        [FILES]: (series) => ({
+          ...series,
+          added: series.added + 120,
+          seasons: listing === "empty" ? [] : series.seasons,
+        }),
+      });
+      await app.refresh();
+      await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toEqual([]));
+      const withdrawnCheck = (await viewer.state(FILES))!.lastCheck.at;
+      relist(app.provider, { [FILES]: (series) => withEpisode(series, 800_012, 180) });
+      await app.refresh();
+      await vi.waitFor(async () =>
+        expect((await viewer.state(FILES))?.lastCheck.at).not.toBe(withdrawnCheck),
+      );
+      expect((await viewer.state(FILES))!.newEpisodes).toEqual(discovered);
+      await app.refresh();
+      expect((await viewer.state(FILES))!.newEpisodes).toEqual(discovered);
+      await viewer.seen(FILES, discovered);
+      const restoredCheck = (await viewer.state(FILES))!.lastCheck.at;
+      relist(app.provider, {
+        [FILES]: (series) => ({ ...series, added: series.added + 240, seasons: [] }),
+      });
+      await app.refresh();
+      await vi.waitFor(async () =>
+        expect((await viewer.state(FILES))!.lastCheck.at).not.toBe(restoredCheck),
+      );
+      const emptyCheck = (await viewer.state(FILES))!.lastCheck.at;
+      relist(app.provider, { [FILES]: (series) => withEpisode(series, 800_012, 300) });
+      await app.refresh();
+      await vi.waitFor(async () =>
+        expect((await viewer.state(FILES))!.lastCheck.at).not.toBe(emptyCheck),
+      );
+      expect(await viewer.alerts()).toEqual([]);
+    },
+  );
 
   it("announces reconciled background news for the active profile", async () => {
     const app = await followsApp();

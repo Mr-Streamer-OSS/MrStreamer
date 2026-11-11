@@ -9,7 +9,7 @@ Every subscription's movies and series in one place, each film once, with detail
 - **Continue.** Continue watching and the next episode pick up where you stopped.
 - **One connection.** Opening a movie or episode stops the live channel first.
 
-**Movies** and **Series** in the top bar list what your providers offer on demand, from [every subscription you added](subscriptions.md) together. Mr. Streamer loads both lists after connecting and keeps them on your computer, refreshing them twice a day; the first load can take a few seconds on a large subscription.
+**Movies** and **Series** in the top bar list what your providers offer on demand, from [every subscription you added](subscriptions.md) together. Mr. Streamer loads both lists after connecting and keeps them on your computer, refreshing them at startup when older than 12 hours, and when you add or refresh a subscription; the first load can take a few seconds on a large subscription.
 
 Each film shows once, even when your provider lists it once per language or quality. Mr. Streamer picks the version in your language, then one with several languages, then one without a language mark. The arrow beside **Play** lets you pick another, as below.
 
@@ -140,6 +140,7 @@ _Hear about new episodes of a series without opening it._
 
 - Your lists refresh when Mr. Streamer starts if they are older than 12 hours, and when you add or refresh a subscription. Nothing checks while the app is closed, and there are no system notifications.
 - An episode with a season and episode number counts once, even if the provider removes it and lists it again or uploads another file for it. Episodes without a number go by file id, so a replacement file can count as new.
+- Episodes missing from a later provider answer are hidden until listed again. Unseen episodes return with their original discovery time; episodes marked seen stay seen.
 - Mr. Streamer checks episodes again when the provider changes the series’ list entry. New episodes can go unnoticed if the provider leaves that entry unchanged. When the entry has no change date or episode files, each refresh checks again.
 - A provider renaming the series keeps it followed. When the provider stops listing it, Home marks it **Unavailable**, keeps what was new, and offers **Stop following**.
 - When the episodes can't be read, the details say so and keep what they knew; the next refresh tries again. If following fails, the details say why and nothing is followed.

@@ -48,25 +48,11 @@ export function useFollowCommands() {
   return { set, seen };
 }
 
-/**
- * Reads the follows again once the main process says this viewer's changed, and once the lists
- * changed: they name each followed series. Lists that newly mark a title for adults drop what
- * was kept rather than show it while it is read again.
- */
+/** Reads follows again when this viewer's records change. Catalogue privacy lives in syncOnDemand. */
 function syncFollows(client: QueryClient): () => void {
-  const stopOwned = listen("follows.changed", ({ owner }) => {
+  return listen("follows.changed", ({ owner }) => {
     if (currentProfile(owner)) void client.invalidateQueries({ queryKey: ["follows"] });
   });
-
-  const stopLists = listen("ondemand.updated", ({ markedForAdults }) => {
-    if (markedForAdults) void client.resetQueries({ queryKey: ["follows"] });
-    else void client.invalidateQueries({ queryKey: ["follows"] });
-  });
-
-  return () => {
-    stopOwned();
-    stopLists();
-  };
 }
 
 /** Keeps a view's follow reads current while it is mounted. */

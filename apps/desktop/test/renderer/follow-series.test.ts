@@ -14,7 +14,8 @@ import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { HomeScreen } from "../../src/renderer/src/features/home/HomeScreen.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
-import { queries } from "../../src/renderer/src/lib/queries.ts";
+import { followQueries } from "../../src/renderer/src/features/titles/follows.ts";
+import { queries, syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 
 const VIEWER = { id: "default", revision: 1 };
 const HARBOUR = { subscriptionId: SUBSCRIPTION, id: "harbour" };
@@ -171,6 +172,47 @@ describe("Follow in a series' details", () => {
 });
 
 describe("New episodes on Home", () => {
+  it("forgets private alerts and late answers while follow surfaces are closed", async () => {
+    ipc.always("subscription.list", [SAVED]);
+    ipc.always("library.categories", []);
+    ipc.always("library.browse", browseResult([]));
+    ipc.always("library.status", []);
+    ipc.always("ondemand.collection", { name: "All", total: 0, titles: [] });
+    ipc.always("follows.alerts", [followed([LOW_TIDE])]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(queries.subscriptions().queryKey, [SAVED]);
+    const view = queryView(client);
+    const stop = syncOnDemand(client);
+    unmount = () => {
+      stop();
+      view.unmount();
+      client.clear();
+    };
+
+    await view.render(createElement(HomeScreen, { active: false }));
+    await until(() => expect(button("Mark new episodes of Night Harbour seen")).toBeDefined());
+    await view.render(null);
+
+    const oldRead = ipc.hold("follows.alerts");
+    const pending = client.fetchQuery(followQueries.alerts()).catch(() => undefined);
+    await until(() => expect(ipc.argsOf("follows.alerts")).toHaveLength(2));
+    await act(async () =>
+      ipc.emit("ondemand.updated", {
+        lists: [],
+        metadata: null,
+        markedForAdults: true,
+      }),
+    );
+    await act(async () => oldRead.resolve([followed([LOW_TIDE])]));
+    await pending;
+    const freshRead = ipc.hold("follows.alerts");
+    await view.render(createElement(HomeScreen, { active: false }));
+    await until(() => expect(ipc.argsOf("follows.alerts")).toHaveLength(3));
+    expect(text()).not.toContain("Night Harbour");
+    await act(async () => freshRead.resolve([]));
+    await until(() => expect(document.querySelector("[data-home-row=new-episodes]")).toBeNull());
+  });
+
   it("shows each followed series with news, an unavailable one as such, until marked seen", async () => {
     const measuredWidth = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
