@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import { CollectionCurrent } from "../src/main/services/collections.ts";
 import { CollectionsStore } from "../src/main/platform/collections-store.ts";
 import { Failed } from "@mrstreamer/core/failure";
 import { ProfileSessions } from "../src/main/services/profiles.ts";
@@ -827,4 +828,75 @@ it("lets a newer alternate episode play override its mark without counting unloa
   } finally {
     await app.runtime.dispose();
   }
+});
+
+it("applies standing exact film marks to discovery and saved smart matches, then restores progress on Undo or replay", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const other = await fakeProvider({ titles: 1 });
+
+  for (const each of [provider, other])
+    each.serveTitles((all) => ({ ...all, movies: [all.movies[0]!], series: [] }));
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  const second = await app.subscriptions.add(demoLogin(other));
+  await app.titles.refresh(source.id);
+  await app.titles.refresh(second.id);
+  const sessions = await app.runtime.runPromise(ProfileSessions);
+  const admission = await app.runtime.runPromise(sessions.admit);
+
+  const run = <A>(effect: Effect.Effect<A, unknown>) =>
+    app.runtime.runPromise(
+      admission.run(
+        effect.pipe(Effect.provideService(CollectionCurrent, { check: admission.current })),
+      ),
+    );
+
+  const record = admission.services.viewing;
+  const collections = admission.services.collections;
+  const onDemand = await app.runtime.runPromise(OnDemand);
+  const query = { kind: "movie" as const, id: "all" as const, offset: 0, limit: 48 };
+  const first = (await app.titles.collection(query)).titles[0]!;
+  const movie = { subscriptionId: source.id, id: first.id };
+  const scope = { kind: "film" as const, versions: [movie] };
+  await run(
+    collections.change({
+      kind: "create",
+      id: "watched",
+      name: "Watched",
+      rules: {
+        kind: "movie",
+        filters: { watched: "watched", sourceIds: [source.id] },
+      },
+    }),
+  );
+
+  const total = async (watched: "watched" | "unwatched" | "in-progress", sourceId = source.id) =>
+    (await run(onDemand.collection({ ...query, filters: { watched, sourceIds: [sourceId] } })))
+      .total;
+
+  const smart = async () => (await run(collections.page("watched", 0, 48))).total;
+  expect(await smart()).toBe(0);
+  const marked = await run(record.markTitles("watched", scope, true));
+  expect(await total("watched")).toBe(1);
+  expect(await total("unwatched")).toBe(0);
+  expect(await total("watched", second.id)).toBe(0);
+  expect(await smart()).toBe(1);
+  await run(record.undoMarks("undo", marked.made));
+  expect(await total("watched")).toBe(0);
+  expect(await smart()).toBe(0);
+  await run(record.recordProgress("finished", { kind: "movie", ...movie }, 5999, 6000, 1));
+  const unmarked = await run(record.markTitles("unwatched", scope, false));
+  expect(await total("watched")).toBe(0);
+  expect(await total("unwatched")).toBe(1);
+  expect(await smart()).toBe(0);
+  await run(record.undoMarks("undo-unwatched", unmarked.made));
+  expect(await total("watched")).toBe(1);
+  expect(await smart()).toBe(1);
+  await run(record.markTitles("watched-again", scope, true));
+  await run(
+    record.recordProgress("replay", { kind: "movie", ...movie }, 180, 6000, Date.now() + 10000),
+  );
+  expect(await total("watched")).toBe(0);
+  expect(await total("in-progress")).toBe(1);
+  expect(await smart()).toBe(0);
 });

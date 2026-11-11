@@ -1518,6 +1518,16 @@ function make(deps: OnDemandDeps) {
             ]),
         );
 
+        if (kind === "movie") {
+          // filmMarks returns only marks that stand over the exact file's progress.
+          for (const mark of yield* record.filmMarks(versions)) {
+            const key = ownedKey(mark.movie);
+
+            if (mark.watched) watched.set(key, { key, state: "watched" });
+            else watched.delete(key);
+          }
+        }
+
         if (kind === "series") {
           const files = yield* knownFiles(kind);
 

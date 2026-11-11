@@ -4320,3 +4320,118 @@ it.each(["committed", "pending"] as const)(
     }
   },
 );
+
+it("guards kids bulk film/season/series marks and Undo, and filters exact history without sharing adult records", async () => {
+  const receipt = type({
+    made: type({
+      kind: '"movie"',
+      title: { subscriptionId: "string", id: "string" },
+      revision: "number",
+    }).array(),
+  });
+
+  const f = await fixture();
+  const allowed = { subscriptionId: f.source.id, id: "90001" };
+  const forbidden = { subscriptionId: f.source.id, id: "90002" };
+  const series = { subscriptionId: f.source.id, id: "80001" };
+  expect(
+    await f.call(f.adult, "viewing.markTitles", {
+      commandId: "adult",
+      scope: { kind: "film", versions: [allowed] },
+      watched: true,
+    }),
+  ).toMatchObject({ ok: true });
+  await f.call(f.adult, "profiles.setPolicy", {
+    current: f.adult,
+    newPin: "1234",
+    profiles: [{ id: f.kid.id, approved: [{ kind: "movie", ...allowed }] }],
+  });
+  const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+  expect(await f.call(kid, "viewing.filmMarks", { movies: [allowed] })).toEqual({
+    ok: true,
+    value: [],
+  });
+  expect(await f.call(kid, "viewing.history", undefined)).toEqual({ ok: true, value: [] });
+
+  for (const scope of [
+    { kind: "film" as const, versions: [allowed, forbidden] },
+    { kind: "film" as const, versions: [{ ...allowed, subscriptionId: "another-source" }] },
+    { kind: "season" as const, series, season: 1 },
+    { kind: "series" as const, series },
+  ]) {
+    expect(
+      await f.call(kid, "viewing.markTitles", {
+        commandId: `denied-${scope.kind}-${JSON.stringify(scope)}`,
+        scope,
+        watched: true,
+      }),
+    ).toMatchObject({ ok: false, error: { kind: "invalid-input" } });
+  }
+
+  expect(await f.call(kid, "viewing.filmMarks", { movies: [allowed, forbidden] })).toMatchObject({
+    ok: false,
+  });
+  expect(
+    await f.call(kid, "viewing.undoMarks", {
+      commandId: "forbidden-undo",
+      made: [{ kind: "movie", title: forbidden, revision: 1 }],
+    }),
+  ).toMatchObject({ ok: false, error: { kind: "invalid-input" } });
+  expect(
+    await f.call(kid, "viewing.undoMarks", {
+      commandId: "forbidden-series-undo",
+      made: [{ kind: "series", title: series, revision: 1 }],
+    }),
+  ).toMatchObject({ ok: false, error: { kind: "invalid-input" } });
+
+  const marked = await f.call(kid, "viewing.markTitles", {
+    commandId: "kid",
+    scope: { kind: "film", versions: [allowed] },
+    watched: true,
+  });
+
+  expect(marked).toMatchObject({ ok: true, value: { changed: 1 } });
+  expect(await f.call(kid, "viewing.filmMarks", { movies: [allowed] })).toMatchObject({
+    ok: true,
+    value: [{ movie: allowed, watched: true }],
+  });
+  expect(await f.call(kid, "viewing.history", undefined)).toMatchObject({
+    ok: true,
+    value: [{ kind: "movie", movie: allowed }],
+  });
+
+  if (!marked.ok) throw new Error("mark refused");
+  expect(
+    await f.call(kid, "viewing.undoMarks", {
+      commandId: "allowed-undo",
+      made: receipt.assert(marked.value).made,
+    }),
+  ).toEqual({ ok: true, value: null });
+  expect(await f.call(kid, "viewing.filmMarks", { movies: [allowed] })).toEqual({
+    ok: true,
+    value: [],
+  });
+
+  const again = await f.call(kid, "viewing.markTitles", {
+    commandId: "kid-again",
+    scope: { kind: "film", versions: [allowed] },
+    watched: true,
+  });
+
+  if (!again.ok) throw new Error("mark refused");
+  // Removing approval hides retained history and refuses Undo without erasing the record.
+  const back = await f.app.runPromise(f.sessions.switch(f.adult.id, kid, "1234"));
+  await f.call(back, "profiles.setPolicy", {
+    current: back,
+    pin: "1234",
+    profiles: [{ id: kid.id, approved: [] }],
+  });
+  const restricted = await f.app.runPromise(f.sessions.switch(kid.id, back));
+  expect(await f.call(restricted, "viewing.history", undefined)).toEqual({ ok: true, value: [] });
+  expect(
+    await f.call(restricted, "viewing.undoMarks", {
+      commandId: "stale-undo",
+      made: receipt.assert(again.value).made,
+    }),
+  ).toMatchObject({ ok: false });
+});
