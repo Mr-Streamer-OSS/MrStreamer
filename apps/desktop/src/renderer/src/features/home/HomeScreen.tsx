@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Play, Volume2, VolumeX } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { ChevronRight, History as HistoryIcon, Play, Volume2, VolumeX } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { seriesOf, type Title, type TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { Recording } from "@mrstreamer/contracts/recordings";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { hasTitles, ownedId, ownedKey, sameOwned } from "@mrstreamer/contracts/subscription";
-import { formatDate, formatNumber, t } from "@mrstreamer/core/i18n";
+import { formatNumber, t } from "@mrstreamer/core/i18n";
 import { openDetails, openView, type ChannelList } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo, hueOf } from "../../components/ChannelLogo.tsx";
@@ -41,7 +41,6 @@ import {
   movieNow,
   playTitle,
   pickedVersion,
-  timeLeftOf,
   type ContinueEntry,
 } from "../../lib/titles.ts";
 import { useFit } from "../../lib/use-fit.ts";
@@ -56,18 +55,16 @@ import { PAGE } from "../titles/CollectionGrid.tsx";
 import { openCollection } from "../titles/TitlesPage.tsx";
 import { HomeTitle } from "./HomeTitle.tsx";
 import {
-  isLive,
-  outcome,
-  placeText,
   playRecording,
   resumes,
-  settledPlace,
   useRecordingResume,
   useRecordings,
   type RecordingPlace,
 } from "../recordings/recordings.ts";
 import { kindLabel } from "../../lib/watchlist.ts";
 import { SavedTile, openSaved } from "../watchlist/SavedTile.tsx";
+import { HistoryPage } from "../history/HistoryPage.tsx";
+import { recordingLine } from "../history/places.ts";
 
 const NO_CHANNELS: readonly LiveChannel[] = [];
 const NO_TITLES: readonly Title[] = [];
@@ -92,7 +89,21 @@ function useBrowse(): (list: ChannelList) => void {
   };
 }
 
+/**
+ * Home, or the viewer's History in its place once asked for from Home's heading. History stays
+ * open while the page does, and Back in it returns to Home.
+ */
 export function HomeScreen({ active }: { active: boolean }) {
+  const [history, setHistory] = useState(false);
+
+  return history ? (
+    <HistoryPage onBack={() => setHistory(false)} />
+  ) : (
+    <Home active={active} onHistory={() => setHistory(true)} />
+  );
+}
+
+function Home({ active, onHistory }: { active: boolean; onHistory: () => void }) {
   const visible = usePresentationVisible();
   const browse = useBrowse();
   const subscriptions = useSubscriptions();
@@ -484,6 +495,10 @@ export function HomeScreen({ active }: { active: boolean }) {
       <WindowBar className="sticky top-0 z-20 bg-black" />
       <div className="flex items-center gap-3 px-10 pt-5 pb-3">
         <h1 className="mr-auto text-2xl font-semibold">{t("Home")}</h1>
+        <Button variant="ghost" onClick={onHistory}>
+          <HistoryIcon />
+          {t("History")}
+        </Button>
       </div>
       {notice && !(mappedOnly && notice.kind === "empty") ? (
         <div className="flex min-h-64 items-center justify-center">
@@ -898,31 +913,7 @@ function RecordingEntry({
   place: RecordingPlace;
   brief: boolean;
 }) {
-  const now = useNow();
-  const gone = recording.status.kind === "missing";
-  const day = formatDate(recording.start, "weekdayDay");
-
-  const line = gone
-    ? [day, t("No longer there")].join(" · ")
-    : isLive(recording)
-      ? [outcome(recording, now).word, placeText(recording, place)].filter(Boolean).join(" · ")
-      : [
-          day,
-          outcome(recording, now).word,
-          (settledPlace(recording, place) &&
-            place.duration > 0 &&
-            timeLeftOf({ ...place, finished: false })) ||
-            placeText(recording, place),
-        ]
-          .filter(Boolean)
-          .join(" · ");
-
-  // A place saved while it recorded was against what it had then: no bar says how far through.
-  const done =
-    settledPlace(recording, place) && !gone && place.duration > 0
-      ? Math.min(1, place.position / place.duration)
-      : null;
-
+  const { line, done, gone } = recordingLine(recording, place, useNow());
   const play = gone ? () => openView("recordings") : () => playRecording(recording);
 
   return brief ? (

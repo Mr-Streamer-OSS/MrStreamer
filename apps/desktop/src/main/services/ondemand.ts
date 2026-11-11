@@ -1,3 +1,4 @@
+import { standingFilmMark } from "@mrstreamer/core/viewing/marks";
 import { episodeStates } from "@mrstreamer/core/viewing/episodes";
 import { STARTED_SECONDS } from "@mrstreamer/core/viewing/titles";
 import { AdmittedKids } from "./profile-policy.ts";
@@ -1517,6 +1518,39 @@ function make(deps: OnDemandDeps) {
               },
             ]),
         );
+
+        if (kind === "movie") {
+          const marks = new Map(
+            (yield* record.filmMarks(versions)).map((mark) => [ownedKey(mark.movie), mark]),
+          );
+
+          const played = new Map(progress.map((entry) => [ownedKey(entry.title), entry]));
+
+          for (const title of page.titles) {
+            const subscriptions = new Set(title.versions.map((version) => version.subscriptionId));
+
+            for (const subscriptionId of subscriptions) {
+              const own = title.versions.filter(
+                (version) => version.subscriptionId === subscriptionId,
+              );
+
+              const mark = standingFilmMark(
+                own.flatMap((version) => marks.get(ownedKey(version)) ?? []),
+                own.flatMap((version) => played.get(ownedKey(version)) ?? []),
+              );
+
+              // Film state agrees with Details; quality/language still match one exact file.
+              if (!mark) continue;
+
+              for (const version of own) {
+                const key = ownedKey(version);
+
+                if (mark.watched) watched.set(key, { key, state: "watched" });
+                else watched.delete(key);
+              }
+            }
+          }
+        }
 
         if (kind === "series") {
           const files = yield* knownFiles(kind);

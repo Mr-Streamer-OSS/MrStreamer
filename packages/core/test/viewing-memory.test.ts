@@ -33,6 +33,7 @@ function app(
   snapshot: ViewingSnapshot | null,
   save: (next: ViewingSnapshot) => void,
   favourite?: (streamId: string) => FavouriteGroup | undefined,
+  identities?: ViewingSeries["Service"]["identities"],
 ) {
   const layer = ViewingRecord.layer.pipe(
     Layer.provide(
@@ -46,6 +47,7 @@ function app(
           ...defined({ favourite: favourite ? () => Effect.succeed(favourite) : undefined }),
         }),
         Layer.succeed(ViewingSeries, {
+          ...defined({ identities }),
           identity: (series) =>
             Effect.succeed({
               key: `id:${series.id}`,
@@ -126,12 +128,148 @@ describe("the viewing record over the in-memory store", () => {
     expect(saved).not.toBeNull();
   });
 
+  it("keeps film and season marks, their Undo and the history across launches", async () => {
+    let saved: ViewingSnapshot | null = null;
+    const first = app(null, (next) => (saved = next));
+    const film = { kind: "movie" as const, subscriptionId: SUB, id: "m1" };
+    await first.run((record) => record.recordProgress("p1", film, 600, 5400, 1));
+
+    const filmMarked = await first.run((record) =>
+      record.markTitles("f1", { kind: "film", versions: [film] }, true),
+    );
+
+    const seasonMarked = await first.run((record) =>
+      record.markTitles("s1", { kind: "season", series, season: 1 }, true),
+    );
+
+    expect([filmMarked.changed, seasonMarked.changed]).toEqual([1, 3]);
+
+    const relaunched = app(saved, (next) => (saved = next));
+    expect(
+      await relaunched.run((record) =>
+        record.markTitles("f1", { kind: "film", versions: [film] }, true),
+      ),
+    ).toEqual(filmMarked);
+    expect(
+      await relaunched.run((record) =>
+        record.markTitles("s1", { kind: "season", series, season: 1 }, true),
+      ),
+    ).toEqual(seasonMarked);
+    const viewing = await relaunched.run((record) => record.state);
+    expect(viewing.continueWatching).toEqual([]);
+    expect(viewing.marked[0]?.next).toBeNull();
+
+    // Both marked within a moment of each other: which came first isn't what this is about.
+    const history = await relaunched.run((record) => record.history);
+    expect(history.map((entry) => entry.kind).toSorted()).toEqual(["movie", "series"]);
+    expect(history.find((entry) => entry.kind === "movie")?.mark).toMatchObject({ watched: true });
+
+    await relaunched.run((record) =>
+      record.undoMarks("u1", [...filmMarked.made, ...seasonMarked.made]),
+    );
+
+    const undone = app(saved, () => {});
+    expect((await undone.run((record) => record.episodes(series))).marks).toEqual([]);
+    expect(
+      (await undone.run((record) => record.state)).continueWatching.map(({ title }) => title.id),
+    ).toEqual(["m1"]);
+  });
+
+  it("keeps only mark receipts, bounds command ids, and deduplicates other commands after reload", async () => {
+    const kept: { snapshot: ViewingSnapshot | null } = { snapshot: null };
+    const running = app(null, (next) => (kept.snapshot = next));
+    const movie = { kind: "movie" as const, subscriptionId: SUB, id: "m1" };
+
+    const marked = await running.run((record) =>
+      record.markTitles("mark", { kind: "film", versions: [movie] }, true),
+    );
+
+    await running.run((record) =>
+      record.recordProgress("checkpoint", movie, 600, 5400, Date.now() + 1000),
+    );
+    expect(
+      Object.values(kept.snapshot?.receiptEvents ?? {})
+        .flat()
+        .map(({ event }) => event.type),
+    ).toEqual(["movie-marked"]);
+    const relaunched = app(kept.snapshot, (next) => (kept.snapshot = next));
+    await relaunched.run((record) =>
+      record.recordProgress("checkpoint", movie, 900, 5400, Date.now() + 2000),
+    );
+    expect(
+      (await relaunched.run((record) => record.progress({ movies: [movie] })))[0]?.position,
+    ).toBe(600);
+    expect(
+      await relaunched.run((record) =>
+        record.markTitles("mark", { kind: "film", versions: [movie] }, true),
+      ),
+    ).toEqual(marked);
+    await relaunched.run((record) =>
+      Effect.forEach(
+        Array.from({ length: 501 }, (_, index) => index),
+        (index) => record.recordProgress(`p${index}`, movie, 1200, 5400, Date.now() + 3000),
+      ),
+    );
+    expect(kept.snapshot?.receipts).toHaveLength(500);
+    expect(Object.values(kept.snapshot?.receiptEvents ?? {}).flat()).toEqual([]);
+  });
+
+  it("reads History through batched current identities and propagates a failed catalogue read", async () => {
+    const kept: { snapshot: ViewingSnapshot | null } = { snapshot: null };
+    const first = app(null, (next) => (kept.snapshot = next));
+
+    const marked = await first.run((record) =>
+      record.markTitles("season", { kind: "season", series, season: 1 }, true),
+    );
+
+    await first.run((record) =>
+      record.recordProgress(
+        "other-series",
+        { ...episode(1), id: "other-e1", seriesId: "s2" },
+        600,
+        2700,
+        1,
+      ),
+    );
+    let failed = false;
+
+    const running = app(
+      kept.snapshot,
+      () => {},
+      undefined,
+      (wanted) => {
+        expect(wanted).toEqual(expect.arrayContaining([series, { subscriptionId: SUB, id: "s2" }]));
+
+        return failed
+          ? Effect.fail(
+              new Failed({ error: { kind: "unexpected", detail: "catalogue unavailable" } }),
+            )
+          : Effect.succeed(
+              wanted.map((each) => ({
+                key: `id:${each.id}`,
+                keys: [`id:${each.id}`],
+                versions: [each.id],
+              })),
+            );
+      },
+    );
+
+    expect(
+      (await running.run((record) => record.history)).find(
+        (each) => each.kind === "series" && each.series.id === "s1",
+      ),
+    ).toMatchObject({ undoable: marked.made[0]?.revision });
+    failed = true;
+    await expect(running.run((record) => record.history)).rejects.toBeDefined();
+  });
+
   it("erases an account with everything it recorded", async () => {
     const kept: { snapshot: ViewingSnapshot | null } = { snapshot: null };
     const running = app(null, (next) => (kept.snapshot = next));
     await running.run((record) => record.markEpisode("m1", episode(1), true));
     await running.run((record) => record.erase(SUB));
     expect(kept.snapshot?.accounts).toEqual({});
+    expect(Object.values(kept.snapshot?.receiptEvents ?? {}).flat()).toEqual([]);
   });
 
   it("stars, shows, moves and unstars a favourite by the port's group, none of it listed", async () => {

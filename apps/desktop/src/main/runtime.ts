@@ -1,3 +1,4 @@
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { join } from "node:path";
 import type { UsageObservers } from "./analytics/observers.ts";
 // The main process's services, assembled once from Layers. The app makes one runtime from
@@ -317,6 +318,18 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
           Effect.map(onDemand.titles("series", [series]), ([title]) =>
             seriesIdentity(series, title),
           ),
+        identities: (series) =>
+          Effect.map(onDemand.titles("series", series), (titles) => {
+            const byVersion = new Map(
+              titles.flatMap((title) =>
+                title.versions.map((version) => [ownedKey(version), title] as const),
+              ),
+            );
+
+            return series.map((version) =>
+              seriesIdentity(version, byVersion.get(ownedKey(version))),
+            );
+          }),
         seasons: (series) =>
           Effect.map(onDemand.details("series", series), (details) =>
             details.kind === "series" ? seriesEpisodeSeasons(details) : [],

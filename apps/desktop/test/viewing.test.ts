@@ -1306,6 +1306,48 @@ describe("the viewing record of several subscriptions", () => {
     expect((await viewing.state()).continueWatching).toHaveLength(1);
   });
 
+  it("marks a film's versions of every subscription in one save, keeps each one's history its own, and marks none for one not saved", async () => {
+    const { viewing, a, b } = await two();
+    later();
+    await viewing.recordProgress(
+      randomUUID(),
+      { kind: "movie", ...of(a, "91001") },
+      600,
+      6000,
+      Date.now(),
+    );
+    later();
+    const versions = [of(a, "91001"), of(b, "91001")];
+
+    await expect(
+      viewing.markTitles(
+        randomUUID(),
+        { kind: "film", versions: [...versions, of("gone", "91001")] },
+        true,
+      ),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    expect(await viewing.filmMarks(versions)).toEqual([]);
+
+    expect((await viewing.markTitles(randomUUID(), { kind: "film", versions }, true)).changed).toBe(
+      2,
+    );
+
+    // One entry per subscription's version: b's mark doesn't take a's progress for its own.
+    expect(
+      (await viewing.history()).map((entry) =>
+        entry.kind === "movie"
+          ? [entry.movie.subscriptionId, entry.progress?.position ?? null, entry.mark?.watched]
+          : null,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        [a, 600, true],
+        [b, null, true],
+      ]),
+    );
+    expect(await viewing.history()).toHaveLength(2);
+  });
+
   it("keeps the lists of a subscription whose secret the keychain lost", async () => {
     const { viewing, runtime, start, a, b } = await two();
     const starred = [of(a, "2014"), of(b, "2014")];
@@ -1327,5 +1369,298 @@ describe("the viewing record of several subscriptions", () => {
     // A star is the viewer's own, whatever the provider can be asked.
     const without = await locked.viewing.setFavourite(randomUUID(), of(b, "2014"), false);
     expect(without.favourites).toEqual([of(a, "2014")]);
+  });
+});
+
+describe("marking a film, a season or a series at once", () => {
+  /** The Dutch version of "TEST | Formats": two seasons, of three episodes and of two. */
+  const NL = "80000";
+
+  /** The files the provider lists for its episodes, by season and number. */
+  const FILES: Readonly<Record<string, string>> = {
+    "1:1": "81000",
+    "1:2": "81001",
+    "1:3": "81002",
+    "2:1": "81010",
+    "2:2": "81011",
+  };
+
+  /** The app with one subscription saved, and the clock standing still until `later`. */
+  async function marking() {
+    later();
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+    const series = await viewing.own(NL);
+
+    const episodeOf = (season: number, number: number): TitleRef => ({
+      kind: "episode",
+      subscriptionId: series.subscriptionId,
+      id: FILES[`${season}:${number}`] ?? "",
+      seriesId: NL,
+      season,
+      episode: number,
+    });
+
+    return { app, viewing, series, episodeOf };
+  }
+
+  /** Where each marked series goes on, by season and number. */
+  const goesOn = async (record: Promised<ViewingRecord["Service"]>) =>
+    (await record.state()).marked.map(({ next }) => next && `${next.season}:${next.episode}`);
+
+  const marks = async (record: Promised<ViewingRecord["Service"]>, series: OwnedId) =>
+    (await record.episodes(series)).marks.map((mark) => `${mark.season}:${mark.episode}`);
+
+  it("marks a season in one save, goes on after it, and Undo puts every episode back, also after a restart and a rebuild", async () => {
+    const { app, viewing, series, episodeOf } = await marking();
+    const { record } = viewing;
+    // Watched to its end already: only the other two episodes change.
+    await record.recordProgress(randomUUID(), episodeOf(1, 1), 2690, 2700, Date.now());
+    later();
+    const before = await record.episodes(series);
+
+    const done = await record.markTitles("season", { kind: "season", series, season: 1 }, true);
+
+    expect(done).toEqual({
+      changed: 2,
+      made: [{ kind: "series", title: series, revision: expect.any(Number) }],
+    });
+    expect(await marks(record, series)).toEqual(["1:2", "1:3"]);
+    expect(await goesOn(record)).toEqual(["2:1"]);
+
+    // The same after a restart, and once the marks are worked out from the events again.
+    app.database((db) =>
+      db.exec(
+        "delete from marked_episodes; delete from marked_series; delete from meta where key = 'state-version';",
+      ),
+    );
+    const restarted = (await app.start()).record;
+    expect(await goesOn(restarted)).toEqual(["2:1"]);
+    expect((await restarted.episodes(series)).undoable).toBe(done.made[0]?.revision);
+
+    later();
+    await restarted.undoMarks("undo", done.made);
+    expect(await restarted.episodes(series)).toEqual(before);
+    expect(await goesOn(restarted)).toEqual([]);
+    // Sent again, it changes nothing more and fails nothing.
+    await restarted.undoMarks("undo", done.made);
+    expect(await restarted.episodes(series)).toEqual(before);
+  });
+
+  it("marks a whole series, leaves out what stands so already, and refuses a season it doesn't list, storing nothing", async () => {
+    const { viewing, series } = await marking();
+    const { record } = viewing;
+    await record.markTitles(randomUUID(), { kind: "season", series, season: 1 }, true);
+    later();
+    const { sequence } = await record.state();
+
+    await expect(
+      record.markTitles(randomUUID(), { kind: "season", series, season: 9 }, true),
+    ).rejects.toMatchObject({ error: { kind: "title-not-found" } });
+    await expect(
+      record.markTitles(
+        randomUUID(),
+        { kind: "series", series: { subscriptionId: "another-subscription", id: NL } },
+        true,
+      ),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    expect((await record.state()).sequence).toBe(sequence);
+
+    const all = await record.markTitles("all", { kind: "series", series }, true);
+    expect(all.changed).toBe(2);
+    expect(await goesOn(record)).toEqual([null]);
+    // A retry recovers the original acknowledgement, including Undo revisions.
+    expect(await record.markTitles("all", { kind: "series", series }, true)).toEqual(all);
+    expect(await record.markTitles(randomUUID(), { kind: "series", series }, true)).toEqual({
+      changed: 0,
+      made: [],
+    });
+
+    later();
+    const unwatched = await record.markTitles(randomUUID(), { kind: "series", series }, false);
+    expect(unwatched.changed).toBe(5);
+    expect(await goesOn(record)).toEqual(["1:1"]);
+    // The one Undo takes the series back to every episode watched.
+    later();
+    await record.undoMarks(randomUUID(), unwatched.made);
+    expect(await goesOn(record)).toEqual([null]);
+  });
+
+  it("reports History Undo eligibility across every episode after a series mark", async () => {
+    const { viewing, series, episodeOf } = await marking();
+    const { record } = viewing;
+    const done = await record.markTitles(randomUUID(), { kind: "season", series, season: 1 }, true);
+    expect((await record.history()).find((entry) => entry.kind === "series")).toMatchObject({
+      undoable: done.made[0]?.revision,
+    });
+    later();
+    // A play outside the marked season still invalidates the entire series Undo.
+    await record.recordProgress(randomUUID(), episodeOf(2, 1), 300, 2700, Date.now());
+    expect((await record.history()).find((entry) => entry.kind === "series")).toMatchObject({
+      undoable: null,
+    });
+  });
+
+  it("recovers committed mark receipts and Undo after a lost acknowledgement and restart", async () => {
+    const { app, viewing, series } = await marking();
+    const scope = { kind: "season", series, season: 1 } as const;
+    const before = await viewing.record.episodes(series);
+    const done = await viewing.record.markTitles("lost-ack", scope, true);
+    expect(done.changed).toBe(3);
+    expect(await viewing.record.markTitles("lost-ack", scope, true)).toEqual(done);
+    const restarted = await app.start();
+    expect(await restarted.record.markTitles("lost-ack", scope, true)).toEqual(done);
+    await restarted.record.undoMarks(randomUUID(), done.made);
+    expect(await restarted.record.episodes(series)).toEqual(before);
+  });
+
+  it("marks every version of a film: it leaves Continue watching, the earlier play's late checkpoints change nothing, a play begun later takes over", async () => {
+    const { app, viewing } = await marking();
+    const { record, own } = viewing;
+    const began = Date.now();
+    await viewing.played(movie("m1-nl"), 600, 6000, began);
+    later();
+    await viewing.played(movie("m2"), 600, 6000);
+    later();
+    const versions = [await own("m1-nl"), await own("m1-4k")];
+
+    const done = await record.markTitles(randomUUID(), { kind: "film", versions }, true);
+
+    expect(done.changed).toBe(2);
+    expect(done.made.map(({ kind, title }) => [kind, title.id])).toEqual([
+      ["movie", "m1-nl"],
+      ["movie", "m1-4k"],
+    ]);
+    expect((await viewing.state()).continueWatching.map(({ title }) => title)).toEqual([
+      movie("m2"),
+    ]);
+    expect(
+      (await record.filmMarks(versions)).map(({ movie, watched }) => [movie.id, watched]),
+    ).toEqual([
+      ["m1-nl", true],
+      ["m1-4k", true],
+    ]);
+
+    // The play going on when it was marked saves late: how far it got stays as it was.
+    await viewing.played(movie("m1-nl"), 660, 6000, began);
+    expect(await viewing.progress({ movieIds: ["m1-nl"] })).toMatchObject([{ position: 600 }]);
+    expect((await viewing.state()).continueWatching.map(({ title }) => title)).toEqual([
+      movie("m2"),
+    ]);
+
+    // Undo puts it back in Continue watching where it was, after a restart too.
+    const restarted = await app.start();
+    later();
+    await restarted.record.undoMarks(randomUUID(), done.made);
+    expect((await restarted.state()).continueWatching.map(({ title }) => title)).toEqual([
+      movie("m2"),
+      movie("m1-nl"),
+    ]);
+    expect(await restarted.record.filmMarks(versions)).toEqual([]);
+
+    // Marked unwatched: the version never played or marked stands so already and is left out.
+    const unwatched = await restarted.record.markTitles(
+      randomUUID(),
+      { kind: "film", versions },
+      false,
+    );
+
+    expect(unwatched.changed).toBe(1);
+    expect((await restarted.state()).continueWatching.map(({ title }) => title)).toEqual([
+      movie("m2"),
+    ]);
+    // A play begun later takes over from the mark.
+    later();
+    await restarted.played(movie("m1-nl"), 300, 6000);
+    expect(await restarted.record.filmMarks(versions)).toEqual([]);
+    expect((await restarted.state()).continueWatching.map(({ title }) => title)).toEqual([
+      movie("m1-nl"),
+      movie("m2"),
+    ]);
+  });
+
+  it("refuses Undo, changing nothing, once a marked film or series was played, marked again or taken out of Continue watching", async () => {
+    const { viewing, series, episodeOf } = await marking();
+    const { record, own } = viewing;
+    const versions = [await own("m1")];
+    await viewing.played(movie("m1"), 600, 6000);
+    later();
+    const film = await record.markTitles(randomUUID(), { kind: "film", versions }, true);
+
+    const season = await record.markTitles(
+      randomUUID(),
+      { kind: "season", series, season: 2 },
+      true,
+    );
+
+    later();
+    await record.recordProgress(randomUUID(), episodeOf(2, 1), 60, 2700, Date.now());
+    const { sequence } = await record.state();
+
+    // One stale part refuses all of it: the film's mark, which could be taken back, stays.
+    await expect(
+      record.undoMarks(randomUUID(), [...film.made, ...season.made]),
+    ).rejects.toMatchObject({ error: { kind: "mark-changed" } });
+    expect((await record.state()).sequence).toBe(sequence);
+    expect(await record.filmMarks(versions)).toMatchObject([{ watched: true }]);
+
+    await record.removeFromContinue(randomUUID(), { movies: versions });
+    await expect(record.undoMarks(randomUUID(), film.made)).rejects.toMatchObject({
+      error: { kind: "mark-changed" },
+    });
+
+    const again = await record.markTitles(randomUUID(), { kind: "film", versions }, false);
+    await expect(record.undoMarks(randomUUID(), film.made)).rejects.toMatchObject({
+      error: { kind: "mark-changed" },
+    });
+    await record.undoMarks(randomUUID(), again.made);
+    expect(await record.filmMarks(versions)).toMatchObject([{ watched: true }]);
+
+    // Played after its mark, a film's mark can't be taken back either.
+    const other = [await own("m3")];
+    const marked = await record.markTitles(randomUUID(), { kind: "film", versions: other }, true);
+    later();
+    await viewing.played(movie("m3"), 300, 6000);
+    await expect(record.undoMarks(randomUUID(), marked.made)).rejects.toMatchObject({
+      error: { kind: "mark-changed" },
+    });
+  });
+
+  it("lists each film and series version played or marked, most recent first, whatever left Continue watching", async () => {
+    const { viewing, series, episodeOf } = await marking();
+    const { record, own } = viewing;
+    await viewing.played(movie("m1"), 600, 6000);
+    later();
+    await record.recordProgress(randomUUID(), episodeOf(1, 1), 900, 2700, Date.now());
+    later();
+    await record.recordProgress(randomUUID(), episodeOf(1, 2), 300, 2700, Date.now());
+    later();
+    await viewing.remove({ movieIds: ["m1"] });
+    await record.markTitles(randomUUID(), { kind: "film", versions: [await own("m2")] }, true);
+
+    const history = await record.history();
+
+    expect(
+      history.map((entry) =>
+        entry.kind === "movie"
+          ? [entry.movie.id, entry.progress?.position ?? null, entry.mark?.watched ?? null]
+          : [entry.series.id, entry.progress?.title.id ?? null, entry.mark],
+      ),
+    ).toEqual([
+      ["m2", null, true],
+      [NL, "81001", null],
+      ["m1", 600, null],
+    ]);
+    expect(history[1]).toMatchObject({ kind: "series", series });
+
+    // A mark a later play replaced no longer shows; the play does.
+    later();
+    await viewing.played(movie("m2"), 120, 6000);
+    expect((await record.history())[0]).toMatchObject({
+      kind: "movie",
+      mark: null,
+      progress: { position: 120 },
+    });
   });
 });

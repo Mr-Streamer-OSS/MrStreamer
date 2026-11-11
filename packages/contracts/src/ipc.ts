@@ -114,7 +114,15 @@ import {
 import { PlaylistMode, type PlaylistGroupPage, type PlaylistOmissionPage } from "./playlist.ts";
 import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
-import type { EpisodeMark, SeriesViewing, TitleProgress, Viewing } from "./viewing.ts";
+import type {
+  EpisodeMark,
+  FilmMark,
+  HistoryEntry,
+  MarksChanged,
+  SeriesViewing,
+  TitleProgress,
+  Viewing,
+} from "./viewing.ts";
 import type { CustomList } from "./custom-lists.ts";
 import { WATCHLIST_SORTS, type WatchlistPage } from "./watchlist.ts";
 
@@ -674,6 +682,30 @@ export const ipcInputs = {
   /** Takes back the mark `revision` names, of the series a version of which is named. */
   "viewing.undoMark": () =>
     type({ commandId: "string", series: owned(), revision: "number.integer > 0" }),
+  /** Marks a film, a season or a whole series watched or unwatched: see `MarkScope`. */
+  "viewing.markTitles": () =>
+    type({
+      commandId: "string",
+      scope: type({ kind: "'film'", versions: owned().array().atLeastLength(1) })
+        .or({ kind: "'season'", series: owned(), season: "number.integer >= 0" })
+        .or({ kind: "'series'", series: owned() }),
+      watched: "boolean",
+    }),
+  /** Takes back what one `viewing.markTitles` made, as its answer named it. */
+  "viewing.undoMarks": () =>
+    type({
+      commandId: "string",
+      made: type({
+        kind: "'movie' | 'series'",
+        title: owned(),
+        revision: "number.integer > 0",
+      })
+        .array()
+        .atLeastLength(1),
+    }),
+  /** The marks that stand of these movies, by their versions. */
+  "viewing.filmMarks": () => type({ movies: owned().array() }),
+  "viewing.history": none,
   /** A page of the watchlist every saved subscription's entries make together, in `sort`. */
   "watchlist.list": () =>
     type({
@@ -1101,6 +1133,29 @@ export interface IpcOutputs {
    * of Continue watching since.
    */
   "viewing.undoMark": null;
+  /**
+   * Answers once every mark is stored, in one save, with how many films and episodes changed and
+   * what `viewing.undoMarks` takes back. A failure stores nothing, and the same call can be made
+   * again. While its id is retained, a repeat answers with its original changed count and Undo
+   * receipt while the subscription data remains (at least the last 500 ids in memory snapshots;
+   * without that cap in SQLite).
+   */
+  "viewing.markTitles": MarksChanged;
+  /**
+   * Puts every film and episode the marks named, and where each series goes on and whether it
+   * shows in Continue watching, back as before, all at once. Fails with `mark-changed`, changing
+   * nothing, once any of them was marked again, played or taken out of Continue watching since,
+   * or for another profile's marks.
+   */
+  "viewing.undoMarks": null;
+  /** The marks that still stand of the movies named: none was replaced by a play begun later. */
+  "viewing.filmMarks": readonly FilmMark[];
+  /**
+   * Every film and series version this profile played or marked, of every saved subscription,
+   * most recent first, each version its own entry. Downloads and recordings keep their own
+   * positions apart: see `downloads.list` and `recordings.resume`.
+   */
+  "viewing.history": readonly HistoryEntry[];
   /** The saved titles, with what the lists have of each now. Empty without a subscription. */
   "watchlist.list": WatchlistPage;
   /** The entry the movie or series is saved as, whichever of its versions is named, or null. */

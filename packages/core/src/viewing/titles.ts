@@ -111,10 +111,14 @@ export function removedKeys(title: RawTitleRef, rows: readonly TitleRow[]): stri
 
 /**
  * Continue watching from an account's rows: movies started and not finished, and for each series
- * the episode played last, finished or not, so its next one can be offered. Hidden rows stay out.
- * Most recent first, at most `CONTINUE_OFFERED`.
+ * the episode played last, finished or not, so its next one can be offered. Hidden rows stay out,
+ * and so do movies marked by hand since their play began (`markedAt`, by the provider's id), watched
+ * or unwatched, until a play begun later. Most recent first, at most `CONTINUE_OFFERED`.
  */
-export function continueWatching(rows: readonly TitleRow[]): RawProgress[] {
+export function continueWatching(
+  rows: readonly TitleRow[],
+  markedAt: (movieId: string) => number | null = () => null,
+): RawProgress[] {
   const latestPerSeries = new Map<string, TitleRow>();
   /** Series with an episode watched past its start, so a few seconds of a pilot don't count. */
   const started = new Set<string>();
@@ -122,7 +126,13 @@ export function continueWatching(rows: readonly TitleRow[]): RawProgress[] {
 
   for (const row of rows) {
     if (row.title.kind === "movie") {
-      if (!row.hidden && !row.finished && row.position >= STARTED_SECONDS) movies.push(row);
+      const mark = markedAt(row.title.id);
+      const marked = mark !== null && row.since <= mark;
+
+      if (!row.hidden && !marked && !row.finished && row.position >= STARTED_SECONDS) {
+        movies.push(row);
+      }
+
       continue;
     }
 

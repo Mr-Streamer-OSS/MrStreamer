@@ -40,7 +40,7 @@ _Filters narrow an open grid and its search results._
 
 **Genre**, **Year**, **Runtime**, **Rating**, **Watched**, **Source**, **Quality**, **Language** and **Verified** filter an open movie or series grid and its search results. They are compact menus on one line, after **Sort** where a list has one. Each menu lists every choice, with the current one checked, and **Any** clears that filter where offered. Clear both Year fields to remove its limits. **Genre** and **Source** take several picks, and a title matches any of them. **Year** has a **From** and a **To** year, either left empty for no limit, and applies them when you press Enter or close it. Long menus scroll, and Escape closes an open menu before it leaves the list.
 
-Genres come from TMDB. Year and **Rating** are the provider's, for each version; Rating offers 6+ to 9+, out of 10. **Runtime** uses provider or TMDB lengths from current details already loaded in this session, so filtering never fetches details or opens a file: a title whose runtime isn't known yet never matches, and a line under the menus says how many are left out. **Watched** follows this profile's progress: **Unwatched**, **In progress** (at least two minutes played) or **Watched**. Manual watched episode marks count only on already loaded files. Alternate loaded files of the same episode share its watched or in-progress state, as in Details. For a series, Runtime and Watched look at the episode files already read, not the whole series. Runtime evidence stays in the recent details cache (up to 200 entries) and disappears on eviction or restart; reopen details to load it again. A year, rating, runtime or genre that isn't known never matches. Every filter must hold for one version of a title, from one source.
+Genres come from TMDB. Year and **Rating** are the provider's, for each version; Rating offers 6+ to 9+, out of 10. **Runtime** uses provider or TMDB lengths from current details already loaded in this session, so filtering never fetches details or opens a file: a title whose runtime isn't known yet never matches, and a line under the menus says how many are left out. **Watched** follows this profile's progress: **Unwatched**, **In progress** (at least two minutes played) or **Watched**. A film mark applies across its qualities in the same subscription until a newer play of any version or a later mark, including unwatched, replaces it. Manual watched episode marks count only on already loaded files. Alternate loaded files of the same episode share its watched or in-progress state, as in Details. For a series, Runtime and Watched look at the episode files already read, not the whole series. Runtime evidence stays in the recent details cache (up to 200 entries) and disappears on eviction or restart; reopen details to load it again. A year, rating, runtime or genre that isn't known never matches. Every filter must hold for one version of a title, from one source.
 
 Quality and Language are hints from the provider's names. **Unknown** means no hint, and **MULTI** means a mark for several languages. The count shows matches out of the current list, beside a collection's name; **Reset** clears every filter. Switching between Movies and Series clears them too. ⌘K's search stays unfiltered.
 
@@ -109,7 +109,28 @@ Playing an episode after you marked it replaces the mark with what you watch. An
 
 If Mr. Streamer can't read what you watched, the details say so with **Try again**. Until it can, they name no episode to go on with, show no check marks and offer no marks, so nothing is guessed. The episodes still play, from their beginning.
 
-Marks are for one episode at a time. There is none for a whole season or series.
+To mark a whole season or series, or a film, at once, see [Marking a film, season or series](#marking-a-film-season-or-series).
+
+## Marking a film, season or series
+
+_Mark a film, a season or a whole series watched or unwatched at once._
+
+- A film's details have **Mark watched** among the buttons beside **Play**, or **Mark unwatched** once the film is watched. It marks every version of the film that the subscription of the version shown lists. A marked film plays from its beginning and leaves Continue watching. Playing it after you marked it replaces the mark with what you watch.
+- A series' details have **Mark season watched** and **Mark series watched** beside the season tabs, or **Mark season unwatched** and **Mark series unwatched** once every episode there is watched. The season one marks the season shown. The series one marks every episode the series lists, specials included. Both mark in the subscription whose version the details show, as an episode's own mark does.
+
+Marking plays nothing. Each change is saved all at once or not at all. Films and episodes that already were as you asked are left alone, and the line under the buttons says how many episodes changed, as **Marked 3 episodes of Season 2 watched**, or that everything already was. **Undo** takes back the whole change: every check mark and place you stopped at, where the series goes on and whether the title was in Continue watching. Once you play, mark or remove from Continue watching a film version it marked, or any episode of any version of that series, Undo can no longer be done: the line goes, or says so when you press **Undo**, and nothing changes. Switching profiles takes the line away too. If a mark couldn't be saved, the line says so with **Retry**, and nothing has changed.
+
+## History
+
+_See what you watched and marked, and change it._
+
+**History** at the top of Home opens it, and **Home** returns. Each profile has its own. A kids profile sees only the titles approved for it.
+
+**Movies and series** lists every movie and series version you played or marked, most recent first, with how far it got or how you marked it, and when. A title has an entry for each version you watched and each subscription it's in: another subscription's file keeps its own progress, and the entry names that subscription. Titles your lists no longer have, and titles for adults, aren't shown. Click an entry to open its details. Its three dots mark that film version, or every episode of the series, watched or unwatched, with **Undo** as above, and take it off Continue watching while it's there. Nothing in History is deleted for good.
+
+**On this computer** lists the recordings and downloads you played, each with its own place, apart from the online entries and from each other. A recording says when you last played it, as Continue watching does. A download keeps no time you played it, so downloads show in the order of the Downloads page, with no time. Click one to play it from where you stopped; a download that isn't finished opens Downloads.
+
+If History can't read what you watched, it says so with **Try again**. A failed refresh keeps the last successful list and hides the empty-history message until a read succeeds.
 
 ## Watchlist
 
