@@ -727,14 +727,14 @@
       ]
     },
     {
-      "id": "core-js@3.50.0",
+      "id": "core-js@3.51.0",
       "name": "core-js",
       "licence": "MIT",
-      "source": "https://registry.npmjs.org/core-js/-/core-js-3.50.0.tgz",
+      "source": "https://registry.npmjs.org/core-js/-/core-js-3.51.0.tgz",
       "facts": [
         {
           "label": "Version",
-          "value": "3.50.0"
+          "value": "3.51.0"
         },
         {
           "label": "In the app",
