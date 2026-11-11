@@ -271,6 +271,13 @@ export function isTitleEvent(event: ViewingEvent): event is TitleEvent {
   return "title" in event && !isMarkEvent(event);
 }
 
+/** The events a bulk mark receipt needs to recover its original count and Undo. */
+export function isMarkReceiptEvent(
+  event: ViewingEvent,
+): event is Extract<ViewingEvent, { readonly type: "movie-marked" | "episodes-marked" }> {
+  return event.type === "movie-marked" || event.type === "episodes-marked";
+}
+
 /** Whether an event is a movie's mark or one taken back. */
 export function isFilmMarkEvent(event: ViewingEvent): event is FilmMarkEvent {
   return event.type === "movie-marked" || event.type === "movie-mark-undone";

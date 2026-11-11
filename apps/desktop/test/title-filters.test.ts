@@ -983,8 +983,8 @@ it("shares standing film state within a subscription while keeping quality/langu
   vi.setSystemTime(Date.now() + 60000);
   await run(record.markTitles("both-again", { kind: "film", versions: [hd, uhd] }, true));
   expect(await total()).toBe(1);
-  vi.setSystemTime(Date.now() + 60000);
-  await run(record.markTitles("history-unwatched", { kind: "film", versions: [hd] }, false));
+  // A later revision wins even when the clock has not advanced since marking both versions.
+  await run(record.markTitles("history-unwatched", { kind: "film", versions: [uhd] }, false));
   expect(await total()).toBe(0);
   expect(await smart()).toBe(0);
   expect(

@@ -16,6 +16,7 @@ import {
   apply,
   emptyState,
   isMarkEvent,
+  isMarkReceiptEvent,
   isTitleEvent,
   type AccountEvent,
   type ChannelEvent,
@@ -120,9 +121,7 @@ export function memoryViewingStore(deps: {
     receiptEvents = Object.fromEntries(
       Object.entries(from.receiptEvents ?? {}).map(([id, events]) => [
         id,
-        events.filter(
-          ({ event }) => event.type === "episodes-marked" || event.type === "movie-marked",
-        ),
+        events.filter(({ event }) => isMarkReceiptEvent(event)),
       ]),
     );
     sequence = from.sequence;
@@ -377,9 +376,7 @@ export function memoryViewingStore(deps: {
           receiptEvents = {
             ...receiptEvents,
             [commandId]: events.flatMap((event, index) =>
-              event.event.type === "episodes-marked" || event.event.type === "movie-marked"
-                ? [{ ...event, sequence: first + index }]
-                : [],
+              isMarkReceiptEvent(event.event) ? [{ ...event, sequence: first + index }] : [],
             ),
           };
           append(at, events);

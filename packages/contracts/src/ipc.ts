@@ -1136,7 +1136,8 @@ export interface IpcOutputs {
   /**
    * Answers once every mark is stored, in one save, with how many films and episodes changed and
    * what `viewing.undoMarks` takes back. A failure stores nothing, and the same call can be made
-   * again. One sent again answers with its original changed count and Undo receipt.
+   * again. While its id is retained, a repeat answers with its original changed count and Undo
+   * receipt (the last 500 commands in the memory store; without that cap in SQLite).
    */
   "viewing.markTitles": MarksChanged;
   /**

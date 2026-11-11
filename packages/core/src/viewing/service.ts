@@ -75,6 +75,7 @@ import {
 import { removalScope, type RawProgress } from "./titles.ts";
 import {
   decide,
+  isMarkReceiptEvent,
   importEvents,
   reordered,
   type AccountEvent,
@@ -270,8 +271,9 @@ export class ViewingStore extends Context.Service<
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
      * the records of `accounts` as they stand, each to its own account's and in the order given,
      * and stores the states they add up to. Returns the records after, with the numbers the
-     * events were given, in their order, and the original events for receipt recovery. A `Failed` from
-     * `decide` refuses the command: the call fails with it and stores nothing, the id neither.
+     * events were given, in their order, and at least the mark events for receipt recovery. A
+     * `Failed` from `decide` refuses the command: the call fails with it and stores nothing, the id
+     * neither.
      */
     readonly commit: (input: {
       readonly accounts: readonly string[];
@@ -418,7 +420,8 @@ export class ViewingRecord extends Context.Service<
      * Fails, storing nothing, with `no-subscription` when a version's subscription isn't saved,
      * with `title-not-found` when the series doesn't list the season, and with whatever kept the
      * lists or the details from answering. A command sent again changes nothing more, and answers
-     * with its original changed count and Undo receipt.
+     * with its original changed count and Undo receipt while the id is retained (the last 500
+     * commands in the memory store; without that cap in SQLite).
      */
     markTitles(
       commandId: string,
@@ -966,8 +969,9 @@ function make() {
         // The store returns the original events on retries too, even after a restart.
         const owners = yield* account.owners;
 
-        const made = stored.recorded.flatMap<{ count: number; mark: MarkMade }>(
-          ({ account: key, event, sequence }) => {
+        const made = stored.recorded
+          .filter(({ event }) => isMarkReceiptEvent(event))
+          .flatMap<{ count: number; mark: MarkMade }>(({ account: key, event, sequence }) => {
             const owner = owners.find((each) => each.key === key);
 
             if (!owner) return [];
@@ -998,8 +1002,7 @@ function make() {
               ];
 
             return [];
-          },
-        );
+          });
 
         return {
           changed: made.reduce((sum, each) => sum + each.count, 0),
@@ -1415,7 +1418,7 @@ function make() {
                   return yield* new Failed({
                     error: {
                       kind: "unexpected",
-                      detail: "Missing series identity; retry the request.",
+                      detail: "Missing series identity.",
                     },
                   });
                 const played = yield* store.titles(owner.key, { seriesIds: identity.versions });

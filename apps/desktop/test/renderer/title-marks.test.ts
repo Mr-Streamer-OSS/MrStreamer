@@ -16,6 +16,7 @@ import type { HistoryEntry, TitleProgress, Viewing } from "@mrstreamer/contracts
 import { HistoryPage } from "../../src/renderer/src/features/history/HistoryPage.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
+import { syncRecordings } from "../../src/renderer/src/features/recordings/recordings.ts";
 import { syncViewing } from "../../src/renderer/src/lib/queries.ts";
 
 /** Another saved subscription, whose versions are other files with their own record. */
@@ -155,10 +156,12 @@ async function show(element: ReturnType<typeof createElement>): Promise<void> {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["subscriptions"], [SAVED, OTHER_SAVED]);
   const stopSync = syncViewing(client);
+  const stopRecordings = syncRecordings(client);
   const view = queryView(client);
   await view.render(element);
   unmount = () => {
     stopSync();
+    stopRecordings();
     view.unmount();
   };
 }
@@ -221,11 +224,13 @@ describe("marking a film from its details", () => {
     expect(button("Resume")).toBeUndefined();
   });
 
-  it("keeps primary keyboard focus when the initial marks resolve, so Enter resumes", async () => {
+  it("keeps primary focus as marks resolve and activates the resulting Resume button", async () => {
     const held = ipc.hold("viewing.filmMarks");
     await filmSheet(false);
     await until(() => expect(button("Play")).toBeDefined());
     expect(document.activeElement).toBe(button("Play"));
+    expect(button("Play")?.getAttribute("aria-busy")).toBe("true");
+    expect(button("Play")?.getAttribute("aria-disabled")).toBe("true");
     await act(async () => held.resolve([]));
     await until(() => expect(button("Resume")).toBeDefined());
     expect(document.activeElement).toBe(button("Resume"));
@@ -445,13 +450,26 @@ describe("History", () => {
     await until(() => expect(text()).toContain("Night Harbour"));
   }
 
-  it.each([false, true])(
-    "keeps cached history and exposes failed refresh and Retry (empty %s)",
-    async (empty) => {
+  it("keeps local entries and the recording error detail while offering Retry", async () => {
+    await history();
+    ipc.refuse("recordings.resume", { kind: "unexpected", detail: "recording read failed" });
+    await act(async () => ipc.emit("recordings.resumeChanged", null));
+    await until(() => expect(text()).toContain("recording read failed"));
+    expect(document.querySelector('[aria-labelledby="history-local"]')?.textContent).toContain(
+      "The Long Shore",
+    );
+    ipc.always("recordings.resume", { owner: { id: "default", revision: 1 }, items: [] });
+    await click("Try again");
+    await until(() => expect(text()).not.toContain("recording read failed"));
+  });
+
+  it.each(["rows", "empty", "unavailable"] as const)(
+    "keeps cached history and exposes failed refresh and Retry (%s)",
+    async (cached) => {
       await history();
 
-      if (empty) {
-        ipc.always("viewing.history", []);
+      if (cached !== "rows") {
+        ipc.always("viewing.history", cached === "empty" ? [] : entries.slice(-1));
         await act(async () => ipc.emit("viewing.changed", viewing(2)));
         await until(() => expect(text()).toContain("Nothing watched yet"));
       }
@@ -460,7 +478,7 @@ describe("History", () => {
       await act(async () => ipc.emit("viewing.changed", viewing(3)));
       await until(() => expect(text()).toContain("refresh failed"));
 
-      if (!empty)
+      if (cached === "rows")
         expect(document.querySelector('[aria-labelledby="history-online"]')?.textContent).toContain(
           "Kite Season",
         );

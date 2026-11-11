@@ -545,6 +545,7 @@ function MovieActions({
       saving={saving}
       progress={partly ? current : undefined}
       primaryLabel={partly ? t("Resume") : t("Play")}
+      primaryPending={!ready && !readError}
       onPrimary={() => {
         if (ready || readError) playTitle(now, resumePoint(partly ? current : undefined));
       }}
@@ -767,6 +768,7 @@ function Actions({
   saving,
   progress,
   primaryLabel,
+  primaryPending = false,
   onPrimary,
   onBeginning,
   onRemove,
@@ -781,6 +783,8 @@ function Actions({
   saving: SaveToggle;
   progress: TitleProgress | undefined;
   primaryLabel: string;
+  /** Keeps the initial focus while progress or marks are unresolved. */
+  primaryPending?: boolean;
   onPrimary: () => void;
   onBeginning: (() => void) | null;
   /** Shown while Continue watching holds the title. */
@@ -816,6 +820,8 @@ function Actions({
             size="lg"
             autoFocus
             disabled={switching}
+            aria-busy={primaryPending || undefined}
+            aria-disabled={primaryPending || undefined}
             onClick={onPrimary}
             className={cn(several && "rounded-r-none pr-5")}
           >

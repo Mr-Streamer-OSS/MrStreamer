@@ -96,7 +96,7 @@ export function HistoryPage({ onBack }: { onBack: () => void }) {
             />
           )}
           {history.data && (!history.error || entries.length > 0) ? (
-            <OnlineHistory entries={entries} marks={marks} />
+            <OnlineHistory entries={entries} marks={marks} stale={history.isError} />
           ) : !history.error ? (
             <p className="text-[0.9375rem] text-muted-foreground">{t("Loading…")}</p>
           ) : null}
@@ -134,9 +134,11 @@ function useListed(entries: readonly HistoryEntry[], kind: TitleKind) {
 function OnlineHistory({
   entries,
   marks,
+  stale,
 }: {
   entries: readonly HistoryEntry[];
   marks: TitleMarks;
+  stale: boolean;
 }) {
   const movies = useListed(entries, "movie");
   const series = useListed(entries, "series");
@@ -189,7 +191,7 @@ function OnlineHistory({
       {removal.error && (
         <p className="mt-3 text-sm text-destructive">{describeError(appError(removal.error))}</p>
       )}
-      {listed.length === 0 && !failed && !loading && (
+      {listed.length === 0 && !failed && !loading && !stale && (
         <p className="text-[0.9375rem] text-muted-foreground">{t("Nothing watched yet.")}</p>
       )}
     </>
@@ -390,7 +392,7 @@ function LocalHistory() {
       )}
       {places.isError && (
         <Failure
-          text={t("Your place in some recordings couldn't be read.")}
+          text={`${t("Your place in some recordings couldn't be read.")} ${describeError(appError(places.error))}`}
           onRetry={() => void places.refetch()}
         />
       )}
