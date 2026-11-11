@@ -16,6 +16,13 @@
 // one a rule made has no Edit, as the rule sets its padding, and cancelling it lets that one
 // airing go. Rules are each a programme followed on its channels: what it records, its padding and
 // priority, Edit in a popover and Stop following in its menu.
+//   Any recording with a copy, also one still recording, has Protect or Take protection off in its
+// menu; a protected one has a lock beside its name, Protected lists them on the side, and Delete
+// and Remove refuse it. A rule's Retention popover chooses what it keeps: until deleted (default),
+// its last few, or those of the last days, taking in older recordings only when asked. Its preview
+// lists what goes now and what it keeps for now and why, and the button names how many it deletes
+// and sends that list, so a save never deletes one the viewer wasn't shown; a refused save reads
+// the preview again. A recording retention couldn't delete says so until it goes.
 // An action that fails says so in place of the reason.
 // Narrower windows put the size, or a schedule's repeat, in the row's second line and the outcome
 // under the bar. A recording's outcome and why wrap rather than cut off: two lines fit its row,
@@ -24,15 +31,24 @@
 // with nothing scheduled and no way to record, in the bar Downloads shares (DownloadsPage.tsx).
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
-import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ellipsis, Play, Repeat2, Search } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import {
+  skipToken,
+  useMutation,
+  useMutationState,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { Ellipsis, Lock, Play, Repeat2, Search } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import {
   RECORDING_PRIORITY_DEFAULT,
+  RETENTION_LIMITS,
   type Recording,
+  type RecordingRetention,
   type RecordingRule,
   type RecordingStorage,
+  type RetentionHold,
   type ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -40,6 +56,8 @@ import { formatBytes, formatDate, formatList, formatNumber, t } from "@mrstreame
 import { useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
+import { NativeCheckbox } from "../../components/ui/checkbox.tsx";
+import { Input } from "../../components/ui/input.tsx";
 import { menuItem, menuSurface } from "../../components/ui/menu.ts";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { OfflineBar } from "../downloads/DownloadsPage.tsx";
@@ -76,7 +94,8 @@ import {
 } from "./schedules.ts";
 
 /** What the page shows beside the side: a list of its own, or one group by its key. */
-type Shelf = "overview" | "recorded" | "scheduled" | "rules" | "other" | `group:${string}`;
+type Shelf =
+  "overview" | "recorded" | "scheduled" | "rules" | "protected" | "other" | `group:${string}`;
 
 export function RecordingsPage({ standalone = false }: { standalone?: boolean }) {
   const list = useRecordings();
@@ -93,8 +112,13 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
   const { groups, other } = recordingGroups(recordings, rules, scheduled);
   const searching = query.trim() !== "";
   const group = groups.find((each) => `group:${each.key}` === shelf) ?? null;
-  // A group whose last recording went shows Overview again.
-  const showing: Shelf = shelf.startsWith("group:") && !group ? "overview" : shelf;
+  const protectedOnes = recordings.filter((each) => each.protected);
+
+  // A group whose last recording went, or Protected once none is, shows Overview again.
+  const showing: Shelf =
+    (shelf.startsWith("group:") && !group) || (shelf === "protected" && !protectedOnes.length)
+      ? "overview"
+      : shelf;
 
   const shown = searching
     ? recordings.filter((each) => matchesRecording(each, query))
@@ -102,9 +126,11 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
       ? group.recordings
       : showing === "other"
         ? other
-        : showing === "overview" || showing === "recorded"
-          ? recordings
-          : [];
+        : showing === "protected"
+          ? protectedOnes
+          : showing === "overview" || showing === "recorded"
+            ? recordings
+            : [];
 
   const now = showing === "recorded" && !searching ? [] : shown.filter(isLive);
   const recorded = shown.filter((each) => !isLive(each));
@@ -151,9 +177,11 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           ? { title: t("Scheduled"), count: scheduled.length }
           : showing === "rules"
             ? { title: t("Rules"), count: rules.length }
-            : showing === "other"
-              ? { title: t("Other"), count: other.length }
-              : { title: t("Recordings"), count };
+            : showing === "protected"
+              ? { title: t("Protected"), count: protectedOnes.length }
+              : showing === "other"
+                ? { title: t("Other"), count: other.length }
+                : { title: t("Recordings"), count };
 
   // Standing alone, nothing is scheduled and nothing follows a rule.
   const shelves: { id: Shelf; label: string; count: number | null }[] = [
@@ -165,6 +193,9 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           { id: "scheduled" as const, label: t("Scheduled"), count: scheduled.length },
           { id: "rules" as const, label: t("Rules"), count: rules.length },
         ]),
+    ...(protectedOnes.length > 0
+      ? [{ id: "protected" as const, label: t("Protected"), count: protectedOnes.length }]
+      : []),
   ];
 
   const groupShelves = [
@@ -266,16 +297,21 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
             )}
             {group?.rule && !searching && (
               <span className="ml-auto truncate text-xs text-muted-foreground">
-                {t("Follows {title} on {channels}", {
-                  title: group.rule.plan.title,
-                  channels: formatList(
-                    channels
-                      .filter((channel) =>
-                        group.rule?.plan.channels.some((owned) => sameOwned(channel, owned)),
-                      )
-                      .map((channel) => channel.title),
-                  ),
-                })}
+                {[
+                  t("Follows {title} on {channels}", {
+                    title: group.rule.plan.title,
+                    channels: formatList(
+                      channels
+                        .filter((channel) =>
+                          group.rule?.plan.channels.some((owned) => sameOwned(channel, owned)),
+                        )
+                        .map((channel) => channel.title),
+                    ),
+                  }),
+                  group.rule.retention && keepsText(group.rule.retention),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
             )}
           </div>
@@ -332,6 +368,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
                 channels={channels.filter((channel) =>
                   each.plan.channels.some((owned) => sameOwned(channel, owned)),
                 )}
+                recordings={recordings.filter((one) => one.scheduled?.rule === each.id)}
               />
             ))}
           </Section>
@@ -346,9 +383,13 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           </Section>
           {now.length + recorded.length > 0 && (
             <p className="pt-4 text-[0.8125rem] text-muted-foreground">
-              {t(
-                "Recordings stay until you delete them. Partial ones play, skipping what was missed.",
-              )}
+              {rules.some((each) => each.retention)
+                ? t(
+                    "Recordings stay until you delete them or their rule's retention does. Partial ones play, skipping what was missed.",
+                  )
+                : t(
+                    "Recordings stay until you delete them. Partial ones play, skipping what was missed.",
+                  )}
             </p>
           )}
         </div>
@@ -506,18 +547,23 @@ function Row({
 
   const action = useMutation({
     mutationKey,
-    mutationFn: (kind: "stop" | "remove") =>
-      call(kind === "stop" ? "recordings.stop" : "recordings.remove", { id: recording.id }),
+    mutationFn: (kind: "stop" | "remove" | "protect" | "unprotect") =>
+      kind === "stop" || kind === "remove"
+        ? call(`recordings.${kind}`, { id: recording.id })
+        : call("recordings.protect", { id: recording.id, on: kind === "protect" }),
   });
 
   const last = useMutationState({ filters: { mutationKey }, select: (each) => each.state }).at(-1);
 
   // A Stop that failed only to write down its end was still taken: once the recording is no longer
-  // live, its outcome says so, and that its end isn't saved yet, until the retry saves it.
+  // live, its outcome says so, and that its end isn't saved yet, until the retry saves it. Next to
+  // that, a deletion retention couldn't make, which main tries again on its own; Delete still works.
   const failure =
     last?.status === "error" && (active || last.variables !== "stop")
       ? describeError(appError(last.error))
-      : null;
+      : recording.retentionFailed
+        ? t("Retention couldn't delete it. It tries again within a minute.")
+        : null;
 
   const size = missing ? null : formatBytes(recording.bytes);
   const start = coverageStart(recording);
@@ -536,9 +582,20 @@ function Row({
       <LogoSlot channel={channel} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 xl:w-64 xl:flex-none">
         <span
-          className={cn("truncate text-[0.875rem] font-medium", missing && "text-muted-foreground")}
+          className={cn(
+            "flex min-w-0 items-center gap-1.5 text-[0.875rem] font-medium",
+            missing && "text-muted-foreground",
+          )}
         >
-          {name}
+          <span className="truncate">{name}</span>
+          {recording.protected && (
+            <Lock
+              role="img"
+              aria-label={t("It's protected")}
+              className="size-3 flex-none text-muted-foreground"
+              strokeWidth={2.2}
+            />
+          )}
         </span>
         <span className="line-clamp-2 text-xs break-words text-muted-foreground">
           {[recording.channelName, when].join(" · ")}
@@ -566,7 +623,7 @@ function Row({
       <span className="hidden w-[3.75rem] flex-none text-right text-xs text-muted-foreground tabular-nums xl:block">
         {size}
       </span>
-      <div className="flex w-[10.5rem] flex-none justify-end gap-2 xl:w-[11.5rem]">
+      <div className="flex w-[12.5rem] flex-none justify-end gap-2 xl:w-[13.75rem]">
         {!missing && (
           <Button
             variant="primary"
@@ -600,7 +657,9 @@ function Row({
           >
             {t("Remove")}
           </Button>
-        ) : (
+        ) : null}
+        {/* A missed one has no copy to protect; every other one has its menu. */}
+        {!missed && (
           <Menu.Root>
             <Menu.Trigger
               render={
@@ -618,11 +677,20 @@ function Row({
                 <Menu.Popup className={cn(menuSurface, "text-[0.875rem] text-white")}>
                   <Menu.Item
                     closeOnClick
-                    onClick={() => action.mutate("remove")}
+                    onClick={() => action.mutate(recording.protected ? "unprotect" : "protect")}
                     className={cn(menuItem, "px-2 py-2")}
                   >
-                    {t("Delete")}
+                    {recording.protected ? t("Take protection off") : t("Protect")}
                   </Menu.Item>
+                  {!active && !missing && (
+                    <Menu.Item
+                      closeOnClick
+                      onClick={() => action.mutate("remove")}
+                      className={cn(menuItem, "px-2 py-2")}
+                    >
+                      {t("Delete")}
+                    </Menu.Item>
+                  )}
                 </Menu.Popup>
               </Menu.Positioner>
             </Menu.Portal>
@@ -789,7 +857,7 @@ function ScheduleRow({
         {line}
       </span>
       <span className="hidden w-[3.75rem] flex-none xl:block" />
-      <div className="flex w-[10.5rem] flex-none justify-end gap-2 xl:w-[11.5rem]">
+      <div className="flex w-[12.5rem] flex-none justify-end gap-2 xl:w-[13.75rem]">
         {!occurrence && (
           <Popover.Root open={editing} onOpenChange={setEditing}>
             <Popover.Trigger
@@ -862,13 +930,22 @@ function ScheduleRow({
 
 /**
  * One rule, in the recordings' lanes: the first channel's logo, the title with its channels,
- * padding and priority, what it records where the bar is, then Edit with its menu, which has Stop
- * following.
+ * padding, priority and retention, what it records where the bar is, then Edit, Retention and its
+ * menu, which has Stop following. `recordings` are those it made, which its retention preview names.
  */
-function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly LiveChannel[] }) {
+function RuleRow({
+  rule,
+  channels,
+  recordings,
+}: {
+  rule: RecordingRule;
+  channels: readonly LiveChannel[];
+  recordings: readonly Recording[];
+}) {
   const client = useQueryClient();
   const { plan } = rule;
   const [editing, setEditing] = useState(false);
+  const [retaining, setRetaining] = useState(false);
 
   const stop = useMutation({
     mutationKey: ["rules", "cancel", rule.id],
@@ -885,6 +962,7 @@ function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly L
     t("{minutes} min early", { minutes: plan.padding.before }),
     t("{minutes} min late", { minutes: plan.padding.after }),
     t("Priority {priority}", { priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT }),
+    ...(rule.retention ? [keepsText(rule.retention)] : []),
   ].join(", ");
 
   const mode = plan.mode === "new-only" ? t("New episodes only") : t("Every match");
@@ -923,7 +1001,7 @@ function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly L
         {failure ?? padding}
       </span>
       <span className="hidden w-[3.75rem] flex-none xl:block" />
-      <div className="flex w-[10.5rem] flex-none justify-end gap-2 xl:w-[11.5rem]">
+      <div className="flex w-[12.5rem] flex-none justify-end gap-2 xl:w-[13.75rem]">
         <Popover.Root open={editing} onOpenChange={setEditing}>
           <Popover.Trigger
             render={
@@ -949,6 +1027,39 @@ function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly L
                   {t("Follow {title}", { title: plan.title })}
                 </h2>
                 <RulePanel rule={rule} onDone={() => setEditing(false)} />
+              </Popover.Popup>
+            </Popover.Positioner>
+          </Popover.Portal>
+        </Popover.Root>
+        <Popover.Root open={retaining} onOpenChange={setRetaining}>
+          <Popover.Trigger
+            render={
+              <Button
+                size="sm"
+                aria-label={t("Retention for {title}", { title: plan.title })}
+                className="px-3 data-popup-open:bg-white/16 data-popup-open:ring-2 data-popup-open:ring-ring data-popup-open:ring-inset"
+              >
+                {t("Retention")}
+              </Button>
+            }
+          />
+          <Popover.Portal>
+            <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-[60]">
+              <Popover.Popup
+                aria-label={t("Retention for {title}", { title: plan.title })}
+                className={cn(
+                  menuSurface,
+                  "flex max-h-[var(--available-height)] w-[29rem] max-w-[calc(100vw-2rem)] flex-col gap-3.5 overflow-y-auto p-4 transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
+                )}
+              >
+                <h2 className="truncate text-[0.9375rem] font-semibold">
+                  {t("Retention for {title}", { title: plan.title })}
+                </h2>
+                <RetentionPanel
+                  rule={rule}
+                  recordings={recordings}
+                  onDone={() => setRetaining(false)}
+                />
               </Popover.Popup>
             </Popover.Positioner>
           </Popover.Portal>
@@ -981,6 +1092,312 @@ function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly L
         </Menu.Root>
       </div>
     </li>
+  );
+}
+
+/** What a rule's retention keeps, for its row and group: "keeps the last 5", "keeps 14 days". */
+function keepsText(retention: RecordingRetention): string {
+  return retention.kind === "count"
+    ? t("keeps the last {count}", { count: retention.count })
+    : t("keeps {count} days", { count: retention.days });
+}
+
+function sameRetention(a: RecordingRetention, b: RecordingRetention): boolean {
+  return a.kind === "count"
+    ? b.kind === "count" && a.count === b.count
+    : b.kind === "days" && a.days === b.days;
+}
+
+/** Why retention keeps one it would delete, as its preview says. */
+function holdText(why: RetentionHold): string {
+  switch (why) {
+    case "protected":
+      return t("It's protected");
+    case "played":
+      return t("Opened to play since Mr. Streamer started");
+    case "unsaved":
+      return t("Its end isn't saved yet");
+  }
+}
+
+/** A whole number from 1 to `max` as typed, else null. */
+function whole(text: string, max: number): number | null {
+  const value = Number(text);
+
+  return text.trim() !== "" && Number.isInteger(value) && value >= 1 && value <= max ? value : null;
+}
+
+/** Recordings each list of a retention preview names before it counts the rest. */
+const SHOWN_RETAINED = 8;
+
+type Keep = "off" | RecordingRetention["kind"];
+
+/**
+ * What `rule` keeps of `recordings`, those it made: until deleted, its last few or those of the
+ * last days, and whether older ones count. The preview follows each choice; the button names how
+ * many go now and saves with that list as `seen`, so main refuses, saving nothing, when it would
+ * delete one the viewer wasn't shown. A refused save reads the preview again. Turning it off
+ * deletes nothing and needs no preview.
+ */
+function RetentionPanel({
+  rule,
+  recordings,
+  onDone,
+}: {
+  rule: RecordingRule;
+  recordings: readonly Recording[];
+  onDone: () => void;
+}) {
+  const client = useQueryClient();
+  const saved = rule.retention;
+  const name = useId();
+  const [keep, setKeep] = useState<Keep>(saved?.kind ?? "off");
+  const [count, setCount] = useState(String(saved?.kind === "count" ? saved.count : 5));
+  const [days, setDays] = useState(String(saved?.kind === "days" ? saved.days : 30));
+  // Older recordings stay out unless the viewer takes them in; a `from` of 0 means they were.
+  const [existing, setExisting] = useState(saved?.from === 0);
+
+  const typed =
+    keep === "off" ? null : whole(keep === "count" ? count : days, RETENTION_LIMITS[keep]);
+
+  // Null keeps everything; undefined is an amount out of range, which can't be saved.
+  const retention: RecordingRetention | null | undefined =
+    keep === "off"
+      ? null
+      : typed === null
+        ? undefined
+        : keep === "count"
+          ? { kind: "count", count: typed }
+          : { kind: "days", days: typed };
+
+  const preview = useQuery({
+    queryKey: ["recordings", "retention", rule.id, retention, existing],
+    queryFn: retention
+      ? () => call("recordings.previewRetention", { id: rule.id, retention, existing })
+      : skipToken,
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      call(
+        "recordings.retain",
+        retention
+          ? { id: rule.id, retention, existing, seen: [...(preview.data?.remove ?? [])] }
+          : { id: rule.id, retention: null },
+      ),
+    onSuccess: (next) => {
+      client.setQueryData(rulesQuery().queryKey, (list) =>
+        list?.map((each) => (each.id === next.id ? next : each)),
+      );
+      onDone();
+    },
+    // Refused, as when more would go now than the preview listed: it is read again, and the
+    // button then names the new count.
+    onError: () => {
+      if (retention) void preview.refetch();
+    },
+  });
+
+  const change = (apply: () => void) => {
+    save.reset();
+    apply();
+  };
+
+  const unchanged =
+    retention === null
+      ? !saved
+      : !!retention &&
+        !!saved &&
+        sameRetention(retention, saved) &&
+        existing === (saved.from === 0);
+
+  const going = preview.data?.remove.length ?? 0;
+
+  const ready =
+    !unchanged && (retention === null || (!!retention && preview.isSuccess && !preview.isFetching));
+
+  const label =
+    retention === null
+      ? saved
+        ? t("Turn off")
+        : t("Turn on")
+      : going > 0
+        ? saved
+          ? t("Delete {count} and save", { count: going })
+          : t("Delete {count} and turn on", { count: going })
+        : saved
+          ? t("Save")
+          : t("Turn on");
+
+  const byId = new Map(recordings.map((each) => [each.id, each]));
+  const day = (each: Recording) => formatDate(coverageStart(each), "weekdayDay");
+
+  const listed = <T,>(items: readonly T[], row: (item: T) => ReactNode) => (
+    <ul className="flex flex-col gap-1.5">
+      {items.slice(0, SHOWN_RETAINED).map(row)}
+      {items.length > SHOWN_RETAINED && (
+        <li className="text-muted-foreground">
+          {t("{count} more", { count: items.length - SHOWN_RETAINED })}
+        </li>
+      )}
+    </ul>
+  );
+
+  const amount = (value: string, max: number, label: string, onChange: (value: string) => void) => (
+    <>
+      <Input
+        compact
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={max}
+        step={1}
+        value={value}
+        aria-label={label}
+        aria-invalid={whole(value, max) === null}
+        onChange={(event) => change(() => onChange(event.target.value))}
+        className="w-16 tabular-nums aria-invalid:ring-destructive"
+      />
+      <span className="text-xs text-muted-foreground">{t("{min} to {max}", { min: 1, max })}</span>
+    </>
+  );
+
+  const choices: { keep: Keep; label: string; then?: ReactNode }[] = [
+    { keep: "off", label: t("Until I delete them") },
+    {
+      keep: "count",
+      label: t("By count"),
+      then: amount(count, RETENTION_LIMITS.count, t("Recordings to keep"), setCount),
+    },
+    {
+      keep: "days",
+      label: t("By age, in days"),
+      then: amount(days, RETENTION_LIMITS.days, t("Days to keep"), setDays),
+    },
+  ];
+
+  const shown =
+    retention === null ? (
+      saved && <p className="text-muted-foreground">{t("Deletes nothing now.")}</p>
+    ) : retention === undefined ? null : preview.error ? (
+      <p role="alert" className="flex flex-wrap items-center gap-3 text-destructive">
+        {describeError(appError(preview.error))}
+        <Button size="sm" onClick={() => void preview.refetch()}>
+          {t("Try again")}
+        </Button>
+      </p>
+    ) : !preview.data ? (
+      <p className="text-muted-foreground">{t("Checking…")}</p>
+    ) : (
+      <>
+        <p className="font-semibold">
+          {going > 0
+            ? t("Deletes {count} now, {size}", {
+                count: going,
+                size: formatBytes(preview.data.bytes),
+              })
+            : t("Deletes nothing now.")}
+        </p>
+        {going > 0 &&
+          listed(preview.data.remove, (id) => {
+            const each = byId.get(id);
+
+            return (
+              each && (
+                <li key={id} className="flex gap-3">
+                  <span className="w-24 flex-none">{day(each)}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {t("{start} to {end}", {
+                      start: formatDate(coverageStart(each), "time"),
+                      end: formatDate(each.ended ?? each.stop, "time"),
+                    })}
+                  </span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {formatBytes(each.bytes)}
+                  </span>
+                </li>
+              )
+            );
+          })}
+        {preview.data.held.length > 0 && (
+          <>
+            <p className="pt-2 font-semibold">{t("Keeps for now")}</p>
+            {listed(preview.data.held, ({ id, why }) => {
+              const each = byId.get(id);
+
+              return (
+                each && (
+                  <li key={id} className="flex gap-3">
+                    <span className="w-24 flex-none">{day(each)}</span>
+                    <span className="min-w-0 flex-1 text-muted-foreground">{holdText(why)}</span>
+                  </li>
+                )
+              );
+            })}
+          </>
+        )}
+      </>
+    );
+
+  return (
+    <div className="flex flex-col gap-3.5 text-[0.8125rem]">
+      <fieldset className="flex flex-col gap-0.5">
+        <legend className="sr-only">{t("Retention")}</legend>
+        {choices.map((choice) => (
+          <div key={choice.keep} className="flex h-8 items-center gap-2.5">
+            <label className="flex w-40 flex-none items-center gap-2.5">
+              <input
+                type="radio"
+                name={name}
+                checked={keep === choice.keep}
+                onChange={() => change(() => setKeep(choice.keep))}
+                className="size-4 flex-none appearance-none rounded-full shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none checked:bg-black checked:shadow-[inset_0_0_0_5px_white] focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              {choice.label}
+            </label>
+            {keep === choice.keep && choice.then}
+          </div>
+        ))}
+      </fieldset>
+      {keep !== "off" && (
+        <label className="flex items-center gap-2.5">
+          <NativeCheckbox
+            checked={existing}
+            onChange={(event) => change(() => setExisting(event.target.checked))}
+          />
+          {saved?.from
+            ? t("Include recordings started before {date}, {time}", {
+                date: formatDate(saved.from, "date"),
+                time: formatDate(saved.from, "time"),
+              })
+            : t("Include those recorded before now")}
+        </label>
+      )}
+      <div
+        aria-live="polite"
+        className="flex flex-col gap-1.5 border-t border-border pt-3 empty:hidden"
+      >
+        {shown}
+      </div>
+      {save.error && (
+        <p role="alert" className="text-destructive">
+          {describeError(appError(save.error))}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!ready || save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {label}
+        </Button>
+        <Button size="sm" onClick={onDone}>
+          {t("Cancel")}
+        </Button>
+      </div>
+    </div>
   );
 }
 

@@ -42,6 +42,8 @@ const VERSION = 1;
  * asked for, to go on with them, and how far it played.
  */
 export type StoredRecording = Omit<Recording, "status" | "unsaved"> & {
+  /** Durable retention intent, written before folder removal and retried after restart. */
+  readonly retentionDeleting?: true;
   readonly file: string;
   readonly folder?: string;
   /** The id its chosen folder was marked with as it began, where it goes on. */
@@ -57,6 +59,9 @@ const Entry = lazy(() =>
   type({
     id: "string > 0",
     file: "string > 0",
+    // Presence protects, even when an older or damaged ledger kept a non-boolean value.
+    "protected?": "unknown",
+    "retentionDeleting?": "true",
     channel: Channel(),
     channelName: "string",
     title: "string",
@@ -197,7 +202,11 @@ async function readOurs<S, A>(
 export function readRecordings(path: string): Promise<Read<StoredRecording>> {
   return readOurs(path, File(), (parsed) => ({
     version: parsed.version,
-    items: parsed.recordings,
+    items: parsed.recordings.map((entry) => {
+      const { protected: _protected, ...record } = entry;
+
+      return { ...record, ...("protected" in entry && { protected: true as const }) };
+    }),
   }));
 }
 

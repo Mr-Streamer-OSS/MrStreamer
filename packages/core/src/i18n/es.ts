@@ -1682,6 +1682,63 @@ export const es: Translation = {
     "Reiniciar ahora detiene la grabación y conserva lo grabado.",
   "Choose a stop time within 12 hours.": "Elige una hora de fin dentro de 12 horas.",
   "Stop the recording before deleting it.": "Detén la grabación antes de eliminarla.",
+  "Take protection off before deleting it.": "Quita la protección antes de eliminarla.",
+  "A missed recording has no copy to protect.":
+    "Una grabación perdida no tiene copia que proteger.",
+  "The recordings to delete changed. Preview again.":
+    "Las grabaciones que se eliminarán han cambiado. Vuelve a ver la vista previa.",
+  // Recording protection and retention on the Recordings page.
+  Protected: "Protegidas",
+  Protect: "Proteger",
+  "Take protection off": "Quitar la protección",
+  "It's protected": "Está protegida",
+  Retention: "Conservación",
+  "Retention for {title}": "Conservación de {title}",
+  "Until I delete them": "Hasta que las elimine",
+  "By count": "Por número",
+  "By age, in days": "Por antigüedad, en días",
+  "{min} to {max}": "{min} a {max}",
+  "Recordings to keep": "Grabaciones que conservar",
+  "Days to keep": "Días que conservar",
+  "Include recordings started before {date}, {time}":
+    "Incluir grabaciones iniciadas antes de {date}, {time}",
+  "Include those recorded before now": "Incluir las grabadas hasta ahora",
+  "Deletes nothing now.": "Ahora no elimina nada.",
+  "Keeps for now": "Se conservan por ahora",
+  "Opened to play since Mr. Streamer started":
+    "Abierta para reproducir desde que se inició Mr. Streamer",
+  "Its end isn't saved yet": "Su final aún no está guardado",
+  "Turn on": "Activar",
+  "Turn off": "Desactivar",
+  "Retention couldn't delete it. It tries again within a minute.":
+    "La conservación no pudo eliminarla. Lo volverá a intentar en menos de un minuto.",
+  "Recordings stay until you delete them or their rule's retention does. Partial ones play, skipping what was missed.":
+    "Las grabaciones se quedan hasta que las borres o lo haga la conservación de su regla. Las parciales se reproducen saltando lo que faltó.",
+  "keeps the last {count}": {
+    one: "conserva solo la última",
+    many: "conserva las últimas {count}",
+    other: "conserva las últimas {count}",
+  },
+  "keeps {count} days": {
+    one: "conserva {count} día",
+    many: "conserva {count} de días",
+    other: "conserva {count} días",
+  },
+  "Deletes {count} now, {size}": {
+    one: "Elimina {count} ahora, {size}",
+    many: "Elimina {count} ahora, {size}",
+    other: "Elimina {count} ahora, {size}",
+  },
+  "Delete {count} and turn on": {
+    one: "Eliminar {count} y activar",
+    many: "Eliminar {count} y activar",
+    other: "Eliminar {count} y activar",
+  },
+  "Delete {count} and save": {
+    one: "Eliminar {count} y guardar",
+    many: "Eliminar {count} y guardar",
+    other: "Eliminar {count} y guardar",
+  },
   "It is still recording.": "Todavía se está grabando.",
   Recordings: "Grabaciones",
   Recording: "Grabando",

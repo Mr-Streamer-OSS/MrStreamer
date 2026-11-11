@@ -107,6 +107,16 @@ export interface Recording {
    * remains, else it is cut short by the quit.
    */
   readonly unsaved?: boolean;
+  /**
+   * The viewer protected it (`recordings.protect`): its rule's retention never deletes it, and
+   * Delete and Remove refuse it until protection is taken off.
+   */
+  readonly protected?: true;
+  /**
+   * Retention could not finish deleting it, including saving the inventory after its folder went.
+   * Files still present take their room; the next check retries completion, also after restart.
+   */
+  readonly retentionFailed?: true;
 }
 
 /** Personal recording positions joined to retained local inventory, including zero. */
@@ -364,6 +374,48 @@ export interface RecordingRule {
   readonly error?: string;
   readonly id: string;
   readonly plan: RecordingRulePlan;
+  /**
+   * Which of its recordings it deletes, once the viewer turned that on; absent, it deletes none.
+   * It covers the rule's ended recordings that started at or after `from`: 0 when the viewer took
+   * in those made before it was turned on.
+   */
+  readonly retention?: RecordingRetention & { readonly from: number };
+}
+
+/** The most a rule's retention keeps by count, and by age in days. */
+export const RETENTION_LIMITS = { count: 100, days: 365 } as const;
+
+/**
+ * Which of a rule's ended recordings its retention keeps: its newest `count`, by start, or those
+ * that ended within the last `days`. The rest go, but for those it holds (`RetentionHold`).
+ */
+export type RecordingRetention =
+  | { readonly kind: "count"; readonly count: number }
+  | { readonly kind: "days"; readonly days: number };
+
+export const RecordingRetentionSchema = lazy(() =>
+  type({ kind: "'count'", count: `1 <= number.integer <= ${RETENTION_LIMITS.count}` }).or({
+    kind: "'days'",
+    days: `1 <= number.integer <= ${RETENTION_LIMITS.days}`,
+  }),
+);
+
+/**
+ * Why retention keeps a recording it would delete, checked again just before each deletion:
+ *   - `protected`: the viewer protected it.
+ *   - `played`: it was opened to play since Mr. Streamer started; a later start may delete it.
+ *   - `unsaved`: how it ended isn't written down yet, so a restart could go on with it.
+ */
+export type RetentionHold = "protected" | "played" | "unsaved";
+
+/** What a rule's retention would delete now, deleting nothing. */
+export interface RetentionPreview {
+  /** Recordings it deletes, by id, oldest first. */
+  readonly remove: readonly string[];
+  /** Bytes their files take, freed once they go. */
+  readonly bytes: number;
+  /** Recordings past it that it keeps for now, oldest first, and why. */
+  readonly held: readonly { readonly id: string; readonly why: RetentionHold }[];
 }
 
 export const RECORDING_RULE_LIMITS = {

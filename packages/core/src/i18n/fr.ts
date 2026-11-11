@@ -1685,6 +1685,63 @@ export const fr: Translation = {
     "Redémarrer maintenant arrête l'enregistrement et garde ce qui a été enregistré.",
   "Choose a stop time within 12 hours.": "Choisissez une heure de fin dans les 12 heures.",
   "Stop the recording before deleting it.": "Arrêtez l’enregistrement avant de le supprimer.",
+  "Take protection off before deleting it.": "Retirez la protection avant de le supprimer.",
+  "A missed recording has no copy to protect.":
+    "Un enregistrement manqué n’a pas de copie à protéger.",
+  "The recordings to delete changed. Preview again.":
+    "Les enregistrements à supprimer ont changé. Prévisualisez à nouveau.",
+  // Recording protection and retention on the Recordings page.
+  Protected: "Protégés",
+  Protect: "Protéger",
+  "Take protection off": "Retirer la protection",
+  "It's protected": "Il est protégé",
+  Retention: "Conservation",
+  "Retention for {title}": "Conservation de {title}",
+  "Until I delete them": "Jusqu’à ce que je les supprime",
+  "By count": "Par nombre",
+  "By age, in days": "Par ancienneté, en jours",
+  "{min} to {max}": "{min} à {max}",
+  "Recordings to keep": "Enregistrements à garder",
+  "Days to keep": "Jours à garder",
+  "Include recordings started before {date}, {time}":
+    "Inclure les enregistrements commencés avant le {date}, {time}",
+  "Include those recorded before now": "Inclure les enregistrements déjà faits",
+  "Deletes nothing now.": "Ne supprime rien pour l’instant.",
+  "Keeps for now": "Gardés pour l’instant",
+  "Opened to play since Mr. Streamer started":
+    "Ouvert pour la lecture depuis le démarrage de Mr. Streamer",
+  "Its end isn't saved yet": "Sa fin n’est pas encore enregistrée",
+  "Turn on": "Activer",
+  "Turn off": "Désactiver",
+  "Retention couldn't delete it. It tries again within a minute.":
+    "La conservation n’a pas pu le supprimer. Nouvel essai dans la minute.",
+  "Recordings stay until you delete them or their rule's retention does. Partial ones play, skipping what was missed.":
+    "Les enregistrements restent jusqu’à ce que vous les supprimiez ou que la conservation de leur règle le fasse. Les enregistrements partiels se lisent en sautant ce qui manque.",
+  "keeps the last {count}": {
+    one: "garde le dernier",
+    many: "garde les {count} derniers",
+    other: "garde les {count} derniers",
+  },
+  "keeps {count} days": {
+    one: "garde {count} jour",
+    many: "garde {count} de jours",
+    other: "garde {count} jours",
+  },
+  "Deletes {count} now, {size}": {
+    one: "En supprime {count} maintenant, {size}",
+    many: "En supprime {count} maintenant, {size}",
+    other: "En supprime {count} maintenant, {size}",
+  },
+  "Delete {count} and turn on": {
+    one: "En supprimer {count} et activer",
+    many: "En supprimer {count} et activer",
+    other: "En supprimer {count} et activer",
+  },
+  "Delete {count} and save": {
+    one: "En supprimer {count} et enregistrer",
+    many: "En supprimer {count} et enregistrer",
+    other: "En supprimer {count} et enregistrer",
+  },
   "It is still recording.": "L’enregistrement est toujours en cours.",
   Recordings: "Enregistrements",
   Recording: "Enregistrement",
