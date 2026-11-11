@@ -864,7 +864,8 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       }),
     // The events go too, so no rebuild, here or in an older build, brings anything back, and so
     // does what the account saved to its watchlist, the series it follows and what it put in the
-    // viewer's channel lists, which the same file keeps. The account's key and titles don't linger in the file either.
+    // viewer's channel lists, which the same file keeps. The account's key and titles don't
+    // linger in the file either.
     erase: (account) =>
       attempt(() => {
         places.delete(account);

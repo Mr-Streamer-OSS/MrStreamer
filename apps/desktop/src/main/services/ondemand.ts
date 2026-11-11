@@ -6,10 +6,10 @@ import { workerResults } from "../ondemand/protocol.ts";
 import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
 // details come from the provider and TMDB when a title opens, and for a followed series after a
-// refresh changed its list entry (`listedEpisodes`, see series-follows.ts), never otherwise, TMDB's
-// episodes when their season opens, and playback asks here which file to stream. A title's details don't wait
-// for TMDB: what it says joins them once it arrives, and `detailsChanged` says so.
-// A title, version or episode a call names says which subscription lists it, and one of a
+// refresh changed its list entry (`listedEpisodes`, see series-follows.ts), never otherwise,
+// TMDB's episodes when their season opens, and playback asks here which file to stream. A title's
+// details don't wait for TMDB: what it says joins them once it arrives, and `detailsChanged`
+// says so. A title, version or episode a call names says which subscription lists it, and one of a
 // subscription that isn't saved finds nothing. The lists are those of every saved subscription
 // that has movies and series, shown as one catalogue: an unmapped playlist adds none.
 // Each subscription's lists are fetched, kept and reported on their own, so one that can't be

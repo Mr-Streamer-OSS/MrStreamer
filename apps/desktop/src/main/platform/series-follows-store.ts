@@ -13,6 +13,7 @@
 // (viewing-store.ts), so erasing never depends on this store having opened.
 import type { DatabaseSync } from "node:sqlite";
 import { type } from "arktype";
+import type { Episode } from "@mrstreamer/contracts/ondemand";
 import { Failed } from "@mrstreamer/core/failure";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -71,12 +72,7 @@ const EpisodeRow = type({
 });
 
 /** An episode as the provider lists it: the file that plays it, and where it falls. */
-interface ListedEpisode {
-  readonly id: string;
-  readonly season: number;
-  readonly number: number;
-  readonly title: string;
-}
+type ListedEpisode = Pick<Episode, "id" | "season" | "number" | "title">;
 
 /** What a series version's lists and episodes say now. */
 export interface SeriesFacts {

@@ -123,6 +123,18 @@ function make() {
         };
       });
 
+    /** The follows of these saved subscriptions, each with its source and version. */
+    const followsOf = (sources: readonly SavedSubscription[]) =>
+      Effect.map(store.follows(sources.map((each) => each.key)), (follows) =>
+        follows.flatMap((follow) => {
+          const source = sources.find((each) => each.key === follow.account);
+
+          return source
+            ? [{ follow, source, series: { subscriptionId: source.id, id: follow.seriesId } }]
+            : [];
+        }),
+      );
+
     /** The titles the lists have for these versions, at least one, each by its version. */
     const titlesOf = (versions: readonly OwnedId[]) =>
       Effect.map(
@@ -165,25 +177,18 @@ function make() {
       series: OwnedId,
       account: string,
       title: Title,
-      listsNow: readonly TitleListsStatus[],
+      listed: string | null,
       stands: () => boolean,
     ) =>
       Effect.gen(function* () {
-        const episodes = yield* onDemand.listedEpisodes(series);
-
         return {
           account,
           seriesId: series.id,
           name: title.title,
           year: title.year,
           adult: title.adult,
-          listed: entryOf(title, series, listsNow),
-          episodes: episodes.map(({ id, season, number, title }) => ({
-            id,
-            season,
-            number,
-            title,
-          })),
+          listed,
+          episodes: yield* onDemand.listedEpisodes(series),
           at: yield* Clock.currentTimeMillis,
           stands,
         } satisfies SeriesFacts;
@@ -203,15 +208,7 @@ function make() {
               loaded.some((each) => each.subscriptionId === source.id),
             );
 
-            const follows = (yield* store.follows(found.map((each) => each.key))).flatMap(
-              (follow) => {
-                const source = found.find((each) => each.key === follow.account);
-
-                return source
-                  ? [{ follow, source, series: { subscriptionId: source.id, id: follow.seriesId } }]
-                  : [];
-              },
-            );
+            const follows = yield* followsOf(found);
 
             if (follows.length === 0) return;
             const titleFor = yield* titlesOf(follows.map((each) => each.series));
@@ -233,7 +230,7 @@ function make() {
               if (failedUnder.has(key) && failedUnder.get(key) === fetchedAt) continue;
               const stands = () => subscriptions.standsNow(source);
 
-              const news = yield* factsOf(series, source.key, title, listsNow, stands).pipe(
+              const news = yield* factsOf(series, source.key, title, listed, stands).pipe(
                 Effect.flatMap(store.checked),
                 Effect.tap(() => Effect.sync(() => failedUnder.delete(key))),
                 Effect.catchTag("Failed", (failed) =>
@@ -288,7 +285,9 @@ function make() {
             return yield* new Failed({ error: { kind: "title-not-found", titleId: series.id } });
           const { lists: listsNow } = yield* onDemand.status;
 
-          yield* store.follow(yield* factsOf(series, source.key, title, listsNow, stands));
+          const listed = entryOf(title, series, listsNow);
+
+          yield* store.follow(yield* factsOf(series, source.key, title, listed, stands));
           yield* announce;
 
           return yield* state(series);
@@ -302,21 +301,14 @@ function make() {
         }),
 
       alerts: Effect.gen(function* () {
-        const found = yield* saving;
         const policy = yield* Effect.serviceOption(AdmittedKids);
         const approved = policy._tag === "Some" ? policy.value.approved : null;
 
-        const news = (yield* store.follows(found.map((each) => each.key))).flatMap((follow) => {
-          const source = found.find((each) => each.key === follow.account);
-          const series = source && { subscriptionId: source.id, id: follow.seriesId };
-
-          return source &&
-            series &&
+        const news = (yield* followsOf(yield* saving)).filter(
+          ({ follow, series }) =>
             follow.newEpisodes.length > 0 &&
-            allowsApproval(approved, { kind: "series", ...series })
-            ? [{ follow, source, series }]
-            : [];
-        });
+            allowsApproval(approved, { kind: "series", ...series }),
+        );
 
         if (news.length === 0) return [];
         const titleFor = yield* titlesOf(news.map((each) => each.series));
