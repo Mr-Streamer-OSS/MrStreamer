@@ -2935,7 +2935,8 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Deletes what each rule's retention lets go now, answering when the next goes by age, or soon
-     * while a deletion failed; null for neither. Deletes nothing while either file can't be read.
+     * while a deletion failed; null for neither. Unreadable ledgers prevent new selection;
+     * already saved deletion intents can finish.
      */
     const retainNow = (approved?: { rule: string; seen: readonly string[] }) =>
       Effect.gen(function* () {
@@ -2953,6 +2954,7 @@ function make(deps: RecordingsDeps) {
         const pending = [...records.values()].filter((each) => each.retentionDeleting);
 
         for (const record of pending) {
+          if (holdOf(record.id) !== null) continue;
           tried.add(record.id);
           yield* retire(record);
         }
@@ -3487,15 +3489,34 @@ function make(deps: RecordingsDeps) {
 
             if (on) protection.add(id);
             else protection.delete(id);
+
+            // Protection cancels an intact copy's deletion, but a removed copy still needs
+            // its durable intent to finish the inventory write, even across restart.
+            if (on && record.retentionDeleting) {
+              const intact = yield* Effect.promise(() =>
+                stat(fileOf(record)).then(
+                  () => true,
+                  () => false,
+                ),
+              );
+
+              if (intact) {
+                const { retentionDeleting: _deleting, ...kept } = record;
+                records.set(id, kept);
+              }
+            }
+
             const written = yield* Effect.result(save);
 
             if (written._tag === "Failure") {
               if (on) protection.delete(id);
               else protection.add(id);
+              records.set(id, record);
 
               return yield* written.failure;
             }
 
+            if (on) retentionFailures.delete(id);
             yield* publish;
           }),
         ),
@@ -3513,6 +3534,8 @@ function make(deps: RecordingsDeps) {
               error: { kind: "unexpected", detail: t("This recording is no longer there.") },
             });
           played.add(id);
+
+          if (retentionFailures.delete(id)) yield* publish;
 
           // Its file may have gone since the list was read: the list says so at once.
           const there = yield* Effect.promise(() =>

@@ -385,7 +385,7 @@ export const ipcInputs = {
   /**
    * Turns rule `id`'s retention on, changes it, or with null turns it off. `existing` is as for
    * `recordings.previewRetention`, false when left out. `seen` is what the viewer's preview listed
-   * to delete: it refuses to delete any other.
+   * to delete: pre-save validation and the initial save sweep are bounded by those IDs.
    */
   "recordings.retain": () =>
     type({
@@ -951,7 +951,7 @@ export interface IpcOutputs {
   "recordings.previewRetention": RetentionPreview;
   /**
    * The rule as saved, once what it deletes now is deleted. Fails, saving nothing, when it would
-   * delete a recording `seen` doesn't list; a deletion that fails shows on its recording.
+   * delete an unseen recording at pre-save validation; the bounded save sweep selects only `seen` IDs. Deletion failures show on recordings.
    */
   "recordings.retain": RecordingRule;
   /** Fails for rule-made schedules, an unlisted channel or a plan with no time to come. */

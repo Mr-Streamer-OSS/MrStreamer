@@ -7112,6 +7112,164 @@ describe("recording protection and retention", () => {
     );
   });
 
+  it("protects an intact failed deletion persistently without reviving it after retention is disabled", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const id = ids[0]!;
+    const original = fs.rm;
+
+    const adapter = vi.spyOn(fs, "rm").mockImplementation(async (path, options) => {
+      if (path === join(root, id)) throw new Error("folder removal refused");
+
+      return original(path, options);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    const count = { kind: "count", count: 1 } as const;
+    const preview = await first.recordings.previewRetention(RULE, count, true);
+    await first.recordings.retain(RULE, count, true, preview.remove);
+    expect((await first.recordings.list()).find((each) => each.id === id)).toHaveProperty(
+      "retentionFailed",
+      true,
+    );
+    await first.recordings.protect(id, true);
+    expect((await first.recordings.list()).find((each) => each.id === id)).not.toHaveProperty(
+      "retentionFailed",
+    );
+    await first.recordings.retain(RULE, null);
+    await first.quit();
+    adapter.mockRestore();
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+    expect((await second.recordings.list()).find((each) => each.id === id)).toHaveProperty(
+      "protected",
+      true,
+    );
+    await second.recordings.protect(id, false);
+    await second.recordings.check();
+    expect((await second.recordings.list()).find((each) => each.id === id)).not.toHaveProperty(
+      "retentionFailed",
+    );
+    expect(existsSync(join(root, id, "a.ts"))).toBe(true);
+    await second.quit();
+    const third = await app(dataDir);
+    onTestFinished(third.quit);
+    expect((await third.recordings.list()).map((each) => each.id)).toContain(id);
+  });
+
+  it("holds a played failed deletion without a false error, then recovers its durable intent after restart", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const id = ids[0]!;
+    const original = fs.rm;
+
+    const adapter = vi.spyOn(fs, "rm").mockImplementation(async (path, options) => {
+      if (path === join(root, id)) throw new Error("folder removal refused");
+
+      return original(path, options);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    const count = { kind: "count", count: 1 } as const;
+    const preview = await first.recordings.previewRetention(RULE, count, true);
+    await first.recordings.retain(RULE, count, true, preview.remove);
+    expect((await first.recordings.list()).find((each) => each.id === id)).toHaveProperty(
+      "retentionFailed",
+      true,
+    );
+    expect(await first.recordings.copy(id)).not.toBeNull();
+    expect((await first.recordings.list()).find((each) => each.id === id)).not.toHaveProperty(
+      "retentionFailed",
+    );
+    adapter.mockRestore();
+    await first.recordings.check();
+    expect((await first.recordings.list()).find((each) => each.id === id)).not.toHaveProperty(
+      "retentionFailed",
+    );
+    expect(existsSync(join(root, id, "a.ts"))).toBe(true);
+    await first.quit();
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+
+    const after = await until(
+      () => second.recordings.list(),
+      (list) => !list.some((each) => each.id === id),
+      2000,
+    );
+
+    expect(after.map((each) => each.id)).not.toContain(id);
+  });
+
+  it.each(["protect", "play"] as const)(
+    "preserves removed-file recovery while %s holds a failed inventory write",
+    async (hold) => {
+      const { dataDir, root, ids } = await seeded(2);
+      const first = await app(dataDir);
+      onTestFinished(first.quit);
+      const id = ids[0]!;
+      const original = fs.rename;
+
+      const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        if (to === join(root, "recordings.json")) {
+          const replacing = await readRecordings(String(from));
+
+          if (replacing.kind === "read" && !replacing.items.some((each) => each.id === id))
+            throw new Error("inventory replacement refused after folder removal");
+        }
+
+        return original(from, to);
+      });
+
+      onTestFinished(() => adapter.mockRestore());
+      const count = { kind: "count", count: 1 } as const;
+      const preview = await first.recordings.previewRetention(RULE, count, true);
+      await first.recordings.retain(RULE, count, true, preview.remove);
+      expect((await first.recordings.list()).find((each) => each.id === id)).toHaveProperty(
+        "retentionFailed",
+        true,
+      );
+
+      if (hold === "protect") await first.recordings.protect(id, true);
+      else {
+        // Admission may still refuse a retry already claimed by the background check.
+        const failure = await until(
+          () =>
+            first.recordings.copy(id).then(
+              () => null,
+              (error: { error: { kind: string } }) => error.error.kind,
+            ),
+          (kind) => kind === "stream",
+        );
+
+        expect(failure).toBe("stream");
+      }
+
+      await first.recordings.check();
+      expect((await first.recordings.list()).find((each) => each.id === id)).not.toHaveProperty(
+        "retentionFailed",
+      );
+      adapter.mockRestore();
+      await first.recordings.retain(RULE, null);
+      await first.quit();
+      const second = await app(dataDir);
+      onTestFinished(second.quit);
+
+      if (hold === "protect") await second.recordings.protect(id, false);
+      await second.recordings.check();
+
+      const after = await until(
+        () => second.recordings.list(),
+        (list) => !list.some((each) => each.id === id),
+        2000,
+      );
+
+      expect(after.map((each) => each.id)).not.toContain(id);
+      expect(existsSync(join(root, id))).toBe(false);
+    },
+  );
+
   it("keeps metadata deletion failure visible and retries it automatically across restart", async () => {
     const { dataDir, root, ids } = await seeded(2);
     const first = await app(dataDir);
