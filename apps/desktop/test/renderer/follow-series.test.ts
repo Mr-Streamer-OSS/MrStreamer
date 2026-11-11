@@ -172,6 +172,44 @@ describe("Follow in a series' details", () => {
 });
 
 describe("New episodes on Home", () => {
+  it.each(["follows.changed", "ondemand.updated"] as const)(
+    "replaces an obsolete first read after %s",
+    async (event) => {
+      ipc.always("subscription.list", [SAVED]);
+      ipc.always("library.categories", []);
+      ipc.always("library.browse", browseResult([]));
+      ipc.always("library.status", []);
+      ipc.always("ondemand.collection", { name: "All", total: 0, titles: [] });
+      const oldRead = ipc.hold("follows.alerts");
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      client.setQueryData(queries.subscriptions().queryKey, [SAVED]);
+      const view = queryView(client);
+      const stop = syncOnDemand(client);
+      unmount = () => {
+        stop();
+        view.unmount();
+        client.clear();
+      };
+
+      await view.render(createElement(HomeScreen, { active: false }));
+      await until(() => expect(ipc.argsOf("follows.alerts")).toHaveLength(1));
+
+      const files = [
+        { ...LOW_TIDE, number: 0, title: "Pilot" },
+        { ...CROSSING, number: 0, title: "Behind the scenes" },
+      ];
+
+      ipc.always("follows.alerts", [followed(files)]);
+      await act(async () => {
+        if (event === "follows.changed") ipc.emit(event, { owner: VIEWER });
+        else ipc.emit(event, { lists: [], metadata: null });
+      });
+      await act(async () => oldRead.resolve([]));
+      await until(() => expect(text()).toContain("Pilot, Behind the scenes"));
+      expect(text()).not.toContain("E0");
+    },
+  );
+
   it("forgets private alerts and late answers while follow surfaces are closed", async () => {
     ipc.always("subscription.list", [SAVED]);
     ipc.always("library.categories", []);

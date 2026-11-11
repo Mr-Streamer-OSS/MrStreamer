@@ -86,7 +86,11 @@ function Follow({ series }: { series: OwnedId }) {
             {t("{count} new episodes", { count: follow.newEpisodes.length })}
           </span>{" "}
           {follow.newEpisodes
-            .map((episode) => `${episodeLabel(episode.season, episode.number)} ${episode.title}`)
+            .map((episode) =>
+              episode.number > 0
+                ? `${episodeLabel(episode.season, episode.number)} ${episode.title}`
+                : episode.title,
+            )
             .join(" · ")}{" "}
           <button
             disabled={busy}

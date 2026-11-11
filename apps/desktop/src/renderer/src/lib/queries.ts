@@ -890,7 +890,12 @@ export function syncOnDemand(client: QueryClient): () => void {
     if (marked) {
       forget(client, { queryKey: ["collections"] });
       forget(client, { queryKey: ["follows"] });
-    } else void client.invalidateQueries({ queryKey: ["follows"] });
+    } else {
+      const owner = profileOwner();
+      void client.cancelQueries({ queryKey: ["follows"] }).then(() => {
+        if (currentProfile(owner)) void client.invalidateQueries({ queryKey: ["follows"] });
+      });
+    }
 
     if (newLists || marked) invalidateDetailsCatalogue();
 

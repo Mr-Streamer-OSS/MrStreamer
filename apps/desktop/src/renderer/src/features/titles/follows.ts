@@ -31,6 +31,9 @@ export function useFollowCommands() {
   const [owner] = useState(profileOwner);
 
   const settle = async () => {
+    if (!currentProfile(owner)) return;
+    await client.cancelQueries({ queryKey: ["follows"] });
+
     if (currentProfile(owner)) await client.invalidateQueries({ queryKey: ["follows"] });
   };
 
@@ -51,7 +54,10 @@ export function useFollowCommands() {
 /** Reads follows again when this viewer's records change. Catalogue privacy lives in syncOnDemand. */
 function syncFollows(client: QueryClient): () => void {
   return listen("follows.changed", ({ owner }) => {
-    if (currentProfile(owner)) void client.invalidateQueries({ queryKey: ["follows"] });
+    if (!currentProfile(owner)) return;
+    void client.cancelQueries({ queryKey: ["follows"] }).then(() => {
+      if (currentProfile(owner)) void client.invalidateQueries({ queryKey: ["follows"] });
+    });
   });
 }
 
@@ -63,5 +69,9 @@ export function useFollowUpdates(): void {
 
 /** "S2 E5, S2 E6": the new episodes by their numbers. */
 export function newEpisodeLabels(episodes: readonly NewEpisode[]): string {
-  return episodes.map((episode) => episodeLabel(episode.season, episode.number)).join(", ");
+  return episodes
+    .map((episode) =>
+      episode.number > 0 ? episodeLabel(episode.season, episode.number) : episode.title,
+    )
+    .join(", ");
 }

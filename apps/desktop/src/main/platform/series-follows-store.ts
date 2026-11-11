@@ -150,10 +150,6 @@ export class SeriesFollowsStore extends Context.Service<
 /** Makes the tables, for this store and for the viewing record that erases them. */
 export function prepareSeriesFollows(db: DatabaseSync): void {
   db.exec(SCHEMA);
-  const columns = db.prepare("pragma table_info(series_follow_episodes)").all();
-
-  if (!columns.some((column) => column["name"] === "listed"))
-    db.exec("alter table series_follow_episodes add column listed integer not null default 1");
 }
 
 /** The store on the profile's database. */
