@@ -90,6 +90,7 @@ import { Guide } from "@mrstreamer/core/guide/service";
 import { t, type PlainKey } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
@@ -455,7 +456,12 @@ function make(deps: RecordingsDeps) {
     const changes = yield* PubSub.sliding<readonly Recording[]>(4);
     /** Asks the schedules to be checked: a recording started or ended, or the lists changed. */
     const wakes = yield* Queue.sliding<void>(1);
-    const wake = Effect.asVoid(Queue.offer(wakes, undefined));
+    const retentionWakes = yield* Queue.sliding<void>(1);
+
+    const wake = Effect.asVoid(
+      Effect.andThen(Queue.offer(wakes, undefined), Queue.offer(retentionWakes, undefined)),
+    );
+
     /** One write of recordings.json at a time, each with every record as it is then. */
     const writing = (yield* Semaphore.make(1)).withPermits(1);
 
@@ -711,38 +717,36 @@ function make(deps: RecordingsDeps) {
     /** How many times in a row each recording's capture ended quickly, by id. */
     const quickEnds = new Map<string, number>();
 
-    const save = writing(
-      Effect.tryPromise({
-        try: async () => {
-          // One not read yet (see unseen) is kept as it was, its gap not guessed.
-          const kept = [
-            ...[...records.values()].map((record) =>
-              isLive(record) ? (unseen.get(record.id) ?? record) : record,
-            ),
-            ...beginning.values(),
-          ];
+    const saveInventory = Effect.tryPromise({
+      try: async () => {
+        // One not read yet (see unseen) is kept as it was, its gap not guessed.
+        const kept = [
+          ...[...records.values()].map((record) =>
+            isLive(record) ? (unseen.get(record.id) ?? record) : record,
+          ),
+          ...beginning.values(),
+        ];
 
-          await writeRecordings(
-            path,
-            kept.map(({ protected: _protected, retentionFailed: _failed, ...record }) =>
-              protection.has(record.id) ? { ...record, protected: true as const } : record,
-            ),
-          );
-          // Failed starts it no longer lists lose their marked folders.
-          const listed = new Set(kept.map(({ id }) => id));
+        await writeRecordings(
+          path,
+          kept.map(({ protected: _protected, retentionFailed: _failed, ...record }) =>
+            protection.has(record.id) ? { ...record, protected: true as const } : record,
+          ),
+        );
+        // Failed starts it no longer lists lose their marked folders.
+        const listed = new Set(kept.map(({ id }) => id));
 
-          for (const [id, folder] of failedFolders) {
-            if (listed.has(id)) continue;
-            failedFolders.delete(id);
-            void rm(folder, { recursive: true, force: true }).catch(() => {});
-          }
-        },
-        catch: () =>
-          new Failed({
-            error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
-          }),
-      }),
-    ).pipe(
+        for (const [id, folder] of failedFolders) {
+          if (listed.has(id)) continue;
+          failedFolders.delete(id);
+          void rm(folder, { recursive: true, force: true }).catch(() => {});
+        }
+      },
+      catch: () =>
+        new Failed({
+          error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
+        }),
+    }).pipe(
       // Every record is written each time: what couldn't be kept before is now.
       Effect.tap(() =>
         Effect.sync(() => {
@@ -752,6 +756,8 @@ function make(deps: RecordingsDeps) {
         }),
       ),
     );
+
+    const save = writing(saveInventory);
 
     /**
      * Saves how the recordings `ended` ended, leaving what couldn't be written for the next check
@@ -2920,7 +2926,7 @@ function make(deps: RecordingsDeps) {
 
             yield* deleteRecord(pending);
           }).pipe(
-            // Once claimed, shutdown waits for the durable intent and filesystem work to settle.
+            // Keep the claim until the durable intent and filesystem work settle, even during quit.
             Effect.uninterruptible,
             Effect.ensuring(Effect.sync(() => removing.delete(record.id))),
           );
@@ -3000,9 +3006,18 @@ function make(deps: RecordingsDeps) {
     yield* Effect.forkScoped(
       Effect.gen(function* () {
         for (;;) {
-          const checked = yield* checkOnce;
+          const next = yield* checkOnce;
+          yield* next === null
+            ? Queue.take(wakes)
+            : Effect.raceFirst(Effect.sleep(Math.max(0, next - Date.now())), Queue.take(wakes));
+        }
+      }),
+    );
 
-          const retained = yield* retaining(retainNow()).pipe(
+    const retentionWorker = yield* Effect.forkDetach(
+      Effect.gen(function* () {
+        for (;;) {
+          const next = yield* retaining(retainNow()).pipe(
             Effect.catchDefect((defect) =>
               Effect.andThen(
                 Effect.logWarning("[recordings] retention failed", defect),
@@ -3011,16 +3026,21 @@ function make(deps: RecordingsDeps) {
             ),
           );
 
-          const next =
-            checked === null || retained === null
-              ? (checked ?? retained)
-              : Math.min(checked, retained);
-
           yield* next === null
-            ? Queue.take(wakes)
-            : Effect.raceFirst(Effect.sleep(Math.max(0, next - Date.now())), Queue.take(wakes));
+            ? Queue.take(retentionWakes)
+            : Effect.raceFirst(
+                Effect.sleep(Math.max(0, next - Date.now())),
+                Queue.take(retentionWakes),
+              );
         }
       }),
+    );
+
+    // Request cancellation without joining stalled filesystem work. The worker keeps its
+    // deletion claim and permit until the in-flight removal settles; its durable intent
+    // recovers completion if the process exits first. Cancellation stops further selection.
+    yield* Effect.addFinalizer(() =>
+      Effect.asVoid(Effect.forkDetach(Fiber.interrupt(retentionWorker))),
     );
     // The lists may list a schedule's channel anew or no longer, and the guide another programme
     // at its start.
@@ -3487,41 +3507,46 @@ function make(deps: RecordingsDeps) {
 
             if (protection.has(id) === on) return;
 
-            if (on) protection.add(id);
-            else protection.delete(id);
+            const intact =
+              on && record.retentionDeleting
+                ? yield* Effect.promise(() =>
+                    stat(fileOf(record)).then(
+                      () => true,
+                      () => false,
+                    ),
+                  )
+                : false;
 
-            let changed: typeof record | undefined;
+            // Tentative protection and intent changes belong to the same write transaction:
+            // no queued save may persist them before this operation commits or rolls back.
+            yield* writing(
+              Effect.gen(function* () {
+                if (on) protection.add(id);
+                else protection.delete(id);
+                let changed: typeof record | undefined;
 
-            // Protection cancels an intact copy's deletion, but a removed copy still needs
-            // its durable intent to finish the inventory write, even across restart.
-            if (on && record.retentionDeleting) {
-              const intact = yield* Effect.promise(() =>
-                stat(fileOf(record)).then(
-                  () => true,
-                  () => false,
-                ),
-              );
+                if (on && record.retentionDeleting && intact && records.get(id) === record) {
+                  const { retentionDeleting: _deleting, ...kept } = record;
+                  changed = kept;
+                  records.set(id, kept);
+                }
 
-              if (intact && records.get(id) === record) {
-                const { retentionDeleting: _deleting, ...kept } = record;
-                changed = kept;
-                records.set(id, kept);
-              }
-            }
+                const written = yield* Effect.result(saveInventory);
 
-            const written = yield* Effect.result(save);
+                if (written._tag === "Failure") {
+                  if (on) protection.delete(id);
+                  else protection.add(id);
 
-            if (written._tag === "Failure") {
-              if (on) protection.delete(id);
-              else protection.add(id);
+                  if (changed && records.get(id) === changed) records.set(id, record);
 
-              if (changed && records.get(id) === changed) records.set(id, record);
-
-              return yield* written.failure;
-            }
+                  return yield* written.failure;
+                }
+              }).pipe(Effect.uninterruptible),
+            );
 
             if (on) retentionFailures.delete(id);
             yield* publish;
+            yield* wake;
           }),
         ),
       copy: (id: string, captured?: ActiveProfile) =>
