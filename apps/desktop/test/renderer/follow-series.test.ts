@@ -134,7 +134,9 @@ describe("Follow in a series' details", () => {
     ipc.always("follows.seen", null);
     ipc.always("follows.state", followed([]));
     await act(async () => button("Mark seen")!.click());
-    expect(ipc.argsOf("follows.seen")).toEqual([{ series: HARBOUR }]);
+    expect(ipc.argsOf("follows.seen")).toEqual([
+      { series: HARBOUR, episodes: [LOW_TIDE, CROSSING] },
+    ]);
     await until(() => expect(text()).not.toContain("new episodes"));
     expect(button("Following")).toBeDefined();
   });
@@ -217,7 +219,9 @@ describe("New episodes on Home", () => {
     ipc.always("follows.seen", null);
     ipc.always("follows.alerts", []);
     await act(async () => button("Mark new episodes of Night Harbour seen")!.click());
-    expect(ipc.argsOf("follows.seen")).toEqual([{ series: HARBOUR }]);
+    expect(ipc.argsOf("follows.seen")).toEqual([
+      { series: HARBOUR, episodes: [LOW_TIDE, CROSSING] },
+    ]);
     await until(() => expect(document.querySelector("[data-home-row=new-episodes]")).toBeNull());
   });
 });

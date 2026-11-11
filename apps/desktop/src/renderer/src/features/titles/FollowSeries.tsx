@@ -88,7 +88,11 @@ function Follow({ series }: { series: OwnedId }) {
           {follow.newEpisodes
             .map((episode) => `${episodeLabel(episode.season, episode.number)} ${episode.title}`)
             .join(" · ")}{" "}
-          <button disabled={busy} onClick={() => seen.mutate(series)} className={`ml-2 ${LINK}`}>
+          <button
+            disabled={busy}
+            onClick={() => seen.mutate({ series, episodes: follow.newEpisodes })}
+            className={`ml-2 ${LINK}`}
+          >
             {t("Mark seen")}
           </button>
         </p>

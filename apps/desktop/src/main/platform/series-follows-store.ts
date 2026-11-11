@@ -120,8 +120,12 @@ export class SeriesFollowsStore extends Context.Service<
     readonly follow: (facts: SeriesFacts) => Effect.Effect<void, Failed>;
     /** Stops following it, with every episode kept of it. None changes nothing. */
     readonly unfollow: (account: string, seriesId: string) => Effect.Effect<void, Failed>;
-    /** Marks what is new of it seen. Answers whether anything was. */
-    readonly seen: (account: string, seriesId: string) => Effect.Effect<boolean, Failed>;
+    /** Marks only the displayed episodes seen. Answers whether anything was. */
+    readonly seen: (
+      account: string,
+      seriesId: string,
+      episodes: readonly Pick<ListedEpisode, "id" | "season" | "number">[],
+    ) => Effect.Effect<boolean, Failed>;
     /**
      * Takes what a read of its episodes says: an episode not kept yet is new from `at`, a new one
      * the provider lists no more goes, and the name, year and list entry are taken over. Answers
@@ -170,7 +174,7 @@ export const seriesFollowsStoreLayer: Layer.Layer<SeriesFollowsStore, never, Dat
   );
 
 /** One episode per season and number; one without a number by its file. */
-function episodeKey(episode: ListedEpisode): string {
+function episodeKey(episode: Pick<ListedEpisode, "id" | "season" | "number">): string {
   return episode.number > 0 ? `${episode.season}:${episode.number}` : `id:${episode.id}`;
 }
 
@@ -206,12 +210,9 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
        on conflict (account, series_id, key) do update set
          episode_id = excluded.episode_id, title = excluded.title`,
     ),
-    dropEpisode: db.prepare(
-      "delete from series_follow_episodes where account = ? and series_id = ? and key = ?",
-    ),
     seen: db.prepare(
       `update series_follow_episodes set found_at = null
-       where account = ? and series_id = ? and found_at is not null`,
+       where account = ? and series_id = ? and key = ? and found_at is not null`,
     ),
     unfollow: db.prepare("delete from series_follows where account = ? and series_id = ?"),
     unfollowEpisodes: db.prepare(
@@ -260,7 +261,7 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
 
     for (const [key, unseen] of kept) {
       if (unseen && !listed.has(key)) {
-        statements.dropEpisode.run(facts.account, facts.seriesId, key);
+        statements.seen.run(facts.account, facts.seriesId, key);
         dropped += 1;
       }
     }
@@ -335,8 +336,19 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
           statements.unfollow.run(account, seriesId);
         }),
       ),
-    seen: (account, seriesId) =>
-      attempt(() => Number(statements.seen.run(account, seriesId).changes) > 0),
+    seen: (account, seriesId, episodes) =>
+      attempt(() =>
+        transaction(db, () => {
+          let changed = false;
+
+          for (const episode of episodes) {
+            const result = statements.seen.run(account, seriesId, episodeKey(episode));
+            changed = Number(result.changes) > 0 || changed;
+          }
+
+          return changed;
+        }),
+      ),
     checked: (facts) =>
       attempt(() =>
         transaction(db, () => {

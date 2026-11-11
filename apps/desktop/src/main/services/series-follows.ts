@@ -48,8 +48,11 @@ export class SeriesFollows extends Context.Service<
      * Answers the follow, or null once stopped. A follow there already stays as it is.
      */
     follow(series: OwnedId, following: boolean): Effect.Effect<SeriesFollow | null, Failed>;
-    /** Marks what is new of the version seen. */
-    seen(series: OwnedId): Effect.Effect<void, Failed>;
+    /** Marks only the displayed episodes of the version seen. */
+    seen(
+      series: OwnedId,
+      episodes: readonly Pick<SeriesFollow["newEpisodes"][number], "id" | "season" | "number">[],
+    ): Effect.Effect<void, Failed>;
     /** Follows with new episodes the viewer may see on Home, the latest news first. */
     readonly alerts: Effect.Effect<readonly SeriesFollow[], Failed>;
     /** The profile whose follows changed, after each change is stored. */
@@ -236,7 +239,7 @@ function make() {
                 Effect.catchTag("Failed", (failed) =>
                   Effect.logWarning(
                     "[follows] a followed series' episodes can't be read",
-                    failed.error,
+                    failed.error.kind,
                   ).pipe(
                     Effect.andThen(
                       Effect.sync(() => {
@@ -257,7 +260,7 @@ function make() {
         )
         .pipe(
           Effect.catchTag("Failed", (failed) =>
-            Effect.logWarning("[follows] followed series keep what they had", failed.error),
+            Effect.logWarning("[follows] followed series keep what they had", failed.error.kind),
           ),
         );
 
@@ -293,11 +296,14 @@ function make() {
           return yield* state(series);
         }),
 
-      seen: (series: OwnedId) =>
+      seen: (
+        series: OwnedId,
+        episodes: readonly Pick<SeriesFollow["newEpisodes"][number], "id" | "season" | "number">[],
+      ) =>
         Effect.gen(function* () {
           const { source } = yield* sourceOf(series);
 
-          if (yield* store.seen(source.key, series.id)) yield* announce;
+          if (yield* store.seen(source.key, series.id, episodes)) yield* announce;
         }),
 
       alerts: Effect.gen(function* () {

@@ -692,8 +692,12 @@ export const ipcInputs = {
   "follows.state": () => type({ series: owned() }),
   /** Follows or stops following this exact series version. */
   "follows.set": () => type({ series: owned(), following: "boolean" }),
-  /** Marks what is new of this followed series version seen. */
-  "follows.seen": () => type({ series: owned() }),
+  /** Marks the displayed episodes of this followed series version seen. */
+  "follows.seen": () =>
+    type({
+      series: owned(),
+      episodes: type({ id: "string", season: "number", number: "number" }).array().readonly(),
+    }),
   /** Followed series with new episodes, for Home. */
   "follows.alerts": none,
   "collections.list": none,

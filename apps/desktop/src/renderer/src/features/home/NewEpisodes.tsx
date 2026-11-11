@@ -94,7 +94,7 @@ export function NewEpisodeAlert({ follow }: { follow: SeriesFollow }) {
             size="sm"
             disabled={busy}
             aria-label={t("Mark new episodes of {name} seen", { name })}
-            onClick={() => seen.mutate(series)}
+            onClick={() => seen.mutate({ series, episodes: follow.newEpisodes })}
           >
             {t("Mark seen")}
           </Button>

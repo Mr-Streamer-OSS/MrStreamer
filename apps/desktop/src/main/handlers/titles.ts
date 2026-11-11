@@ -65,7 +65,7 @@ export function followHandlers({
   return {
     "follows.state": ({ series }) => follows.state(series),
     "follows.set": ({ series, following }) => follows.follow(series, following),
-    "follows.seen": ({ series }) => Effect.as(follows.seen(series), null),
+    "follows.seen": ({ series, episodes }) => Effect.as(follows.seen(series, episodes), null),
     "follows.alerts": () => follows.alerts,
   };
 }

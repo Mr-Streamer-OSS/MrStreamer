@@ -4,6 +4,7 @@
 // features/profiles), and a change sent for the viewer before fails rather than reach another.
 import { queryOptions, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import type { IpcInput } from "@mrstreamer/contracts/ipc";
 import type { NewEpisode } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
@@ -40,7 +41,7 @@ export function useFollowCommands() {
   });
 
   const seen = useMutation({
-    mutationFn: (series: OwnedId) => callForProfile(owner, "follows.seen", { series }),
+    mutationFn: (input: IpcInput<"follows.seen">) => callForProfile(owner, "follows.seen", input),
     onSettled: settle,
   });
 

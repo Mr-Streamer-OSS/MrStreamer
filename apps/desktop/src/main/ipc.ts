@@ -4,7 +4,7 @@ import { allowsApproval, visibleDownloads, visibleOutput } from "./services/prof
 import { defined } from "@mrstreamer/core/defined";
 import { t } from "@mrstreamer/core/i18n";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
-import type { Title, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { SeriesFollow, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { changedTitles } from "@mrstreamer/contracts/collections";
 import {
@@ -369,6 +369,15 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
       ? { ...item, versions: item.versions.filter((version) => online(item.kind, version)) }
       : null;
 
+  const follow = (item: SeriesFollow | null): SeriesFollow | null => {
+    if (!item || !online("series", item.series)) return null;
+
+    if (!item.title) return item;
+    const allowed = title(item.title);
+
+    return allowed ? { ...item, title: allowed } : null;
+  };
+
   const titles = (items: readonly Title[]) => items.flatMap((item) => title(item) ?? []);
 
   const viewing = (state: Viewing) => ({
@@ -574,18 +583,18 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
     "watchlist.save": (input, frame) =>
       online(input.kind, input.version) ? handlers["watchlist.save"](input, frame) : denied(),
     "follows.state": (input, frame) =>
-      online("series", input.series) ? handlers["follows.state"](input, frame) : denied(),
+      online("series", input.series)
+        ? Effect.map(handlers["follows.state"](input, frame), follow)
+        : denied(),
     "follows.set": (input, frame) =>
-      online("series", input.series) ? handlers["follows.set"](input, frame) : denied(),
+      online("series", input.series)
+        ? Effect.map(handlers["follows.set"](input, frame), follow)
+        : denied(),
     "follows.seen": (input, frame) =>
       online("series", input.series) ? handlers["follows.seen"](input, frame) : denied(),
     "follows.alerts": (input, frame) =>
       Effect.map(handlers["follows.alerts"](input, frame), (alerts) =>
-        alerts.flatMap((follow) => {
-          const allowed = follow.title && title(follow.title);
-
-          return allowed ? [{ ...follow, title: allowed }] : [];
-        }),
+        alerts.flatMap((item) => follow(item) ?? []),
       ),
     "viewing.get": (input, frame) => Effect.map(handlers["viewing.get"](input, frame), viewing),
     "viewing.setFavourite": (input, frame) =>

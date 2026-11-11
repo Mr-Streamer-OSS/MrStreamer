@@ -411,8 +411,12 @@ export function makeProfiles({
             lists.profileChanges ?? Stream.map(lists.changes, () => null),
             (owner) => PubSub.publish(events, { kind: "lists", owner }),
           ),
+          // Background reconciliation has no request admission; this handle owns its store.
           Stream.runForEach(follows.profileChanges, (owner) =>
-            PubSub.publish(events, { kind: "follows", owner }),
+            PubSub.publish(events, {
+              kind: "follows",
+              owner: owner ?? (active.id === id ? { ...active } : null),
+            }),
           ),
         ];
 

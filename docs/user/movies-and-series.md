@@ -138,12 +138,13 @@ _Hear about new episodes of a series without opening it._
 
 **Follow** in a series' details follows the version that plays, from that subscription, and then reads **Following**. Mr. Streamer remembers the episodes it lists now, and tells you when a later refresh of your lists brings more: in the details, below the buttons, as **2 new episodes** with their numbers and names, and on Home in **New episodes**, above the other rows. Each viewing profile follows its own series.
 
-- Your lists refresh when Mr. Streamer starts, twice a day while it runs, and when you refresh a subscription. Nothing checks while the app is closed, and there are no system notifications.
-- An episode counts once. Refreshing again, or a provider uploading the same episode again, adds nothing.
+- Your lists refresh when Mr. Streamer starts if they are older than 12 hours, and when you add or refresh a subscription. Nothing checks while the app is closed, and there are no system notifications.
+- An episode with a season and episode number counts once, even if the provider removes it and lists it again or uploads another file for it. Episodes without a number go by file id, so a replacement file can count as new.
+- Mr. Streamer checks episodes again when the provider changes the series’ list entry. New episodes can go unnoticed if the provider leaves that entry unchanged. When the entry has no change date or episode files, each refresh checks again.
 - A provider renaming the series keeps it followed. When the provider stops listing it, Home marks it **Unavailable**, keeps what was new, and offers **Stop following**.
 - When the episodes can't be read, the details say so and keep what they knew; the next refresh tries again. If following fails, the details say why and nothing is followed.
 - Home leaves out series for adults. A kids profile only follows approved series.
-- **Mark seen**, in the details or on Home, clears the new episodes. **Following** stops following.
+- **Mark seen**, in the details or on Home, clears the displayed new episodes. Episodes found after those were displayed stay new. **Following** stops following.
 
 Every control is a button, so Tab, Enter and Space reach all of it.
 
