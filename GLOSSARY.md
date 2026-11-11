@@ -38,7 +38,7 @@ A named group of movies and series selected by saved filtering rules as the avai
 A series from one source that a viewer asked to hear about when new episodes are listed. Following does not save it to the watchlist.
 
 **New-episode alert**:
-A notice in the app that a followed series lists episodes the viewer has not been told of yet. It lasts until the viewer has seen it.
+A notice in the app that a followed series lists episodes the viewer has not been told of yet. An episode withdrawn by the provider is hidden, keeping its original discovery time, and returns unseen when listed again; a seen episode stays seen.
 
 **Recording retention rule**:
 An optional policy that removes eligible recordings according to their age or how many are kept, while preserving protected recordings.

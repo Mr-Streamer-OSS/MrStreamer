@@ -34,14 +34,14 @@ import {
   type StoredFollow,
 } from "../platform/series-follows-store.ts";
 import { OnDemand } from "./ondemand.ts";
-import { AdmittedSettings } from "./preferences.ts";
+import { AdmittedSettings, Settings, viewingPreferences } from "./preferences.ts";
 import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import { Subscriptions, type SavedSubscription } from "./subscription.ts";
 
 export class SeriesFollows extends Context.Service<
   SeriesFollows,
   {
-    /** The follow of this exact version, or null. Fails while its lists can't be read. */
+    /** The visible follow of this exact version, or null. Fails while its lists can't be read. */
     state(series: OwnedId): Effect.Effect<SeriesFollow | null, Failed>;
     /**
      * Follows the version, reading its episodes now as what is known, or stops following it.
@@ -91,6 +91,7 @@ function make() {
     const subscriptions = yield* Subscriptions;
     const onDemand = yield* OnDemand;
     const store = yield* SeriesFollowsStore;
+    const preferences = viewingPreferences(yield* Settings);
     const changes = yield* PubSub.unbounded<ActiveProfile | null>();
     // One check at a time, so two refreshes close together never read one change twice.
     const checking = yield* Semaphore.make(1);
@@ -172,7 +173,20 @@ function make() {
 
         if (!follow) return null;
 
-        return shown(follow, source, (yield* titlesOf([series]))(series));
+        const title = (yield* titlesOf([series]))(series);
+        const policy = yield* Effect.serviceOption(AdmittedKids);
+
+        const approved = policy._tag === "Some" ? policy.value.approved : null;
+
+        if (!allowsApproval(approved, { kind: "series", ...series })) return null;
+
+        if (
+          (title?.adult ?? follow.adult) &&
+          (approved !== null || !(yield* preferences).adultTitles)
+        )
+          return null;
+
+        return shown(follow, source, title);
       });
 
     /** What the lists and the provider's episodes say of a listed version now. */
@@ -222,6 +236,18 @@ function make() {
 
               // Unlisted for now: it stays as it was, and shows as unavailable.
               if (!title) continue;
+              const stands = () => subscriptions.standsNow(source);
+
+              const metadataChanged = yield* store.catalogue({
+                account: source.key,
+                seriesId: series.id,
+                name: title.title,
+                year: title.year,
+                adult: title.adult,
+                stands,
+              });
+
+              changed ||= metadataChanged;
               const listed = entryOf(title, series, listsNow);
 
               if (listed !== null && listed === follow.listed) continue;
@@ -231,7 +257,6 @@ function make() {
                 listsNow.find((each) => each.subscriptionId === source.id)?.fetchedAt ?? null;
 
               if (failedUnder.has(key) && failedUnder.get(key) === fetchedAt) continue;
-              const stands = () => subscriptions.standsNow(source);
 
               const news = yield* factsOf(series, source.key, title, listed, stands).pipe(
                 Effect.flatMap(store.checked),

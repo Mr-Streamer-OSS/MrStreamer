@@ -104,6 +104,8 @@ async function followsApp(warnings: unknown[] = []) {
       seen: (id: number, episodes: SeriesFollow["newEpisodes"]) =>
         run(follows.seen(series(id), episodes)),
       alerts: () => run(follows.alerts),
+      showAdults: (adultTitles: boolean) =>
+        run(admission.services.settings.update({ adultTitles })),
     };
   };
 
@@ -171,6 +173,50 @@ describe("followed series", { timeout: 20_000 }, () => {
     await viewer.follow(FILES, false);
     expect(await viewer.state(FILES)).toBeNull();
   });
+
+  it.each(["unchanged stamp", "failed details"])(
+    "keeps adult alerts hidden after withdrawal following %s reclassification",
+    async (refresh) => {
+      const app = await followsApp();
+      const viewer = await app.admitted();
+      await viewer.follow(FILES);
+      relist(app.provider, { [FILES]: (series) => withEpisode(series, 800_012) });
+      await app.refresh();
+      await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toHaveLength(1));
+
+      await viewer.showAdults(true);
+      relist(app.provider, {
+        [FILES]: (series) => ({
+          ...withEpisode(series, 800_012, refresh === "failed details" ? 120 : 60),
+          adult: true,
+        }),
+      });
+
+      if (refresh === "failed details") app.provider.failDetails(503);
+      await app.refresh();
+      expect(await viewer.alerts()).toEqual([]);
+
+      if (refresh === "failed details")
+        await vi.waitFor(async () =>
+          expect((await viewer.state(FILES))?.lastCheck.failed).toBe(true),
+        );
+
+      app.provider.serveTitles((all) => ({
+        ...all,
+        series: all.series.filter((series) => series.id !== FILES),
+      }));
+      await app.refresh();
+      expect(await viewer.alerts()).toEqual([]);
+      await viewer.showAdults(false);
+      expect(await viewer.state(FILES)).toBeNull();
+      await viewer.showAdults(true);
+      expect(await viewer.state(FILES)).toMatchObject({
+        title: null,
+        newEpisodes: [{ id: "800012" }],
+      });
+      expect(await viewer.alerts()).toEqual([]);
+    },
+  );
 
   it("keeps every unnumbered file new until seen, including across later additions", async () => {
     const app = await followsApp();
@@ -430,6 +476,7 @@ describe("followed series", { timeout: 20_000 }, () => {
     const app = await followsApp();
     const adult = await app.admitted();
     await adult.follow(FILES);
+    await adult.showAdults(true);
     await adult.follow(AFTER_DARK);
 
     relist(app.provider, {

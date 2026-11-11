@@ -4384,3 +4384,78 @@ it("filters kids follow replies to approved versions and retains approved unavai
     value: null,
   });
 });
+
+it.each([false, true])(
+  "hides reclassified adult follows from kids after withdrawal (details fail: %s)",
+  async (failDetails) => {
+    const f = await fixture({
+      titlesOf: (built) => {
+        const base = built.series.find((item) => !item.adult)!;
+
+        return {
+          ...built,
+          series: [
+            { ...base, id: 80001, name: "Shared series", tmdb: "500" },
+            { ...base, id: 80002, name: "Shared series", tmdb: "500" },
+          ],
+        };
+      },
+    });
+
+    const series = { subscriptionId: f.source.id, id: "80001" };
+    await f.call(f.adult, "profiles.setPolicy", {
+      current: f.adult,
+      newPin: "1234",
+      profiles: [{ id: f.kid.id, approved: [{ kind: "series", ...series }] }],
+    });
+    const kid = await f.app.runPromise(f.sessions.switch(f.kid.id, f.adult));
+
+    for (const result of [
+      await f.call(kid, "follows.set", { series, following: true }),
+      await f.call(kid, "follows.state", { series }),
+    ]) {
+      expect(result).toMatchObject({ ok: true, value: { title: { versions: [series] } } });
+    }
+
+    f.provider.serveTitles((all) => ({
+      ...all,
+      series: all.series.map((item) => ({
+        ...item,
+        added: item.added + 60,
+        seasons: item.seasons.map((season, index) =>
+          index === 0 ? [...season, { ...season[0]!, id: 888888 }] : season,
+        ),
+      })),
+    }));
+    await f.app.runPromise(f.onDemand.refresh(f.source.id));
+    await vi.waitFor(async () =>
+      expect(await f.call(kid, "follows.alerts", undefined)).toMatchObject({
+        ok: true,
+        value: [{ series, newEpisodes: [{ id: "888888" }] }],
+      }),
+    );
+    f.provider.serveTitles((all) => ({
+      ...all,
+      series: all.series.map((item) => ({
+        ...item,
+        adult: true,
+        added: item.added + (failDetails ? 120 : 60),
+      })),
+    }));
+
+    if (failDetails) f.provider.failDetails(503);
+    await f.app.runPromise(f.onDemand.refresh(f.source.id));
+    expect(await f.call(kid, "follows.state", { series })).toEqual({ ok: true, value: null });
+    expect(await f.call(kid, "follows.alerts", undefined)).toEqual({ ok: true, value: [] });
+    f.provider.serveTitles((all) => ({
+      ...all,
+      series: all.series.filter((item) => item.id !== 80001),
+    }));
+    await f.app.runPromise(f.onDemand.refresh(f.source.id));
+    expect(await f.call(kid, "follows.alerts", undefined)).toMatchObject({
+      ok: true,
+      value: [],
+    });
+    expect(await f.call(kid, "follows.state", { series })).toEqual({ ok: true, value: null });
+  },
+);

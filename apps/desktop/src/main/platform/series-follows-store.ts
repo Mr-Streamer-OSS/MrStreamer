@@ -128,11 +128,14 @@ export class SeriesFollowsStore extends Context.Service<
       seriesId: string,
       episodes: readonly Pick<ListedEpisode, "id" | "season" | "number">[],
     ) => Effect.Effect<boolean, Failed>;
+    /** Updates catalogue metadata even when episodes are unchanged or unreadable. */
+    readonly catalogue: (
+      facts: Pick<SeriesFacts, "account" | "seriesId" | "name" | "year" | "adult" | "stands">,
+    ) => Effect.Effect<boolean, Failed>;
     /**
      * Takes what a read of its episodes says: an episode not kept yet is new from `at`, a new one
-     * the provider lists no more is hidden until re-listed, and the name, year and list entry
-     * are taken over. Answers whether the follow changed in a way the viewer sees, or false
-     * when it isn't followed.
+     * the provider lists no more is hidden until re-listed, and the list entry is taken over.
+     * Answers whether the follow changed in a way the viewer sees, or false when it isn't followed.
      */
     readonly checked: (facts: SeriesFacts) => Effect.Effect<boolean, Failed>;
     /**
@@ -199,8 +202,11 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
        (account, series_id, name, year, adult, followed_at, listed, checked_at, failed)
        values (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     ),
+    catalogue: db.prepare(
+      "update series_follows set name = ?, year = ?, adult = ? where account = ? and series_id = ?",
+    ),
     update: db.prepare(
-      `update series_follows set name = ?, year = ?, adult = ?, listed = ?, checked_at = ?,
+      `update series_follows set listed = ?, checked_at = ?,
        failed = 0 where account = ? and series_id = ?`,
     ),
     fail: db.prepare(
@@ -358,6 +364,30 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
           return changed;
         }),
       ),
+    catalogue: (facts) =>
+      attempt(() =>
+        transaction(db, () => {
+          if (!facts.stands()) throw noSubscription;
+          const before = followed(facts.account, facts.seriesId);
+
+          if (
+            !before ||
+            (before.name === facts.name &&
+              before.year === facts.year &&
+              before.adult === (facts.adult ? 1 : 0))
+          )
+            return false;
+          statements.catalogue.run(
+            facts.name,
+            facts.year,
+            facts.adult ? 1 : 0,
+            facts.account,
+            facts.seriesId,
+          );
+
+          return true;
+        }),
+      ),
     checked: (facts) =>
       attempt(() =>
         transaction(db, () => {
@@ -365,24 +395,10 @@ function storeOn(db: DatabaseSync): SeriesFollowsStore["Service"] {
           const before = followed(facts.account, facts.seriesId);
 
           if (!before) return false;
-          statements.update.run(
-            facts.name,
-            facts.year,
-            facts.adult ? 1 : 0,
-            facts.listed,
-            facts.at,
-            facts.account,
-            facts.seriesId,
-          );
+          statements.update.run(facts.listed, facts.at, facts.account, facts.seriesId);
           const { added, dropped, restored } = take(facts, facts.at);
 
-          return (
-            added > 0 ||
-            dropped > 0 ||
-            restored > 0 ||
-            before.failed === 1 ||
-            before.name !== facts.name
-          );
+          return added > 0 || dropped > 0 || restored > 0 || before.failed === 1;
         }),
       ),
     failed: (account, seriesId, at) =>
@@ -406,6 +422,7 @@ function closed(detail: string): SeriesFollowsStore["Service"] {
     follow: () => fail,
     unfollow: () => fail,
     seen: () => fail,
+    catalogue: () => fail,
     checked: () => fail,
     failed: () => fail,
   };
