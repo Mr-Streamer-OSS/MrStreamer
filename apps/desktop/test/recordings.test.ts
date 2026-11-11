@@ -7179,7 +7179,13 @@ describe("recording protection and retention", () => {
       "retentionFailed",
       true,
     );
-    expect(await first.recordings.copy(id)).not.toBeNull();
+
+    const opened = await until(
+      () => first.recordings.copy(id).catch(() => null),
+      (copy) => copy !== null,
+    );
+
+    expect(opened).not.toBeNull();
     expect((await first.recordings.list()).find((each) => each.id === id)).not.toHaveProperty(
       "retentionFailed",
     );

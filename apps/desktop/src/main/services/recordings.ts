@@ -3490,6 +3490,8 @@ function make(deps: RecordingsDeps) {
             if (on) protection.add(id);
             else protection.delete(id);
 
+            let changed: typeof record | undefined;
+
             // Protection cancels an intact copy's deletion, but a removed copy still needs
             // its durable intent to finish the inventory write, even across restart.
             if (on && record.retentionDeleting) {
@@ -3500,8 +3502,9 @@ function make(deps: RecordingsDeps) {
                 ),
               );
 
-              if (intact) {
+              if (intact && records.get(id) === record) {
                 const { retentionDeleting: _deleting, ...kept } = record;
+                changed = kept;
                 records.set(id, kept);
               }
             }
@@ -3511,7 +3514,8 @@ function make(deps: RecordingsDeps) {
             if (written._tag === "Failure") {
               if (on) protection.delete(id);
               else protection.add(id);
-              records.set(id, record);
+
+              if (changed && records.get(id) === changed) records.set(id, record);
 
               return yield* written.failure;
             }

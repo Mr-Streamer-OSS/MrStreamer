@@ -951,7 +951,8 @@ export interface IpcOutputs {
   "recordings.previewRetention": RetentionPreview;
   /**
    * The rule as saved, once what it deletes now is deleted. Fails, saving nothing, when it would
-   * delete an unseen recording at pre-save validation; the bounded save sweep selects only `seen` IDs. Deletion failures show on recordings.
+   * delete an unseen recording at pre-save validation; the bounded save sweep selects only `seen`
+   * IDs. Deletion failures show on recordings.
    */
   "recordings.retain": RecordingRule;
   /** Fails for rule-made schedules, an unlisted channel or a plan with no time to come. */
