@@ -4,9 +4,9 @@
 // answers alike over either.
 //
 // It keeps state and recent command receipts, rather than an unbounded event log: a phone
-// records a checkpoint a minute while a title plays, and a file of every one would grow without end. So nothing here is rebuilt
-// when the rules change (STATE_VERSION); the rows and marks stay as they were committed. Command
-// ids are kept for the latest commands only, enough for a command sent again to change nothing.
+// records a checkpoint a minute while a title plays. Rows and marks stay as committed rather
+// than rebuilding from events. Recent command ids prevent duplicate writes; only mark commands
+// retain events to recover their original changed count and Undo receipt.
 import { CONTINUE_OFFERED } from "@mrstreamer/contracts/viewing";
 import * as Effect from "effect/Effect";
 import { Failed, failedWith } from "../failure.ts";
@@ -117,7 +117,14 @@ export function memoryViewingStore(deps: {
   const load = (from: ViewingSnapshot) => {
     accounts = new Map(Object.entries(from.accounts).map(([key, each]) => [key, accountOf(each)]));
     receipts = new Set(from.receipts);
-    receiptEvents = from.receiptEvents ?? {};
+    receiptEvents = Object.fromEntries(
+      Object.entries(from.receiptEvents ?? {}).map(([id, events]) => [
+        id,
+        events.filter(
+          ({ event }) => event.type === "episodes-marked" || event.type === "movie-marked",
+        ),
+      ]),
+    );
     sequence = from.sequence;
     imported = from.imported;
   };
@@ -369,7 +376,11 @@ export function memoryViewingStore(deps: {
           receipts.add(commandId);
           receiptEvents = {
             ...receiptEvents,
-            [commandId]: events.map((event, index) => ({ ...event, sequence: first + index })),
+            [commandId]: events.flatMap((event, index) =>
+              event.event.type === "episodes-marked" || event.event.type === "movie-marked"
+                ? [{ ...event, sequence: first + index }]
+                : [],
+            ),
           };
           append(at, events);
         });

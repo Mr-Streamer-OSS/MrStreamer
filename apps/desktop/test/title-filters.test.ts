@@ -3,7 +3,7 @@ import { CollectionCurrent } from "../src/main/services/collections.ts";
 import { CollectionsStore } from "../src/main/platform/collections-store.ts";
 import { Failed } from "@mrstreamer/core/failure";
 import { ProfileSessions } from "../src/main/services/profiles.ts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, onTestFinished } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -899,4 +899,96 @@ it("applies standing exact film marks to discovery and saved smart matches, then
   expect(await total("watched")).toBe(0);
   expect(await total("in-progress")).toBe(1);
   expect(await smart()).toBe(0);
+});
+
+it("shares standing film state within a subscription while keeping quality/language conjunction exact in discovery and smart collections", async () => {
+  const provider = await fakeProvider({ titles: 1 });
+  const seed = provider.titles.movies[0]!;
+  provider.serveTitles((all) => ({
+    ...all,
+    movies: [
+      { ...seed, id: 70001, name: "Shared HD (EN)", tmdb: "4567" },
+      { ...seed, id: 70002, name: "Shared 4K (FR)", tmdb: "4567" },
+    ],
+    series: [],
+  }));
+  const app = await started();
+  const source = await app.subscriptions.add(demoLogin(provider));
+  await app.titles.refresh(source.id);
+  const sessions = await app.runtime.runPromise(ProfileSessions);
+  const admission = await app.runtime.runPromise(sessions.admit);
+  const onDemand = await app.runtime.runPromise(OnDemand);
+  const collections = admission.services.collections;
+  const record = admission.services.viewing;
+
+  const run = <A>(effect: import("effect/Effect").Effect<A, unknown>) =>
+    app.runtime.runPromise(
+      admission.run(
+        effect.pipe(Effect.provideService(CollectionCurrent, { check: admission.current })),
+      ),
+    );
+
+  const hd = { subscriptionId: source.id, id: "70001" };
+  const uhd = { subscriptionId: source.id, id: "70002" };
+
+  const filters = {
+    watched: "watched" as const,
+    quality: "4k" as const,
+    language: "fr",
+    sourceIds: [source.id],
+  };
+
+  const query = { kind: "movie" as const, id: "all" as const, offset: 0, limit: 48 };
+  await run(
+    collections.change({
+      kind: "create",
+      id: "watched-sibling",
+      name: "Watched sibling",
+      rules: { kind: "movie", filters },
+    }),
+  );
+  const total = async () => (await run(onDemand.collection({ ...query, filters }))).total;
+  const smart = async () => (await run(collections.page("watched-sibling", 0, 48))).total;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  onTestFinished(() => void vi.useRealTimers());
+  await run(record.markTitles("both", { kind: "film", versions: [hd, uhd] }, true));
+  expect(await total()).toBe(1);
+  expect(await smart()).toBe(1);
+  vi.setSystemTime(Date.now() + 60000);
+  await run(record.recordProgress("replay-hd", { kind: "movie", ...hd }, 180, 6000, Date.now()));
+  expect(await total()).toBe(0);
+  expect(await smart()).toBe(0);
+  expect(
+    (
+      await run(
+        onDemand.collection({
+          ...query,
+          filters: { watched: "in-progress", quality: "4k", language: "fr" },
+        }),
+      )
+    ).total,
+  ).toBe(0);
+  expect(
+    (
+      await run(
+        onDemand.collection({
+          ...query,
+          filters: { watched: "in-progress", quality: "hd", language: "en" },
+        }),
+      )
+    ).total,
+  ).toBe(1);
+  vi.setSystemTime(Date.now() + 60000);
+  await run(record.markTitles("clear-sibling", { kind: "film", versions: [uhd] }, false));
+  vi.setSystemTime(Date.now() + 60000);
+  await run(record.markTitles("both-again", { kind: "film", versions: [hd, uhd] }, true));
+  expect(await total()).toBe(1);
+  vi.setSystemTime(Date.now() + 60000);
+  await run(record.markTitles("history-unwatched", { kind: "film", versions: [hd] }, false));
+  expect(await total()).toBe(0);
+  expect(await smart()).toBe(0);
+  expect(
+    (await run(onDemand.collection({ ...query, filters: { quality: "4k", language: "en" } })))
+      .total,
+  ).toBe(0);
 });

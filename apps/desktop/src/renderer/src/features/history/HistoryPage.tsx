@@ -89,16 +89,17 @@ export function HistoryPage({ onBack }: { onBack: () => void }) {
           <h2 id="history-online" className="mb-2.5 text-xl font-semibold tracking-tight">
             {t("Movies and series")}
           </h2>
-          {history.data ? (
-            <OnlineHistory entries={entries} marks={marks} />
-          ) : history.error ? (
+          {history.error && (
             <Failure
               text={`${t("Couldn't read what you watched.")} ${describeError(appError(history.error))}`}
               onRetry={() => void history.refetch()}
             />
-          ) : (
-            <p className="text-[0.9375rem] text-muted-foreground">{t("Loading…")}</p>
           )}
+          {history.data && (!history.error || entries.length > 0) ? (
+            <OnlineHistory entries={entries} marks={marks} />
+          ) : !history.error ? (
+            <p className="text-[0.9375rem] text-muted-foreground">{t("Loading…")}</p>
+          ) : null}
         </section>
         <section aria-labelledby="history-local">
           <h2 id="history-local" className="mb-2.5 text-xl font-semibold tracking-tight">

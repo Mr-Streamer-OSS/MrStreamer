@@ -1136,7 +1136,7 @@ export interface IpcOutputs {
   /**
    * Answers once every mark is stored, in one save, with how many films and episodes changed and
    * what `viewing.undoMarks` takes back. A failure stores nothing, and the same call can be made
-   * again. One sent again answers that it changed nothing.
+   * again. One sent again answers with its original changed count and Undo receipt.
    */
   "viewing.markTitles": MarksChanged;
   /**

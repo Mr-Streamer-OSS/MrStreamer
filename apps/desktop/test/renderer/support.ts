@@ -189,6 +189,8 @@ const bridge = {
 
     if (method.startsWith("analytics.")) return Promise.resolve({ ok: true, value: null });
 
+    if (method === "viewing.filmMarks") return Promise.resolve({ ok: true, value: [] });
+
     if (method === "viewing.episodes") {
       return Promise.resolve({ ok: true, value: { progress: [], marks: [], undoable: null } });
     }

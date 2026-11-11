@@ -541,11 +541,13 @@ function MovieActions({
   return (
     <Actions
       versions={versions}
-      switching={switching || !ready}
+      switching={switching}
       saving={saving}
       progress={partly ? current : undefined}
       primaryLabel={partly ? t("Resume") : t("Play")}
-      onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
+      onPrimary={() => {
+        if (ready || readError) playTitle(now, resumePoint(partly ? current : undefined));
+      }}
       onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={listed ? () => removal.mutate(details.title) : null}
       removeError={removal.error}

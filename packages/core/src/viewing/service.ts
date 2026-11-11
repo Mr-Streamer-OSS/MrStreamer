@@ -158,6 +158,10 @@ export class ViewingSeries extends Context.Service<
   {
     /** What a series version is as the lists have it now. Asks no provider. */
     readonly identity: (series: OwnedId) => Effect.Effect<SeriesIdentity, Failed>;
+    /** Current identities in input order, from one catalogue read. Older adapters use identity. */
+    readonly identities?: (
+      series: readonly OwnedId[],
+    ) => Effect.Effect<readonly SeriesIdentity[], Failed>;
     /** The seasons that version lists: what its details hold, as when its sheet opened. */
     readonly seasons: (series: OwnedId) => Effect.Effect<SeriesSeasons, Failed>;
   }
@@ -414,7 +418,7 @@ export class ViewingRecord extends Context.Service<
      * Fails, storing nothing, with `no-subscription` when a version's subscription isn't saved,
      * with `title-not-found` when the series doesn't list the season, and with whatever kept the
      * lists or the details from answering. A command sent again changes nothing more, and answers
-     * that it changed nothing.
+     * with its original changed count and Undo receipt.
      */
     markTitles(
       commandId: string,
@@ -1387,12 +1391,35 @@ function make() {
           Effect.gen(function* () {
             const entries = historyOf(owner, yield* store.history(owner.key));
 
+            const series = entries.flatMap((entry) =>
+              entry.kind === "series" ? [entry.series] : [],
+            );
+
+            const identities =
+              series.length === 0
+                ? []
+                : yield* listed.identities
+                    ? listed.identities(series)
+                    : Effect.forEach(series, listed.identity);
+
+            const byVersion = new Map(
+              series.map((each, index) => [ownedKey(each), identities[index]]),
+            );
+
             return yield* Effect.forEach(entries, (entry) =>
               Effect.gen(function* () {
                 if (entry.kind === "movie") return entry;
-                const { keys, versions } = yield* listed.identity(entry.series);
-                const played = yield* store.titles(owner.key, { seriesIds: versions });
-                const kept = yield* store.marks(owner.key, keys);
+                const identity = byVersion.get(ownedKey(entry.series));
+
+                if (!identity)
+                  return yield* new Failed({
+                    error: {
+                      kind: "unexpected",
+                      detail: "Missing series identity; retry the request.",
+                    },
+                  });
+                const played = yield* store.titles(owner.key, { seriesIds: identity.versions });
+                const kept = yield* store.marks(owner.key, identity.keys);
 
                 return { ...entry, undoable: undoable(kept, played)?.revision ?? null };
               }),

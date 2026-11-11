@@ -550,6 +550,7 @@ function rebuild(db: DatabaseSync): void {
 
 function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Service"] {
   const statements = {
+    commandEvents: db.prepare("select * from events where command_id = ? order by sequence"),
     state: db.prepare("select * from state where account = ?"),
     event: db.prepare(
       "insert into events (account, type, version, channel_id, at, command_id, payload) values (?, ?, ?, ?, ?, ?, ?)",
@@ -947,10 +948,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
         return {
           ...read(accounts),
           written: sequences,
-          recorded: db
-            .prepare("select * from events where command_id = ? order by sequence")
-            .all(commandId)
-            .flatMap((raw) => eventOf(raw) ?? []),
+          recorded: statements.commandEvents.all(commandId).flatMap((raw) => eventOf(raw) ?? []),
         };
       }),
     importOnce: ({ account, at, events }) =>

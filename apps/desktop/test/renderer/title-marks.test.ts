@@ -15,6 +15,7 @@ import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import type { HistoryEntry, TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
 import { HistoryPage } from "../../src/renderer/src/features/history/HistoryPage.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
+import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 import { syncViewing } from "../../src/renderer/src/lib/queries.ts";
 
 /** Another saved subscription, whose versions are other files with their own record. */
@@ -129,6 +130,7 @@ beforeEach(() => {
 
 afterEach(() => {
   unmount();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -196,11 +198,19 @@ describe("marking a film from its details", () => {
   it("waits for held film marks, keeps failed reads retryable, and never resumes stale progress", async () => {
     const held = ipc.hold("viewing.filmMarks");
     await filmSheet(false);
-    await until(() => expect(button("Play")?.disabled).toBe(true));
+    await until(() => expect(button("Play")).toBeDefined());
+    expect(button("Play")?.disabled).toBe(false);
+    expect(document.activeElement).toBe(button("Play"));
+    const play = vi.spyOn(titlePlayer, "open").mockResolvedValue(undefined);
+    await click("Play");
+    expect(play).not.toHaveBeenCalled();
     expect(button("Resume")).toBeUndefined();
     await act(async () => held.reject({ kind: "unexpected", detail: "read failed" }));
     await until(() => expect(text()).toContain("Couldn't read what you watched."));
-    expect(button("Play")?.disabled).toBe(true);
+    expect(button("Play")?.disabled).toBe(false);
+    await click("Play");
+    expect(play).toHaveBeenCalledWith(expect.anything(), 0);
+    play.mockRestore();
     expect(button("Resume")).toBeUndefined();
     ipc.always("viewing.filmMarks", [
       { movie: film.versions[1]!, watched: true, at: 200, revision: 7 },
@@ -209,6 +219,26 @@ describe("marking a film from its details", () => {
     await until(() => expect(button("Mark unwatched")).toBeDefined());
     expect(button("Play")?.disabled).toBe(false);
     expect(button("Resume")).toBeUndefined();
+  });
+
+  it("keeps primary keyboard focus when the initial marks resolve, so Enter resumes", async () => {
+    const held = ipc.hold("viewing.filmMarks");
+    await filmSheet(false);
+    await until(() => expect(button("Play")).toBeDefined());
+    expect(document.activeElement).toBe(button("Play"));
+    await act(async () => held.resolve([]));
+    await until(() => expect(button("Resume")).toBeDefined());
+    expect(document.activeElement).toBe(button("Resume"));
+    const play = vi.spyOn(titlePlayer, "open").mockResolvedValue(undefined);
+    // happy-dom does not synthesize a button's native Enter click.
+    await act(async () => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+      (document.activeElement as HTMLElement).click();
+    });
+    expect(play).toHaveBeenCalledWith(expect.anything(), 2695);
+    play.mockRestore();
   });
 
   it("marks the versions of its own subscription, says so with Undo, and Undo sends back what it made", async () => {
@@ -415,6 +445,35 @@ describe("History", () => {
     await until(() => expect(text()).toContain("Night Harbour"));
   }
 
+  it.each([false, true])(
+    "keeps cached history and exposes failed refresh and Retry (empty %s)",
+    async (empty) => {
+      await history();
+
+      if (empty) {
+        ipc.always("viewing.history", []);
+        await act(async () => ipc.emit("viewing.changed", viewing(2)));
+        await until(() => expect(text()).toContain("Nothing watched yet"));
+      }
+
+      ipc.refuse("viewing.history", { kind: "unexpected", detail: "refresh failed" });
+      await act(async () => ipc.emit("viewing.changed", viewing(3)));
+      await until(() => expect(text()).toContain("refresh failed"));
+
+      if (!empty)
+        expect(document.querySelector('[aria-labelledby="history-online"]')?.textContent).toContain(
+          "Kite Season",
+        );
+      else expect(text()).not.toContain("Nothing watched yet");
+      ipc.always("viewing.history", entries);
+      await click("Try again");
+      await until(() => expect(text()).not.toContain("refresh failed"));
+      expect(document.querySelector('[aria-labelledby="history-online"]')?.textContent).toContain(
+        "Kite Season",
+      );
+    },
+  );
+
   it("lists each version the lists still have in its own subscription, apart from what played on this computer", async () => {
     await history();
     const online = document.querySelector('[aria-labelledby="history-online"]')?.textContent ?? "";
@@ -447,7 +506,7 @@ describe("History", () => {
     });
   });
 
-  it("drops History series Undo when a later play makes it ineligible", async () => {
+  it("drops History series Undo when the refreshed record reports it ineligible", async () => {
     await history();
 
     const updated = entries.map((entry) =>
