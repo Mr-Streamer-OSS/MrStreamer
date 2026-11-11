@@ -158,6 +158,7 @@ const { start: startAnalytics } = analyticsFixture({
 async function fixture(
   options: {
     live?: boolean;
+    manualRefresh?: boolean;
     copyPlayback?: boolean;
     notifier?: Notifier;
     now?: number;
@@ -224,7 +225,12 @@ async function fixture(
   const recordings = await app.runPromise(Recordings);
   const guide = await app.runPromise(Guide);
   const reminders = await app.runPromise(Reminders);
-  const source = await app.runPromise(roster.add(demoLogin(provider)));
+
+  // This fixture already awaits both refreshes; opt out of Roster's background load when needed.
+  const source = await app.runPromise(
+    (options.manualRefresh ? subscriptions : roster).add(demoLogin(provider)),
+  );
+
   await app.runPromise(library.refresh(source.id));
   await app.runPromise(onDemand.refresh(source.id));
   const personal = await app.runPromise(sessions.admit);
@@ -1430,7 +1436,7 @@ it("refuses pending, failed and stale collection reads and never commits a late 
 });
 
 it("isolates collection owners, reconnects exact account membership and erases every profile", async () => {
-  const f = await fixture();
+  const f = await fixture({ manualRefresh: true });
   const movie = (await f.app.runPromise(f.onDemand.search("TEST"))).movies[0]!;
 
   const title = {
