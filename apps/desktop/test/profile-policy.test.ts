@@ -1464,14 +1464,17 @@ it("isolates collection owners, reconnects exact account membership and erases e
 
   const adult = await f.app.runPromise(f.sessions.switch(f.adult.id));
   const roster = await f.app.runPromise(Roster);
+  const subscriptions = await f.app.runPromise(Subscriptions);
   await f.app.runPromise(roster.remove(f.source.id, false));
-  const source = await f.app.runPromise(roster.add(demoLogin(f.provider)));
+  // Reconnect through Subscriptions: Roster.add also forks its own titles refresh, whose later
+  // acceptance correctly refuses a collection read that started before it.
+  const source = await f.app.runPromise(subscriptions.add(demoLogin(f.provider)));
   await f.app.runPromise(f.onDemand.refresh(source.id));
   expect(await f.call(adult, "collections.memberships", { ...title, sourceId: source.id })).toEqual(
     { ok: true, value: ["one"] },
   );
   await f.app.runPromise(roster.remove(source.id, true));
-  const restored = await f.app.runPromise(roster.add(demoLogin(f.provider)));
+  const restored = await f.app.runPromise(subscriptions.add(demoLogin(f.provider)));
   await f.app.runPromise(f.onDemand.refresh(restored.id));
 
   expect(await f.call(adult, "collections.list", undefined)).toMatchObject({
