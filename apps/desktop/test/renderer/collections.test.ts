@@ -748,6 +748,44 @@ describe("a title's collections menu in its details", () => {
     expect(document.querySelector("[role=alert]")).toBeNull();
   });
 
+  it("says a catalogue failure once while the title is unread, then its own collections failure", async () => {
+    mainCollections([{ name: "Weekend films", members: [] }], [{ ...film, id: "4k" }]);
+    const client = await details();
+    await vi.waitFor(() => expect(button("Add to collection")).toBeTruthy());
+    const failed = { kind: "unexpected", detail: "catalogue unavailable" } as const;
+    ipc.refuse("ondemand.titles", failed);
+    ipc.refuse("collections.list", failed);
+    ipc.refuse("collections.memberships", failed);
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["ondemand", "titles"] });
+      await client.refetchQueries({ queryKey: ["collections"] });
+    });
+    const alerts = () => [...document.querySelectorAll("[role=alert]")];
+
+    // Above the actions (the title's alert) or among them, after Save (the collections').
+    const afterSave = (alert: Element | undefined) =>
+      !!alert &&
+      !!(button("Save").compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await vi.waitFor(() => expect(alerts()).toHaveLength(1));
+    expect(alerts()[0]?.textContent).toContain("catalogue unavailable");
+    expect(afterSave(alerts()[0])).toBe(false);
+
+    // The title reads again; the collections' own failure is now the only one, with its retry.
+    ipc.always("ondemand.titles", [film]);
+    await act(async () => button("Try again").click());
+    await vi.waitFor(() => expect(afterSave(alerts()[0])).toBe(true));
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.textContent).toContain("catalogue unavailable");
+    ipc.always("collections.list", [{ id: "c0", name: "Weekend films", total: 0 }]);
+    ipc.always("collections.memberships", []);
+    await act(async () => button("Try again").click());
+    await vi.waitFor(() =>
+      expect(button("Add to collection").hasAttribute("disabled")).toBe(false),
+    );
+    expect(alerts()).toHaveLength(0);
+  });
+
   it.each(["create", "member"] as const)(
     "suspends a retained title after an actual refetch error and retries its %s with fresh facts",
     async (operation) => {
