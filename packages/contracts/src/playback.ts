@@ -28,17 +28,15 @@ export function paneStreamLimit(limit: number | null | undefined): number | null
 /** Container formats the UI's playback engines know how to load. */
 export type StreamFormat = "mpegts" | "hls";
 
+/** H.264 variants share NAL parsing and diagnostics; field-capable sequences need window conversion. */
+const H264 = ["h264", "h264-interlaced"] as const;
+
 /**
  * Codecs the app tells apart in a stream. The UI reports which of them its player decodes, and
  * the main process converts the rest before they reach it.
  */
 export const CODECS = [
-  "h264",
-  /**
-   * H.264 whose sequence allows field pictures, including sequences with progressive pictures.
-   * Interlaced pictures can comb in a browser, so the app's window converts this variant.
-   */
-  "h264-interlaced",
+  ...H264,
   "hevc",
   "hevc-10bit",
   "mpeg2",
@@ -56,6 +54,9 @@ export const CODECS = [
 ] as const;
 
 export type Codec = (typeof CODECS)[number];
+
+/** Every H.264 variant uses the same bitstream and diagnostic family. */
+export const H264_CODECS: ReadonlySet<Codec | "unknown"> = new Set(H264);
 
 export interface StreamSession {
   readonly sessionId: string;
@@ -207,4 +208,4 @@ export interface LiveTimeline {
  * more yet, so the rest converts. Interlaced H.264 goes as it is, as it did before the app's own
  * player had it deinterlaced; whether a receiver deinterlaces it is unproven too.
  */
-export const RECEIVER_DECODERS: readonly Codec[] = ["h264", "h264-interlaced", "aac"];
+export const RECEIVER_DECODERS: readonly Codec[] = [...H264, "aac"];

@@ -147,7 +147,7 @@ _What doesn't work yet, or works differently._
 - Closed captions come from the CEA-608 data most broadcasts carry. A channel or file that sends captions only in the newer CEA-708 form shows none.
 - Converting HEVC, Xvid or field-capable H.264 uses much more of your computer's processor than playing it as it is. Each multiview picture converts separately; native CPU, GPU and power costs are unmeasured.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
-- On AirPlay and Cast, H.264 pictures are sent as received; receiver deinterlacing is unproven. Interlaced HLS channels that play directly, and interlaced movies, episodes and recordings played as titles, aren't deinterlaced; fast motion can show fine horizontal lines.
+- Before 0.0.24, interlaced channels that play directly aren't deinterlaced. On AirPlay and Cast, H.264 pictures are sent as received; receiver deinterlacing is unproven. Interlaced HLS channels that play directly, and interlaced movies, episodes and recordings played as titles, aren't deinterlaced; fast motion can show fine horizontal lines.
 - Sound delay only holds sound back; it can't play sound before the picture.
 - After the first sound delay or leveling, sound takes Mr. Streamer's own route until you restart it, also once you reset them. That route can add a small delay; leveling adds a little more while enabled.
 - On a TV, a movie or episode plays at normal speed with the stream's own picture and sound, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.

@@ -3,7 +3,7 @@ import type { PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import type { Codec, StreamFailure } from "@mrstreamer/contracts/playback";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { createCleanStart } from "./clean-start.ts";
-import { createInspector, H264_CODECS, type Inspection, type StreamLayout } from "./inspect.ts";
+import { createInspector, type Inspection, type StreamLayout } from "./inspect.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 export type Opened =
@@ -88,26 +88,7 @@ export async function inspectStart(
   const facts = (): PlaybackDiagnostic => {
     const unresolved = latest?.open.filter(needsInspection) ?? [];
 
-    const layout = latest?.layout;
-
-    const videoOpen = latest?.open.some((candidates) =>
-      candidates.some((codec) => codec === layout?.video?.codec),
-    );
-
-    const audioOpen = latest?.open.some((candidates) =>
-      layout?.audio.some((track) => candidates.some((codec) => codec === track.codec)),
-    );
-
-    // Both H.264 variants have the same diagnostic family, even before field treatment settles.
-    const h264 = latest?.layout.video && H264_CODECS.has(latest.layout.video.codec);
-
     return defined({
-      diagnostic_video_codec: h264
-        ? ("h264" as const)
-        : videoOpen
-          ? ("unknown" as const)
-          : undefined,
-      diagnostic_audio_codec: audioOpen ? ("unknown" as const) : undefined,
       diagnostic_reason:
         !latest || unresolved.length > 0 ? ("inspection_undetermined" as const) : undefined,
     });

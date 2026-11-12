@@ -2,7 +2,7 @@
 // the player. The program tables name each track's format, language and, for teletext and DVB
 // subtitles, their pages; for MPEG audio, H.264, HEVC and AAC the first frame header adds what the
 // tables leave open: MP2 or MP3, H.264 field capability, HEVC bit depth, the channel layout.
-import type { Codec } from "@mrstreamer/contracts/playback";
+import { CODECS, H264_CODECS, type Codec } from "@mrstreamer/contracts/playback";
 import { bitReader, unescape } from "@mrstreamer/core/bitstream";
 
 const PACKET = 188;
@@ -47,13 +47,10 @@ type Pending = "mpeg-audio" | "h264" | "hevc" | "aac";
 /** The codecs a pending track can turn out to be. */
 const CANDIDATES: Record<Pending, readonly Codec[]> = {
   "mpeg-audio": ["mp2", "mp3"],
-  h264: ["h264", "h264-interlaced"],
+  h264: CODECS.filter((codec) => H264_CODECS.has(codec)),
   hevc: ["hevc", "hevc-10bit"],
   aac: ["aac", "aac-pce"],
 };
-
-/** Both forms of H.264 a stream can carry: whatever reads its NAL units reads either. */
-export const H264_CODECS: ReadonlySet<Codec | "unknown"> = new Set(CANDIDATES.h264);
 
 /** The tracks so far. `open` lists what each still undetermined track may turn out to be. */
 export interface Inspection {
@@ -235,7 +232,20 @@ function videoInspector(kind: "h264" | "hevc") {
           continue;
         }
 
-        zeros = byte === 0 ? zeros + 1 : 0;
+        // Hold zeros until a nonzero byte distinguishes payload from the next start code.
+        // Otherwise a truncated SPS can consume delimiter zeros as missing header bits.
+        if (byte === 0) {
+          zeros++;
+          continue;
+        }
+
+        if (nal.length > 0)
+          while (zeros > 0 && nal.length < 1024) {
+            nal.push(0);
+            zeros--;
+          }
+
+        zeros = 0;
 
         if (header) {
           header = false;

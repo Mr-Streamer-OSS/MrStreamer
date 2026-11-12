@@ -1,6 +1,6 @@
 import { type } from "arktype";
 import type { AppError } from "./errors.ts";
-import type { Codec, StreamFailure } from "./playback.ts";
+import { H264_CODECS, type Codec, type StreamFailure } from "./playback.ts";
 import { lazy, type Infer } from "./lazy.ts";
 
 /** Only these screen-entry literals may cross the renderer collection boundary. */
@@ -95,7 +95,7 @@ export function diagnosticCodecs(
 ): PlaybackDiagnostic {
   return {
     diagnostic_video_codec:
-      video === "h264" || video === "h264-interlaced"
+      video !== null && H264_CODECS.has(video)
         ? "h264"
         : video === "mpeg2"
           ? video

@@ -3431,7 +3431,47 @@ it("inspects a mid-GOP join in bounded time and finds a late sequence header", (
   }
 });
 
-it("reports the H.264 family without claiming its unresolved field treatment", async () => {
+it.each([0, 1, 2])(
+  "keeps a truncated sequence header unresolved with %i delimiter zeros before the packet boundary",
+  (zeros) => {
+    const source = fixture("h264-aac.mpegts");
+    const prefix: Buffer[] = [];
+    let video: Buffer | undefined;
+
+    for (let at = 0; at < source.length; at += 188) {
+      const packet = source.subarray(at, at + 188);
+
+      if ((((packet[1]! & 31) << 8) | packet[2]!) === 256) {
+        video = packet;
+        break;
+      }
+
+      prefix.push(packet);
+    }
+
+    if (!video) throw new Error("Fixture has no video PES");
+    const first = Buffer.from(video);
+    const offset = 4 + (((first[3]! >> 4) & 3) === 3 ? 1 + first[4]! : 0);
+    first.fill(0x55, offset + 9 + first[offset + 8]!);
+    // This SPS stops immediately before frame_mbs_only_flag.
+    first.set(
+      [0, 0, 1, 0x67, 0x42, 0, 0x0a, 0xfb, ...Array.from({ length: zeros }, () => 0)],
+      180 - zeros,
+    );
+    const next = Buffer.from(first);
+    next[1] = next[1]! & ~64;
+    next.fill(0x55, offset);
+    next.set([...Array.from({ length: 2 - zeros }, () => 0), 1, 0x68, 0xc0], offset);
+    const inspector = createInspector();
+    const truncated = inspector.push(Buffer.concat([...prefix, first, next, next]));
+
+    expect(truncated?.layout.video?.codec).toBe("h264");
+    expect(truncated?.open).toContainEqual(["h264", "h264-interlaced"]);
+    expect(inspector.push(source)?.layout.video?.codec).toBe("h264");
+  },
+);
+
+it("keeps the H.264 layout without claiming its unresolved field treatment", async () => {
   const input = lateSequenceHeader(false);
 
   const start = await inspectStart(
@@ -3444,7 +3484,7 @@ it("reports the H.264 family without claiming its unresolved field treatment", a
     new Set(["h264", "aac"]),
   );
 
-  expect(start.diagnostic.diagnostic_video_codec).toBe("h264");
+  expect(start.layout?.video?.codec).toBe("h264");
   expect(start.diagnostic.diagnostic_reason).toBe("inspection_undetermined");
 });
 
@@ -3470,4 +3510,32 @@ it("accepts converted HLS whose first segment has no H.264 sequence header", asy
   } finally {
     await reader.close();
   }
+});
+
+it("still refuses converted HLS with an unresolved HEVC sequence header", async () => {
+  const input = Buffer.from(lateSequenceHeader(false));
+  // Name the stripped picture as HEVC in the PMT, leaving its sequence header absent.
+  const entry = input.indexOf(Buffer.from([0x1b, 0xe1, 0, 0xf0, 0]));
+  expect(entry).toBeGreaterThanOrEqual(0);
+  input[entry] = 0x24;
+
+  await expect(
+    openHlsTsInput(
+      "https://fixture.test/list.m3u8",
+      async (address) =>
+        new Response(
+          address.endsWith("m3u8")
+            ? "#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment.ts\n#EXT-X-ENDLIST\n"
+            : input,
+        ),
+      new AbortController().signal,
+      false,
+      null,
+    ),
+  ).rejects.toMatchObject({
+    failure: {
+      kind: "unsupported",
+      diagnostic: { diagnostic_reason: "inspection_undetermined" },
+    },
+  });
 });

@@ -3,13 +3,14 @@
 // session asks this in place of its provider, so ffprobe, ffmpeg and the subtitle readers behind
 // the loopback proxy work unchanged, and the request's address is never read: one session reads
 // one exact path, which never leaves the main process.
+import { H264_CODECS } from "@mrstreamer/contracts/playback";
 import { createReadStream } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 
 import type { RecordingCopyState } from "@mrstreamer/contracts/downloads";
 
-import { createInspector, H264_CODECS, type Inspection } from "./inspect.ts";
+import { createInspector, type Inspection } from "./inspect.ts";
 
 const TYPES: Readonly<Record<string, string>> = {
   mkv: "video/x-matroska",

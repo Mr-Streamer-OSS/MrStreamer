@@ -1,4 +1,4 @@
-import { RECEIVER_DECODERS } from "@mrstreamer/contracts/playback";
+import { H264_CODECS, RECEIVER_DECODERS } from "@mrstreamer/contracts/playback";
 import type { TrackChoice } from "@mrstreamer/contracts/preferences";
 import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import {
@@ -130,7 +130,7 @@ import {
 } from "../playback/hls-ts-input.ts";
 import { paced, pacedEpochs } from "../playback/paced.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
-import { H264_CODECS, type Inspection, type StreamLayout } from "../playback/inspect.ts";
+import { type Inspection, type StreamLayout } from "../playback/inspect.ts";
 import { CAPTION_PID, createCaptionCopy } from "../playback/caption-stream.ts";
 import {
   hlsAddresses,
