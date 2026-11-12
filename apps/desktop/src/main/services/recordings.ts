@@ -1665,8 +1665,20 @@ function make(deps: RecordingsDeps) {
      * start and then by when it was saved, takes a connection first.
      */
     const startingOn = new Set<string>();
-    /** Each schedule's start under way, settling once it answered, for a change to wait on. */
-    const startsOf = new Map<string, Promise<void>>();
+
+    /**
+     * Each schedule's start under way: the occurrence it starts, why that time wasn't recording
+     * before it, and `answered`, settling once it answered, for a change to wait on.
+     */
+    const startsOf = new Map<
+      string,
+      {
+        readonly occurrence: Occurrence;
+        readonly before: ScheduleMiss | "starting" | undefined;
+        readonly answered: Promise<void>;
+      }
+    >();
+
     /** When this run of the app began checking schedules. */
     const started = Date.now();
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
@@ -2265,15 +2277,22 @@ function make(deps: RecordingsDeps) {
             { start: record.scheduled?.from ?? record.start, stop: record.stop },
           );
 
-        // A time on now that it recorded, stopped or cut short, or a change settled, records no
-        // more: the one after it is next.
-        const next = nextPending(schedule, now);
+        // A start still answering stands on its own time, past its stop too, as that time stood
+        // before it. Else a time on now that it recorded, stopped or cut short, or a change
+        // settled, records no more: the one after it is next.
+        const answering = startsOf.get(schedule.id);
+        const next = answering?.occurrence ?? nextPending(schedule, now);
 
         if (hold) return as(hold, next);
 
         if (!next) return as({ kind: "planned" }, next);
         const { subscriptionId } = plan.channel;
-        const reason = next.start <= now ? why.get(occurrenceKey(schedule.id, next)) : undefined;
+
+        const reason = answering
+          ? answering.before
+          : next.start <= now
+            ? why.get(occurrenceKey(schedule.id, next))
+            : undefined;
 
         if (reason === "busy")
           return as({ kind: "waiting", holders: yield* holdersNow(subscriptionId) }, next);
@@ -2365,7 +2384,7 @@ function make(deps: RecordingsDeps) {
       why.set(key, "starting");
       startingOn.add(subscriptionId);
       const answered = Promise.withResolvers<void>();
-      startsOf.set(schedule.id, answered.promise);
+      startsOf.set(schedule.id, { occurrence, before, answered: answered.promise });
       const { plan } = schedule;
       Effect.runFork(
         Effect.gen(function* () {
@@ -2416,7 +2435,8 @@ function make(deps: RecordingsDeps) {
             Effect.sync(() => {
               startingOn.delete(subscriptionId);
 
-              if (startsOf.get(schedule.id) === answered.promise) startsOf.delete(schedule.id);
+              if (startsOf.get(schedule.id)?.answered === answered.promise)
+                startsOf.delete(schedule.id);
               answered.resolve();
             }),
           ),
@@ -3131,7 +3151,7 @@ function make(deps: RecordingsDeps) {
       turn: Effect.Effect<A, E>,
     ): Effect.Effect<A, E> =>
       Effect.suspend(() => {
-        const answering = id === undefined ? undefined : startsOf.get(id);
+        const answering = id === undefined ? undefined : startsOf.get(id)?.answered;
 
         if (answering)
           return Effect.andThen(
