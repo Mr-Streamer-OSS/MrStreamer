@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node
 import { guideSearchScenario, searchGuide } from "./guide-search.ts";
-import type { Observations } from "./language.ts";
+import type { Driver, Observations } from "./language.ts";
+import { focused, loadJourney } from "./journey.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // Drives the built Electron app through its window. Fixtures replace only provider and TMDB APIs.
@@ -8,7 +9,7 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startFakeHls } from "../../../../apps/desktop/test/fake-hls.ts";
@@ -61,7 +62,7 @@ import {
   record,
   stop,
 } from "./session.ts";
-import { connect, silent, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
+import { connect, MODIFIERS, silent, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import {
   liveStreams,
   QUALITY_STREAM_IDS,
@@ -121,9 +122,17 @@ const scenarios = [
   "custom-lists",
   "custom-lists-sources",
   "custom-lists-round-trip",
+  "journey",
 ] as const;
 
 type Scenario = (typeof scenarios)[number];
+
+/** How the action log names the keys `Driver.key` holds. */
+const HELD = {
+  shift: "Shift",
+  alt: "Alt",
+  main: process.platform === "darwin" ? "Cmd" : "Ctrl",
+} as const satisfies Record<keyof typeof MODIFIERS, string>;
 
 /** A playable test channel with a guide channel of its own, for the guide scenarios. */
 const guided = (channel: FakeChannel): FakeChannel =>
@@ -214,6 +223,8 @@ if (command === "--help" || !command) {
        pnpm verify:desktop downloads-queue [--previous <executable>]: pause and order the queue,
          with an earlier build's executable (0.0.19's unpacked AppImage) started between
        pnpm verify:desktop custom-lists-round-trip <executable>: with a prior release's app on the same profile
+       pnpm verify:desktop journey <module>: a journey module's default export, logged in on the
+         fake provider with fake TMDB (scripts/journey.ts)
        pnpm verify:desktop downloads-series [--previous <executable>]: a series' copies grouped
          and played on offline, with an earlier build's executable started after the first start
 Run from the repo root, after pnpm install --frozen-lockfile and pnpm build.
@@ -245,10 +256,13 @@ Each scenario owns a fresh app/profile/ports and retains proof in .local/verific
     throw new Error("No display. Use xvfb-run -a pnpm verify:desktop downloads-series.");
   await runDownloadsSeries(build, selected ? process.argv[4] : undefined);
 } else if (command === "custom-lists-round-trip" && selected !== undefined) {
-  await run(command, selected);
+  await run(command, { prior: selected });
+} else if (command === "journey" && selected !== undefined) {
+  await run(command, { journey: await loadJourney(resolve(selected)) });
 } else if (
   scenarios.some((scenario) => scenario === command) &&
   command !== "custom-lists-round-trip" &&
+  command !== "journey" &&
   selected === undefined
 ) {
   await run(command as Scenario);
@@ -303,9 +317,12 @@ async function until(check: () => Promise<boolean>, signal: AbortSignal, timeout
 /**
  * Runs `scenario` on a fresh owned profile. `prior` is the executable of an earlier release's
  * packaged app, such as an extracted AppImage's, which the scenario can start on the same profile
- * between runs of this build.
+ * between runs of this build. `journey` is the module the journey scenario runs.
  */
-async function run(scenario: Scenario, prior?: string) {
+async function run(
+  scenario: Scenario,
+  { prior, journey }: { prior?: string; journey?: Awaited<ReturnType<typeof loadJourney>> } = {},
+) {
   const build = await preflight();
 
   if (!build.display)
@@ -667,17 +684,21 @@ async function run(scenario: Scenario, prior?: string) {
     };
 
     const click = async (label: string, element: string) => {
-      await wait(() => exists(element));
-      await livePage.evaluate(`(${element})?.scrollIntoView({ block: "nearest" })`);
       // Popup transitions and late details can move a button after it enters the DOM. Like a
       // viewer, press its painted, enabled control, never coordinates from the initial layout.
-      await wait(() =>
-        livePage.evaluate<boolean>(`(async () => {
+      // Each probe says what stops the click, so a timeout names it.
+      let blocked = "";
+
+      const probe = () =>
+        livePage.evaluate<string>(`(async () => {
         const target = ${element};
-        if (!target?.isConnected || !target.checkVisibility() ||
-            target.matches(':disabled, [aria-disabled=true]')) return false;
+        if (!target) return 'no element matches';
+        if (!target.isConnected) return 'it left the page';
+        if (!target.checkVisibility()) return 'it is hidden';
+        if (target.matches(':disabled, [aria-disabled=true]')) return 'it is disabled';
         for (let parent = target; parent; parent = parent.parentElement)
-          if (parent.getAnimations().some(a => a.playState === 'running' || a.pending)) return false;
+          if (parent.getAnimations().some(a => a.playState === 'running' || a.pending)) return 'it is animating';
+        target.scrollIntoView({ block: "nearest", inline: "nearest" });
         const before = target.getBoundingClientRect();
         const inViewport = box => {
           const x = box.x + box.width / 2, y = box.y + box.height / 2;
@@ -687,20 +708,38 @@ async function run(scenario: Scenario, prior?: string) {
         // then let the next probe require stable geometry and a hit on the control itself.
         if (!inViewport(before)) {
           target.scrollIntoView({ block: "nearest", inline: "nearest" });
-          return false;
+          return 'it is outside the window';
         }
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const after = target.getBoundingClientRect();
         if (!inViewport(after)) {
           target.scrollIntoView({ block: "nearest", inline: "nearest" });
-          return false;
+          return 'it is outside the window';
         }
+        if (!target.isConnected) return 'it left the page';
+        if (after.width === 0 || after.height === 0) return 'it is hidden';
+        if (!['x', 'y', 'width', 'height'].every(key => Math.abs(before[key] - after[key]) < 0.5))
+          return 'it is moving';
         const hit = document.elementFromPoint(after.x + after.width / 2, after.y + after.height / 2);
-        return target.isConnected && after.width > 0 && after.height > 0 &&
-          ['x', 'y', 'width', 'height'].every(key => Math.abs(before[key] - after[key]) < 0.5) &&
-          !!hit && target.contains(hit);
-      })()`),
-      );
+        if (hit && target.contains(hit)) return '';
+        const cover = hit;
+        return 'it is covered by ' + (cover ? cover.tagName.toLowerCase() +
+          (cover.getAttribute('role') ? '[role=' + cover.getAttribute('role') + ']' : '') +
+          (cover.getAttribute('aria-label') ? ' "' + cover.getAttribute('aria-label') + '"' : '') : 'nothing');
+      })()`);
+
+      try {
+        await wait(async () => {
+          blocked = "";
+          blocked = await probe();
+
+          return blocked === "";
+        });
+      } catch (error) {
+        if (abort.signal.aborted || !blocked) throw error;
+        throw new Error(`Can't click "${label}": ${blocked}.`, { cause: error });
+      }
+
       action(label);
 
       const point = await livePage.evaluate<{ x: number; y: number }>(`(() => {
@@ -716,19 +755,31 @@ async function run(scenario: Scenario, prior?: string) {
     const button = (selector: string, text: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
 
-    const key = async (name: string, code: number) => {
-      action(`Press ${name}`);
+    const key: Driver["key"] = async (name, code, held = []) => {
+      // App shortcuts skip keys aimed at buttons, fields and dialogs, so the log keeps the focus.
+      const focus = await livePage.evaluate<string>(focused);
+
+      const keys = held.map((each) => HELD[each]);
+      action(`Press ${[...keys, name === " " ? "Space" : name].join("+")} (focus: ${focus})`);
+
+      const modifiers = defined({
+        modifiers: held.reduce((sum, each) => sum | MODIFIERS[each], 0) || undefined,
+      });
+
       const native = name === "Enter" || name === " ";
+
       await send("Input.dispatchKeyEvent", {
         type: native ? "keyDown" : "rawKeyDown",
         key: name,
         windowsVirtualKeyCode: code,
+        ...modifiers,
         ...defined({ text: native ? (name === "Enter" ? "\r" : " ") : undefined }),
       });
       await send("Input.dispatchKeyEvent", {
         type: "keyUp",
         key: name,
         windowsVirtualKeyCode: code,
+        ...modifiers,
       });
     };
 
@@ -1499,6 +1550,24 @@ async function run(scenario: Scenario, prior?: string) {
 
       if (observed["additionalStreamRequests"] !== 0 || provider.activeStreams() !== 1)
         throw new Error("Home/Watch opened another stream.");
+    } else if (scenario === "journey") {
+      const driver: Driver = {
+        profile,
+        observed,
+        evaluate: livePage.evaluate,
+        send,
+        wait,
+        exists,
+        click,
+        key,
+        capture,
+        action,
+        launch,
+        quit,
+      };
+
+      if (!journey) throw new Error("No journey module was given.");
+      await journey(driver, { provider, tmdb });
     } else {
       if (scenario === "watchlist") {
         await wait(async () => !(await exists(button("header button", "Watchlist"))));

@@ -7,6 +7,7 @@ import type { NetworkObservation } from "./downloads-run.ts";
 import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
 import type { Playing } from "./hls-compatibility.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
+import type { MODIFIERS } from "../../../../apps/desktop/test/e2e/app.ts";
 // The language scenario: the interface language picked in Settings, through the real window, at
 // the smallest window the app allows. It changes the app's own text at once, keeps the title,
 // sound and subtitle languages, survives a restart, follows the system when set to System
@@ -68,8 +69,13 @@ export interface Driver {
   /** Waits for `check`, 30 seconds unless `timeout` says otherwise. */
   wait(check: () => Promise<boolean>, timeout?: number): Promise<void>;
   exists(expression: string): Promise<boolean>;
+  /** Clicks `element` once it is painted, still and on top; failing, it says what stood in the way. */
   click(label: string, element: string): Promise<void>;
-  key(name: string, code: number): Promise<void>;
+  /**
+   * Presses `name` (Windows key `code`) with `held` down, as `["shift"]` for Shift+Tab; `main` is
+   * Cmd on macOS, Ctrl elsewhere. The action log names the keys and the element that had focus.
+   */
+  key(name: string, code: number, held?: readonly (keyof typeof MODIFIERS)[]): Promise<void>;
   capture(name: string): Promise<void>;
   action(label: string): void;
   launch(system?: string): Promise<void>;

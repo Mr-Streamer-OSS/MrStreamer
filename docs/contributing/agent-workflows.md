@@ -33,6 +33,8 @@ pnpm verify:desktop live-tv
 
 On headless Linux use `xvfb-run -a pnpm verify:desktop live-tv`. Other baseline scenarios are `subscriptions`, `titles` and `watchlist`. Each starts a real built app against fake provider/TMDB services, captures UI and side effects, then tears down its isolated instance. Evidence remains in gitignored `.local/verification/`.
 
+A ticket's evidence run reads [evidence runs](../../.cursor/skills/verify-mrstreamer/references/evidence-runs.md) before its first launch. A path no scenario drives becomes a journey module for `pnpm verify:desktop journey <module>`, and that reference names each cause that stopped earlier runs.
+
 Inspect the relevant feature entry before treating a baseline as acceptance. For website changes, build with `pnpm build:marketing`, then use collaborative preview or, when unavailable, `xvfb-run -a pnpm verify:website`. The website entry documents routes, responsive checks, link proof and limits.
 
 Use the installed `architect` skill when types, ownership and module boundaries need a design first; keep delivery sequencing in `multi-phase-plan`.

@@ -26,7 +26,10 @@ pnpm verify:desktop language
 pnpm verify:desktop custom-lists
 pnpm verify:desktop custom-lists-sources
 pnpm verify:desktop custom-lists-round-trip <executable>
+pnpm verify:desktop journey <module>
 ```
+
+`journey` runs a journey module's default export on a fresh logged-in session; [Evidence runs](evidence-runs.md) describes the module. `journey .cursor/skills/verify-mrstreamer/scripts/people.ts` drives people and film franchises.
 
 `custom-lists-round-trip` takes the executable of a prior release's packaged app, such as an extracted 0.0.19 AppImage's `squashfs-root/mrstreamer`, and starts it on the same owned profile between runs of this build; its live doctor checks that executable and its renderer instead of this checkout's.
 
