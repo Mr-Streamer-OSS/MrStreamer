@@ -114,7 +114,8 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
       from: kept.top,
       keep: (top) => keep(() => ({ ...leaving.current, top })),
     },
-    !list.isPending && (standalone || (!schedules.isPending && !ruleList.isPending)),
+    list.data !== undefined &&
+      (standalone || (schedules.data !== undefined && ruleList.data !== undefined)),
   );
   // Standing alone, what was recorded: nothing records or is scheduled without a subscription.
   const recordings = (list.data ?? []).filter((each) => !standalone || !isLive(each));

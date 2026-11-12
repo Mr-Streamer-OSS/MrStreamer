@@ -713,15 +713,11 @@ function Tiles({
       from: kept.from?.top ?? null,
       keep: (top) => kept.keep({ key: null, index: 0, top }),
     },
-    !tiles.isPending,
+    tiles.data !== undefined,
   );
 
   const status = useQuery(queries.onDemandStatus());
   const metadata = status.data?.metadata;
-
-  if (tiles.error) {
-    return <p className="px-10 text-sm text-destructive">{describeError(appError(tiles.error))}</p>;
-  }
 
   const empty = tiles.data?.length === 0;
 
@@ -730,6 +726,9 @@ function Tiles({
       ref={scroller}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pt-1 pb-16"
     >
+      {tiles.error && (
+        <p className="mb-4 text-sm text-destructive">{describeError(appError(tiles.error))}</p>
+      )}
       {empty ? (
         <p className="text-[0.9375rem] text-muted-foreground">
           {!metadata

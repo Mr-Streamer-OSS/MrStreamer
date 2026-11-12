@@ -132,7 +132,7 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
       from: kept,
       keep: (top) => keep(() => ({ top })),
     },
-    !list.isPending,
+    list.data !== undefined,
   );
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [outcome, setOutcome] = useState<Outcome | null>(null);

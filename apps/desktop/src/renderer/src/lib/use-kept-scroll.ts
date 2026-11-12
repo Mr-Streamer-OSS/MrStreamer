@@ -13,6 +13,7 @@ const TAKEN = ["wheel", "pointerdown", "touchstart"] as const;
 
 /** Restores an offset once the caller has its content and measured geometry. Viewer input wins, including global navigation keys.
  * Until restoration finishes, leaving preserves the requested offset rather than an empty list's zero.
+ * The caller keeps the element mounted for the hook's lifetime, including query errors.
  * A privacy reset clears both the current and remembered offset while keeping focus ownership mounted.
  */
 export function useKeptScroll(

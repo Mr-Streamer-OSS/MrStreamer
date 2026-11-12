@@ -21,6 +21,7 @@ import {
 } from "../../src/renderer/src/app/ui-store.ts";
 import { openCollection, TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
 import { RecordingsPage } from "../../src/renderer/src/features/recordings/RecordingsPage.tsx";
+import { DownloadsPage } from "../../src/renderer/src/features/downloads/DownloadsPage.tsx";
 import { queries, syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 
 // happy-dom lays nothing out; the grid draws the rows that fit this height, in one column.
@@ -475,36 +476,98 @@ it("keeps the privacy-reset selection and scroll together after returning", asyn
   }
 });
 
-it("keeps the recovered New page's scroll after a failed read", async () => {
-  setBrowsing("movie", (place) => ({ ...place, tab: "new" }));
-  ipc.always("subscription.list", [{ ...SAVED, kind: "xtream" }]);
-  ipc.refuse("ondemand.rows", { kind: "unexpected", detail: "Rows unavailable" });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(queries.subscriptions().queryKey, [{ ...SAVED, kind: "xtream" }]);
-  const page = queryView(client);
-  unmount = page.unmount;
-  await page.render(createElement(TitlesPage, { kind: "movie", active: true }));
-  await until(() => expect(page.container.textContent).toContain("Rows unavailable"));
+it.each(["new", "genres", "services"] as const)(
+  "keeps the recovered %s page's scroll after a failed read",
+  async (tab) => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(960);
 
-  const rows = Array.from({ length: 30 }, (_, index) => ({
-    id: `genre:${index}` as const,
-    name: `Genre ${index}`,
-    total: 0,
-    titles: [],
-  }));
+    try {
+      setBrowsing("movie", (place) => ({ ...place, tab }));
+      ipc.always("subscription.list", [{ ...SAVED, kind: "xtream" }]);
+      const method = tab === "new" ? "ondemand.rows" : "ondemand.tiles";
+      ipc.refuse(method, { kind: "unexpected", detail: "Browse unavailable" });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      client.setQueryData(queries.subscriptions().queryKey, [{ ...SAVED, kind: "xtream" }]);
+      const page = queryView(client);
+      unmount = page.unmount;
+      await page.render(createElement(TitlesPage, { kind: "movie", active: true }));
+      await until(() => expect(page.container.textContent).toContain("Browse unavailable"));
 
-  ipc.always("ondemand.rows", rows);
-  await act(async () =>
-    client.refetchQueries({ queryKey: queries.rows("movie", "new", null).queryKey }),
-  );
-  await until(() => expect(page.container.textContent).toContain("Genre 29"));
-  const scroller = page.container.querySelector<HTMLElement>(".overflow-y-auto")!;
-  await act(async () => {
-    scroller.scrollTop = 350;
-    scroller.dispatchEvent(new Event("scroll"));
-  });
-  await page.render(null);
-  expect(useUi.getState().browsing.movie.spots.tab?.top).toBe(350);
-  await page.render(createElement(TitlesPage, { kind: "movie", active: true }));
-  await until(() => expect(page.container.textContent).toContain("Genre 29"));
-});
+      if (tab === "new") {
+        ipc.always(
+          "ondemand.rows",
+          Array.from({ length: 30 }, (_, index) => ({
+            id: `genre:${index}` as const,
+            name: `Genre ${index}`,
+            total: 0,
+            titles: [],
+          })),
+        );
+      } else {
+        ipc.always(
+          "ondemand.tiles",
+          Array.from({ length: 30 }, (_, index) => ({
+            id: `genre:${index}` as const,
+            name: `Genre ${index}`,
+            count: 0,
+            artworkUrl: null,
+          })),
+        );
+      }
+
+      const key =
+        tab === "new"
+          ? queries.rows("movie", "new", null).queryKey
+          : queries.tiles("movie", tab).queryKey;
+
+      await act(async () => client.refetchQueries({ queryKey: key }));
+      await until(() => expect(page.container.textContent).toContain("Genre 29"));
+      const scroller = page.container.querySelector<HTMLElement>(".overflow-y-auto")!;
+      await act(async () => {
+        scroller.scrollTop = 350;
+        scroller.dispatchEvent(new Event("scroll"));
+      });
+      await page.render(null);
+      expect(useUi.getState().browsing.movie.spots.tab?.top).toBe(350);
+      await page.render(createElement(TitlesPage, { kind: "movie", active: true }));
+      await until(() => expect(page.container.textContent).toContain("Genre 29"));
+      expect(page.container.querySelector<HTMLElement>(".overflow-y-auto")?.scrollTop).toBe(350);
+    } finally {
+      unmount();
+      width.mockRestore();
+    }
+  },
+);
+
+it.each(["recordings", "downloads"] as const)(
+  "preserves %s scroll through a failed initial read",
+  async (page) => {
+    setBrowsing(page, (place) => ({ ...place, top: 700 }));
+    ipc.always("recordings.schedules", []);
+    ipc.always("recordings.rules", []);
+    ipc.refuse(page === "recordings" ? "recordings.list" : "downloads.list", {
+      kind: "unexpected",
+      detail: "List unavailable",
+    });
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+      configurable: true,
+      get: () => 0,
+      set: () => {},
+    });
+
+    try {
+      const shownPage = await shown(() =>
+        page === "recordings" ? createElement(RecordingsPage) : createElement(DownloadsPage),
+      );
+      await until(() => expect(shownPage.container.textContent).toContain("List unavailable"));
+      await shownPage.leave();
+      expect(useUi.getState().browsing[page].top).toBe(700);
+    } finally {
+      unmount();
+
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, "scrollTop", descriptor);
+      else Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
+    }
+  },
+);
