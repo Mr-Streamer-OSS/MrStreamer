@@ -1,7 +1,7 @@
 // A title's collections menu in its details, beside Save: which of the viewer's collections hold
 // the version that plays, by its own subscription and provider id. Another version of the same
 // film is another member. Until both reads answer nothing is ticked or offered, and a failed one
-// says why with Try again rather than showing the title in no collection.
+// says why with Try again rather than showing the title in no collection, once the title is read.
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ListPlus } from "lucide-react";
@@ -23,7 +23,7 @@ export function TitleCollections({
 }: {
   title: Title | null;
   version: OwnedId;
-  /** True until a successful title read, including a failed read awaiting retry. */
+  /** True until a successful title read; the caller shows read failures while collections wait. */
   pending?: boolean;
 }) {
   return (
@@ -66,7 +66,9 @@ function Membership({ title, identity }: { title: Title | null; identity: Collec
   const list = useQuery(collectionQueries.list());
   const memberOf = useQuery(collectionQueries.memberships(identity));
   const commit = useCommitCollection();
-  const error = list.error ?? memberOf.error;
+  // While the title read is unresolved, the details' own alert says what failed (the same
+  // catalogue read, typically); this one waits for the title, still holding its failure and retry.
+  const error = title ? (list.error ?? memberOf.error) : null;
 
   const failure = error ? (
     <p role="alert" className="text-sm">
