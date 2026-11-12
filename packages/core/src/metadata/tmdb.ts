@@ -4,7 +4,8 @@
 // logo and notice in the app, data cached no longer than six months, and JustWatch named beside
 // streaming services.
 import { type } from "arktype";
-import { lazy } from "@mrstreamer/contracts/lazy";
+import { defined } from "../defined.ts";
+import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 
 /** What the app keeps about one film or series. */
 export interface TitleMetadata {
@@ -46,12 +47,28 @@ export interface TitleAbout {
   readonly runtime: number | null;
   /** The first billed, with the part they play and a portrait. */
   readonly cast: readonly {
+    /** TMDB's person id; absent in details kept before ids were. */
+    readonly id?: number;
     readonly name: string;
     readonly character: string | null;
     readonly profile: string | null;
   }[];
   /** A film's directors, or a series' creators. */
   readonly directors: readonly string[];
+  /** `directors` with TMDB's person ids; absent in details kept before ids were. */
+  readonly directorCredits?: readonly { readonly id: number; readonly name: string }[];
+  /** The film franchise it belongs to; absent in details kept before franchises were. */
+  readonly collection?: { readonly id: number; readonly name: string } | null;
+}
+
+/**
+ * The films and series a person made or played in, or a film franchise's films, by TMDB id: a
+ * person's newest first, a franchise's in release order. Undated ones go last.
+ */
+export interface TmdbTitles {
+  /** In the language asked for. */
+  readonly name: string;
+  readonly titles: readonly { readonly kind: TmdbKind; readonly id: string }[];
 }
 
 /** What TMDB says about one episode, asked for when the viewer opens its season. */
@@ -179,17 +196,79 @@ const About = lazy(() =>
     "genres?": type({ id: "number" }).array(),
     "runtime?": "number | null",
     "episode_run_time?": "number[]",
-    "created_by?": type({ name: "string" }).array(),
+    "belongs_to_collection?": type({ id: "number", name: "string" }).or("null"),
+    "created_by?": type({ "id?": "number", name: "string" }).array(),
     "credits?": type({
       "cast?": type({
+        "id?": "number",
         name: "string",
         "character?": "string | null",
         "profile_path?": "string | null",
       }).array(),
-      "crew?": type({ name: "string", "job?": "string | null" }).array(),
+      "crew?": type({ "id?": "number", name: "string", "job?": "string | null" }).array(),
     }),
   }),
 );
+
+/** A title a person is credited for, or a franchise's film. */
+const Credit = lazy(() =>
+  type({
+    id: "number",
+    "media_type?": "string",
+    "job?": "string | null",
+    "release_date?": "string | null",
+    "first_air_date?": "string | null",
+  }),
+);
+
+const PersonCredits = lazy(() =>
+  type({
+    name: "string",
+    combined_credits: type({ "cast?": Credit().array(), "crew?": Credit().array() }),
+  }),
+);
+
+const Franchise = lazy(() => type({ name: "string", "parts?": Credit().array() }));
+
+/** Crew jobs that make a person's title theirs, as the details credit directors and creators. */
+const MADE_BY = new Set(["Director", "Creator"]);
+
+/**
+ * Credits as `TmdbTitles` lists them: films and series once each, dated ones by `order`, then
+ * undated ones as TMDB listed them.
+ */
+function creditedTitles(
+  credits: readonly Infer<typeof Credit>[],
+  order: "newest" | "oldest",
+): TmdbTitles["titles"] {
+  const seen = new Set<string>();
+  const dated: { kind: TmdbKind; id: string; date: string }[] = [];
+
+  for (const credit of credits) {
+    // A franchise's parts are films, whether or not TMDB says so.
+    const kind = credit.media_type ?? "movie";
+
+    if (kind !== "movie" && kind !== "tv") continue;
+    const key = `${kind}:${credit.id}`;
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dated.push({
+      kind,
+      id: String(credit.id),
+      date: credit.release_date || credit.first_air_date || "",
+    });
+  }
+
+  const sign = order === "newest" ? -1 : 1;
+
+  // Stable: equal dates keep TMDB's order.
+  return dated
+    .sort((a, b) =>
+      !a.date || !b.date ? Number(!a.date) - Number(!b.date) : sign * a.date.localeCompare(b.date),
+    )
+    .map(({ kind, id }) => ({ kind, id }));
+}
 
 /** A season's episodes. */
 const seasonEpisodes = lazy(() =>
@@ -336,12 +415,18 @@ export function tmdb(options: TmdbOptions) {
         throw new TmdbError({ kind: "unavailable", detail: body.summary });
       }
 
-      const directors =
+      const credited =
         kind === "tv"
-          ? (body.created_by ?? []).map((person) => person.name)
-          : (body.credits?.crew ?? [])
-              .filter((person) => person.job === "Director")
-              .map((person) => person.name);
+          ? (body.created_by ?? [])
+          : (body.credits?.crew ?? []).filter((person) => person.job === "Director");
+
+      const directorCredits = [
+        ...new Map(
+          credited.flatMap(({ id, name }) =>
+            id === undefined ? [] : [[id, { id, name }] as const],
+          ),
+        ).values(),
+      ];
 
       return {
         original: (body.original_title ?? body.original_name)?.trim() || null,
@@ -352,11 +437,52 @@ export function tmdb(options: TmdbOptions) {
         genres: (body.genres ?? []).map((genre) => genre.id),
         runtime: body.runtime || body.episode_run_time?.[0] || null,
         cast: (body.credits?.cast ?? []).slice(0, CAST_SHOWN).map((person) => ({
+          ...defined({ id: person.id }),
           name: person.name,
           character: person.character?.trim() || null,
           profile: person.profile_path ?? null,
         })),
-        directors: [...new Set(directors)],
+        directors: [...new Set(credited.map((person) => person.name))],
+        directorCredits,
+        collection: body.belongs_to_collection ?? null,
+      };
+    },
+
+    /**
+     * The films and series person `id` played in, directed or created, newest first, with their
+     * name in `language`. One request.
+     */
+    async person(id: number, language: string, signal?: AbortSignal): Promise<TmdbTitles> {
+      const body = PersonCredits()(
+        await get(`/person/${id}`, { language, append_to_response: "combined_credits" }, signal),
+      );
+
+      if (body instanceof type.errors) {
+        throw new TmdbError({ kind: "unavailable", detail: body.summary });
+      }
+
+      const { cast = [], crew = [] } = body.combined_credits;
+
+      return {
+        name: body.name,
+        titles: creditedTitles(
+          [...cast, ...crew.filter((credit) => MADE_BY.has(credit.job ?? ""))],
+          "newest",
+        ),
+      };
+    },
+
+    /** Film franchise `id`'s films in release order, with its name in `language`. One request. */
+    async franchise(id: number, language: string, signal?: AbortSignal): Promise<TmdbTitles> {
+      const body = Franchise()(await get(`/collection/${id}`, { language }, signal));
+
+      if (body instanceof type.errors) {
+        throw new TmdbError({ kind: "unavailable", detail: body.summary });
+      }
+
+      return {
+        name: body.name,
+        titles: creditedTitles(body.parts ?? [], "oldest"),
       };
     },
 

@@ -1,6 +1,7 @@
 import type { RelatedTitles, Title } from "@mrstreamer/contracts/ondemand";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { ProviderTitle } from "../provider.ts";
+import { kindOf, type IndexedCatalogue } from "./catalogue.ts";
 import { TITLE_LANGUAGES } from "./languages.ts";
 import { formatLanguageName, t } from "../i18n.ts";
 import { titleName } from "./names.ts";
@@ -203,4 +204,15 @@ export function relatedTitles(source: RelatedSource): RelatedTitles {
     basis: best[0]?.reason ?? null,
     titles: best.map(({ title, reason }) => ({ title, reason })),
   };
+}
+
+/**
+ * The titles a person or franchise has in the catalogue (`LinkedTitles`), by kind and TMDB id
+ * alone, in the order asked. Titles for adults gather by no TMDB id, so none is found.
+ */
+export function linkedTitles(
+  catalogue: IndexedCatalogue,
+  wanted: readonly { readonly kind: Title["kind"]; readonly tmdbId: string }[],
+): Title[] {
+  return wanted.flatMap(({ kind, tmdbId }) => kindOf(catalogue, kind).byTmdbId().get(tmdbId) ?? []);
 }

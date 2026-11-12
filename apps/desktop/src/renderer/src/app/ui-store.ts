@@ -1,7 +1,12 @@
 import type { SettingsSection, SettingsControl } from "../features/settings/catalogue.ts";
 import { create } from "zustand";
 import type { LiveDiscovery, LiveFilters } from "@mrstreamer/contracts/live-browse";
-import type { CollectionId, CollectionSort, TitleKind } from "@mrstreamer/contracts/ondemand";
+import type {
+  CollectionId,
+  CollectionSort,
+  RelatedLink,
+  TitleKind,
+} from "@mrstreamer/contracts/ondemand";
 import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
@@ -47,12 +52,28 @@ export interface DetailsTarget extends OwnedId {
 /**
  * Where a title's details stood as a related title opened from them: the season picked there,
  * null for the one being watched, how far the sheet was scrolled, and the related title opened,
- * by its `Title.key`, which Back gives the keyboard back to.
+ * by its `Title.key`, which Back gives the keyboard back to. Opened from a person's or franchise's
+ * titles, `linked` is that list, which Back shows again, and `scroll` is the list's.
  */
 export interface DetailsPlace {
   readonly season: number | null;
   readonly scroll: number;
   readonly related: string;
+  readonly linked?: LinkedView;
+}
+
+/**
+ * A person's or film franchise's titles, shown in the details' sheet in place of the details
+ * whose link opened them (`openLinked`). `label` is the link's own text, shown until TMDB names
+ * them and where it can't; `scroll` is how far the details were scrolled, which Back restores
+ * with the keyboard on the link.
+ */
+export interface LinkedView {
+  /** The exact credit button, including its role and position among duplicate people. */
+  readonly anchor: string;
+  readonly link: RelatedLink;
+  readonly label: string;
+  readonly scroll: number;
 }
 
 /** Details a related title led away from, with where they stood. */
@@ -240,6 +261,8 @@ interface UiState {
   readonly trail: readonly DetailsStep[];
   /** Where Back found the details on screen, for them to show as they open, once. */
   readonly place: DetailsPlace | null;
+  /** A person's or franchise's titles, in place of the details on screen; Back leaves it first. */
+  readonly linked: LinkedView | null;
   /**
    * The season picked in the details Settings closed, by their `visit`, for them to show again as
    * Settings closes, as after a change of interface language.
@@ -282,6 +305,7 @@ export const useUi = create<UiState>(() => ({
   details: null,
   trail: [],
   place: null,
+  linked: null,
   heldSeason: null,
   visit: 0,
   savedEntry: null,
@@ -318,6 +342,7 @@ useUi.subscribe((state, previous) => {
   if (
     state.details !== previous.details ||
     state.trail !== previous.trail ||
+    state.linked !== previous.linked ||
     (state.settings !== null && previous.settings === null) ||
     (state.playingTitle && !previous.playingTitle) ||
     (state.watching && !previous.watching) ||
@@ -332,7 +357,13 @@ export function invalidateDetailsCatalogue(): void {
 }
 
 /** No details on screen, nor a way back through any. */
-const NO_DETAILS = { details: null, trail: [], place: null, heldSeason: null } as const;
+const NO_DETAILS = {
+  details: null,
+  trail: [],
+  place: null,
+  linked: null,
+  heldSeason: null,
+} as const;
 
 /**
  * Leaves the title, saving how far it got, back to its details or the page. One that plays on a
@@ -413,6 +444,7 @@ export function openDetails(target: DetailsTarget): void {
     details: target,
     trail: [],
     place: null,
+    linked: null,
     visit: visit + 1,
     savedEntry: null,
     searchOpen: false,
@@ -433,19 +465,28 @@ export function openRelated(target: DetailsTarget, here: DetailsPlace): void {
     details: target,
     trail: [...trail, { target: details, place: here }].slice(-DETAILS_TRAIL),
     place: null,
+    linked: null,
     visit: visit + 1,
   });
 }
 
+/** Shows a person's or franchise's titles in place of the details on screen, which Back returns to. */
+export function openLinked(view: LinkedView): void {
+  if (useUi.getState().details) useUi.setState({ linked: view });
+}
+
 /**
- * Back over details: to the details the ones on screen were opened from as a related title, as
- * they stood, or to the page once there are none. The lists are asked first, as they stand now:
+ * Back over details: from a person's or franchise's titles to the details they were opened from,
+ * else to the details the ones on screen were opened from as a related title, as they stood, with
+ * the list they were opened from, or to the page once there are none. The lists are asked first, as they stand now:
  * details of a title they keep from the viewer, as one they have since marked for adults while
  * Settings hides those, are passed over and forgotten, and never show. Going anywhere meanwhile
  * wins over the answer (`navigation`): another Back, Close, other details, Settings, a playing
  * title or search, also left again before the lists answer, and the way back stays as it was.
  */
 export async function backDetails(): Promise<void> {
+  if (useUi.getState().linked) return useUi.setState({ linked: null });
+
   for (;;) {
     const mine = ++navigation;
     const { details, trail } = useUi.getState();
@@ -465,6 +506,7 @@ export async function backDetails(): Promise<void> {
       details: step.target,
       trail: trail.slice(0, -1),
       place: step.place,
+      linked: step.place.linked ?? null,
       visit: visit + 1,
     }));
 

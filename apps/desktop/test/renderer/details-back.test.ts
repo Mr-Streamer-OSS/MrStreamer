@@ -9,7 +9,9 @@
 // restores it at once, and only then. Search opened over the details, by pointer or shortcut,
 // gives the keyboard back to them. A Back still waiting for the lists gives way to whatever the
 // viewer does meanwhile: Settings, a title played, Search, another Back, Close or another title,
-// opened and left again too, and the way back stays as it was.
+// opened and left again too, and the way back stays as it was. A person's or franchise's titles
+// open in place of the details from their link, each title opening its own version, and Back
+// returns through them to the details with the keyboard on the link.
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -120,10 +122,18 @@ const base = {
   backdropUrl: null,
 };
 
+/** What TMDB credits Night Harbour with: its cast, directors and franchise, with their ids. */
+let credits: Partial<Pick<MovieDetails, "cast" | "directors" | "directorCredits" | "franchise">> =
+  {};
+
 function detailsOf(id: string): MovieDetails | SeriesDetails {
   const title = titles.get(id)!;
 
-  if (title.kind === "movie") return { ...base, kind: "movie", title };
+  if (title.kind === "movie") {
+    const film: MovieDetails = { ...base, kind: "movie", title };
+
+    return id === "a" ? { ...film, ...credits } : film;
+  }
 
   return {
     ...base,
@@ -228,6 +238,7 @@ beforeEach(() => {
   });
   related = { a: [canyon, field], b: [meridian, harbour], c: [field], d: [] };
   forAdults = new Set();
+  credits = {};
   ipc.always("subscription.list", BOTH);
   ipc.always("liveBrowse.get", { kind: "all" });
   ipc.always("ondemand.status", status);
@@ -964,5 +975,191 @@ describe("grid and related details", () => {
       document.activeElement?.closest('[role="listitem"]')?.getAttribute("aria-posinset"),
     ).toBe("2");
     expect(document.activeElement?.querySelector("span.ring-2.ring-white")).not.toBeNull();
+  });
+});
+
+describe("a person's or franchise's titles", () => {
+  /** A cast member, director or franchise the details link to, by the text it shows. */
+  const linkTo = (name: string) =>
+    [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      (each) =>
+        each.textContent?.includes(name) &&
+        !each.closest('[aria-label="Also in your subscriptions"]'),
+    );
+
+  /** A title the list shows, by its name. */
+  const listedTile = (name: string) =>
+    [...(sheet()?.querySelectorAll<HTMLButtonElement>("li button") ?? [])].find((tile) =>
+      tile.textContent?.includes(name),
+    );
+
+  /** Waits on the fake clock for the list named `name` to say `line`. */
+  async function listing(name: string, line: string) {
+    await vi.waitFor(
+      async () => {
+        await settle();
+        expect(shown()).toBe(name);
+        expect(sheet()?.textContent).toContain(line);
+      },
+      { interval: 1 },
+    );
+  }
+
+  it("opens a person's titles by their exact versions, and Back returns through them to the link", async () => {
+    credits = {
+      cast: [
+        { name: "Alan Actor", role: "Pilot", photoUrl: null, tmdbId: 7 },
+        { name: "Cal Crew", role: "Deckhand", photoUrl: null },
+      ],
+      directors: ["Dana Director", "Una Unlinked"],
+      directorCredits: [{ tmdbId: 8, name: "Dana Director" }],
+    };
+    ipc.answer("ondemand.linked", ({ link }) =>
+      link.id === 7
+        ? { name: "Alan Actor", titles: [canyon, meridian] }
+        : { name: null, titles: [] },
+    );
+    await window_();
+    const opener = await onPage("Details");
+    opener.focus();
+    await press(opener);
+    await showing("Night Harbour");
+
+    // Cal Crew has no TMDB id, so their name leads nowhere; the director's does.
+    expect(sheet()?.textContent).toContain("Cal Crew");
+    expect(linkTo("Cal Crew")).toBeUndefined();
+    expect(linkTo("Dana Director")).toBeDefined();
+    expect(sheet()?.textContent).toContain("Una Unlinked");
+    expect(linkTo("Una Unlinked")).toBeUndefined();
+
+    scroller()!.scrollTop = 120;
+    await press(linkTo("Alan Actor"));
+    await listing("Alan Actor", "2 in your subscriptions, newest first");
+    expect(ipc.argsOf("ondemand.linked")).toEqual([{ link: { kind: "person", id: 7 } }]);
+    expect(document.activeElement?.textContent).toBe("Alan Actor");
+    // A person's titles mix movies and series, and say which is a series.
+    expect(listedTile("Canyon Hours")?.textContent).toContain("2024 · Series");
+
+    ipc.always("viewing.progress", [
+      {
+        title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "c2" },
+        position: 100,
+        duration: 3600,
+        finished: false,
+        at: 10,
+        since: 1,
+      },
+    ]);
+    // Meridian Dawn opens the version listed first, even with progress on the other.
+    await press(listedTile("Meridian Dawn"));
+    await showing("Meridian Dawn");
+    expect(ipc.argsOf("ondemand.details").at(-1)?.version).toEqual(ownedOf(meridian));
+
+    await press(back());
+    await listing("Alan Actor", "2 in your subscriptions");
+    expect(document.activeElement).toBe(listedTile("Meridian Dawn"));
+
+    await press(back());
+    await showing("Night Harbour");
+    expect(scroller()?.scrollTop).toBe(120);
+    expect(document.activeElement).toBe(linkTo("Alan Actor"));
+
+    await press(back());
+    expect(sheet()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it.each([false, true])(
+    "Back restores the director link and scroll after Settings remount (loading: %s)",
+    async (loading) => {
+      credits = {
+        cast: [{ name: "Alan Actor", role: "Pilot", photoUrl: null, tmdbId: 7 }],
+        directors: ["Alan Actor"],
+        directorCredits: [{ tmdbId: 7, name: "Alan Actor" }],
+      };
+      ipc.always("ondemand.linked", { name: "Alan Actor", titles: [meridian] });
+      const client = await window_();
+      await press(await onPage("Details"));
+      await showing("Night Harbour");
+
+      const director = () =>
+        [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+          (button) => button.textContent?.trim() === "Alan Actor",
+        );
+
+      scroller()!.scrollTop = 180;
+      await press(director());
+      await listing("Alan Actor", "1 in your subscriptions");
+      let held: ReturnType<typeof ipc.hold<"ondemand.details">> | undefined;
+
+      if (loading) {
+        await key(",", { ctrlKey: true, metaKey: true });
+        await settle();
+        held = ipc.hold("ondemand.details");
+        client.removeQueries({ queryKey: ["ondemand", "details"] });
+        await press(
+          [
+            ...document.querySelectorAll<HTMLButtonElement>('[data-view="settings"] header button'),
+          ].find((button) => button.textContent?.trim() === "Back"),
+        );
+        await listing("Alan Actor", "1 in your subscriptions");
+      }
+
+      await press(back());
+
+      if (held) await act(async () => held.resolve(detailsOf("a")));
+      await showing("Night Harbour");
+      expect(document.activeElement).toBe(director());
+      expect(scroller()?.scrollTop).toBe(180);
+    },
+  );
+
+  it("says when a franchise has none in the subscriptions, or TMDB didn't answer, with Try again", async () => {
+    credits = { franchise: { tmdbId: 9, name: "Harbour Collection" } };
+    const first = ipc.hold("ondemand.linked");
+    await window_();
+    await press(await onPage("Details"));
+    await showing("Night Harbour");
+
+    await press(linkTo("Harbour Collection"));
+    await listing("Harbour Collection", "Loading…");
+    await act(async () => first.reject({ kind: "unexpected", detail: "TMDB didn't answer." }));
+    await settle();
+    expect(sheet()?.querySelector('[role="alert"]')?.textContent).toContain("TMDB didn't answer.");
+
+    // TMDB answers now, without a name for the id: the list keeps the link's.
+    ipc.always("ondemand.linked", { name: null, titles: [] });
+    await press(inSheet("Try again"));
+    await listing("Harbour Collection", "None of its films are in your subscriptions.");
+    expect(sheet()?.querySelector('[role="alert"]')).toBeNull();
+    expect(ipc.argsOf("ondemand.linked")).toEqual([
+      { link: { kind: "franchise", id: 9 } },
+      { link: { kind: "franchise", id: 9 } },
+    ]);
+  });
+
+  it("never shows a title new lists mark for adults while the list is read again", async () => {
+    credits = { cast: [{ name: "Alan Actor", role: null, photoUrl: null, tmdbId: 7 }] };
+    ipc.always("ondemand.linked", { name: "Alan Actor", titles: [canyon, meridian] });
+    await window_();
+    await press(await onPage("Details"));
+    await showing("Night Harbour");
+    await press(linkTo("Alan Actor"));
+    await listing("Alan Actor", "Meridian Dawn");
+
+    const again = ipc.hold("ondemand.linked");
+    await act(async () =>
+      ipc.emit("ondemand.updated", {
+        ...status,
+        lists: status.lists.map((list) => ({ ...list, fetchedAt: 2 })),
+        markedForAdults: true,
+      }),
+    );
+    await settle();
+    expect(sheet()?.textContent).not.toContain("Meridian Dawn");
+
+    await act(async () => again.resolve({ name: "Alan Actor", titles: [canyon] }));
+    await listing("Alan Actor", "1 in your subscriptions");
+    expect(sheet()?.textContent).not.toContain("Meridian Dawn");
   });
 });

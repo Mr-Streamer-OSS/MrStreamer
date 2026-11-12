@@ -535,6 +535,11 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
             }),
           }))
         : denied(),
+    "ondemand.linked": (input, frame) =>
+      Effect.map(handlers["ondemand.linked"](input, frame), (result) => ({
+        ...result,
+        titles: titles(result.titles),
+      })),
     "ondemand.recommendations": (input, frame) =>
       input.seeds.every((seed) => online(seed.kind, seed.version))
         ? Effect.map(handlers["ondemand.recommendations"](input, frame), (rows) =>

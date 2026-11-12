@@ -1,8 +1,9 @@
 import type { Json } from "@mrstreamer/contracts/json";
 // A stand-in for TMDB's API: every film and series it is asked about exists, with genres, a
 // language and names that follow from its id (see `tmdbName`), every series has two seasons whose
-// episodes are named the same way (see `tmdbEpisodeName`), and one streaming service streams the
-// first titles it is told about.
+// episodes are named the same way (see `tmdbEpisodeName`), one streaming service streams the
+// first titles it is told about, and the people and franchise every title credits have titles of
+// their own (see `PEOPLE` and `FRANCHISES`).
 import { createServer } from "node:http";
 
 export interface FakeTmdb {
@@ -11,6 +12,8 @@ export interface FakeTmdb {
   detailRequests(language?: string): number;
   /** Requests a title's details made as it opened, with its credits, refused ones included. */
   aboutRequests(): number;
+  /** Requests for a person's or franchise's titles so far: "person/1", "collection/10". */
+  linkedRequests(): readonly string[];
   /** Season requests so far, in order, by series, season and language: "90000/1/nl". */
   seasonRequests(): readonly string[];
   /**
@@ -65,6 +68,48 @@ function tmdbEpisodeName(id: number, season: number, episode: number, language: 
   return `Episode ${episode}`;
 }
 
+/**
+ * The people every title credits, by TMDB person id, with what they are credited for: Alan
+ * Actor plays in every title, Grace Director directs every film and Ada Creator created every
+ * series. Ids 999990 and up are titles no fake provider lists.
+ */
+const PEOPLE: Readonly<Record<number, { readonly name: string; readonly credits: Json }>> = {
+  1: {
+    name: "Alan Actor",
+    credits: {
+      cast: [
+        { id: 100002, media_type: "movie", release_date: "2001-05-01" },
+        { id: 90000, media_type: "tv", first_air_date: "2010-09-01" },
+        { id: 999999, media_type: "movie", release_date: "2020-01-01" },
+        { id: 100003, media_type: "movie", release_date: "2005-03-01" },
+        { id: 100005, media_type: "movie", release_date: "" },
+      ],
+      // Not what he made: a producer's credit is no link of the title's.
+      crew: [{ id: 100001, media_type: "movie", job: "Producer", release_date: "2015-01-01" }],
+    },
+  },
+  2: {
+    name: "Grace Director",
+    credits: { crew: [{ id: 100001, media_type: "movie", job: "Director" }] },
+  },
+  3: {
+    name: "Ada Creator",
+    credits: { crew: [{ id: 90000, media_type: "tv", job: "Creator" }] },
+  },
+};
+
+/** The film franchise every film belongs to, by TMDB collection id, with its films. */
+const FRANCHISES: Readonly<Record<number, { readonly name: string; readonly parts: Json }>> = {
+  10: {
+    name: "Test Saga",
+    parts: [
+      { id: 100004, media_type: "movie", release_date: "2003-01-01" },
+      { id: 999998, media_type: "movie", release_date: "2001-01-01" },
+      { id: 100000, media_type: "movie", release_date: "1999-01-01" },
+    ],
+  },
+};
+
 /** Episodes per season the fake TMDB lists for every series: four, then one. */
 const SEASON_EPISODES = [4, 1];
 
@@ -73,6 +118,7 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
   let about = 0;
   let refused = false;
   const seasons: string[] = [];
+  const linked: string[] = [];
   let seasonFailure: number | "hold" | null = null;
   /** Season requests waiting while their answers are held. */
   const heldSeasons: (() => void)[] = [];
@@ -139,6 +185,27 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
       return answer();
     }
 
+    const person = /^\/3\/(person|collection)\/(\d+)$/.exec(url.pathname);
+
+    if (person) {
+      const id = Number(person[2]);
+      linked.push(`${person[1]}/${id}`);
+
+      if (person[1] === "person") {
+        const known = PEOPLE[id];
+
+        return known
+          ? json(response, { id, name: known.name, combined_credits: known.credits })
+          : json(response, { status_code: 34 }, 404);
+      }
+
+      const known = FRANCHISES[id];
+
+      return known
+        ? json(response, { id, name: known.name, parts: known.parts })
+        : json(response, { status_code: 34 }, 404);
+    }
+
     const title = /^\/3\/(movie|tv)\/(\d+)$/.exec(url.pathname);
 
     if (title) {
@@ -173,10 +240,13 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
                 poster_path: `/poster-${id}.jpg`,
                 runtime: series ? null : 101,
                 episode_run_time: series ? [44] : undefined,
-                created_by: series ? [{ name: "Ada Creator" }] : undefined,
+                created_by: series ? [{ id: 3, name: "Ada Creator" }] : undefined,
+                belongs_to_collection: series ? undefined : { id: 10, name: "Test Saga" },
                 credits: {
-                  cast: [{ name: "Alan Actor", character: "The Lead", profile_path: "/alan.jpg" }],
-                  crew: [{ name: "Grace Director", job: "Director" }],
+                  cast: [
+                    { id: 1, name: "Alan Actor", character: "The Lead", profile_path: "/alan.jpg" },
+                  ],
+                  crew: [{ id: 2, name: "Grace Director", job: "Director" }],
                 },
               }
             : listed,
@@ -221,6 +291,7 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
   return {
     url: `http://127.0.0.1:${port}/3`,
     aboutRequests: () => about,
+    linkedRequests: () => [...linked],
     seasonRequests: () => [...seasons],
     failSeasons: (answer) => {
       seasonFailure = answer;

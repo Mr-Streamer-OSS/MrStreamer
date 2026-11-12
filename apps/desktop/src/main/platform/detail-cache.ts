@@ -67,7 +67,13 @@ export type DetailRecord =
 
 // Declare stripping on each object to avoid rebuilding the full schema on first use.
 const Person = lazy(() =>
-  type({ "+": "delete", name: "string", character: "string | null", profile: "string | null" }),
+  type({
+    "+": "delete",
+    "id?": "number",
+    name: "string",
+    character: "string | null",
+    profile: "string | null",
+  }),
 );
 
 const About = lazy(() =>
@@ -82,6 +88,8 @@ const About = lazy(() =>
     runtime: "number | null",
     cast: Person().array(),
     directors: "string[]",
+    "directorCredits?": type({ "+": "delete", id: "number", name: "string" }).array(),
+    "collection?": type({ "+": "delete", id: "number", name: "string" }).or("null"),
   }),
 );
 

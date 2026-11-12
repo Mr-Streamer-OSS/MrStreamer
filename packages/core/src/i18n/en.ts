@@ -817,6 +817,16 @@ export const en = {
   Episodes: "Episodes",
   "Genres need a TMDB key, in Settings.": "Genres need a TMDB key, in Settings.",
   "Services need a TMDB key, in Settings.": "Services need a TMDB key, in Settings.",
+  "People and franchises need a TMDB key, in Settings.":
+    "People and franchises need a TMDB key, in Settings.",
+  "TMDB didn't answer.": "TMDB didn't answer.",
+  "Part of": "Part of",
+  "{count} in your subscriptions, newest first": "{count} in your subscriptions, newest first",
+  "{count} in your subscriptions, in release order":
+    "{count} in your subscriptions, in release order",
+  "None of their titles are in your subscriptions.":
+    "None of their titles are in your subscriptions.",
+  "None of its films are in your subscriptions.": "None of its films are in your subscriptions.",
   "TMDB refused the key. Check it in Settings.": "TMDB refused the key. Check it in Settings.",
   "Genres appear as details arrive from TMDB.": "Genres appear as details arrive from TMDB.",
   "Services appear as details arrive from TMDB.": "Services appear as details arrive from TMDB.",

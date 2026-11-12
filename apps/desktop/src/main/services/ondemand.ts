@@ -29,6 +29,8 @@ import type {
   MetadataProgress,
   OnDemandStatus,
   OnDemandUpdate,
+  LinkedTitles,
+  RelatedLink,
   RelatedTitles,
   HomeRecommendation,
   HomeSeed,
@@ -54,6 +56,7 @@ import {
   TmdbError,
   type EpisodeAbout,
   type TitleAbout,
+  type TmdbTitles,
 } from "@mrstreamer/core/metadata/tmdb";
 import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
@@ -123,6 +126,12 @@ const SEASONS_KEPT = 100;
 
 /** How long TMDB gets to describe a title, or a season; the provider's details stand after that. */
 const ABOUT_TIMEOUT_MS = 4000;
+
+/** How many people's and franchises' titles TMDB listed stay in memory, each in one language. */
+const LINKED_KEPT = 50;
+
+/** How long TMDB gets to list a person's or franchise's titles: one larger answer. */
+const LINKED_TIMEOUT_MS = 8000;
 
 /** Search results a Movies or Series page shows; a longer list needs more words. */
 const SEARCH_PAGE = 300;
@@ -236,6 +245,12 @@ export class OnDemand extends Context.Service<
     details(kind: TitleKind, version: OwnedId): Effect.Effect<TitleDetails, Failed>;
     /** Related titles from lists already in memory. Never opens another library or file. */
     related(kind: TitleKind, version: OwnedId): Effect.Effect<RelatedTitles, Failed>;
+    /**
+     * A person's or franchise's titles in the lists, as `LinkedTitles` says. Asks TMDB once per
+     * link and language, keeping its answer as long as a title's details; a failed answer fails
+     * with what to do, unless one is still kept, and isn't kept itself.
+     */
+    linked(link: RelatedLink): Effect.Effect<LinkedTitles, Failed>;
     recommendations(
       seeds: readonly HomeSeed[],
     ): Effect.Effect<readonly HomeRecommendation[], Failed>;
@@ -443,6 +458,9 @@ function make(deps: OnDemandDeps) {
     const asking = new Map<string, Flight<TitleAbout | null | undefined>>();
     const late = new Set<string>();
     const seasons = new Map<string, Timed<readonly EpisodeAbout[] | null>>();
+    /** TMDB's titles of a person or franchise, by link and language; null where it has none. */
+    const linkedAnswers = new Map<string, Timed<TmdbTitles | null>>();
+    const linkedFlights = new Map<string, Fiber.Fiber<TmdbTitles | null, Failed>>();
     const seasonFlights = new Map<string, Flight<readonly EpisodeAbout[] | null | undefined>>();
     const reconfigured = new WeakSet<Fiber.Fiber<unknown, unknown>>();
     /** A forgotten source cannot start new work while Roster still holds its saved login. */
@@ -1109,7 +1127,10 @@ function make(deps: OnDemandDeps) {
         const personalKey = keyOf(yield* preferences);
 
         if (
-          (kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS)) ||
+          (kept &&
+            younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS) &&
+            // Details kept without TMDB's person ids are asked for again, so their people link.
+            (kept.value === null || kept.value.directorCredits !== undefined)) ||
           !personalKey
         )
           return { value, flight: undefined };
@@ -1160,6 +1181,46 @@ function make(deps: OnDemandDeps) {
         );
 
         return { value, flight, key, flightKey };
+      });
+
+    /** TMDB's titles of a person or franchise in `viewer`'s language; null when it has none. */
+    const askLinked = (link: RelatedLink, viewer: string) =>
+      Effect.gen(function* () {
+        const personalKey = keyOf(yield* preferences);
+
+        if (!personalKey)
+          return yield* new Failed({
+            error: {
+              kind: "unexpected",
+              detail: t("People and franchises need a TMDB key, in Settings."),
+            },
+          });
+        const client = tmdb({ key: personalKey, ...defined({ api: deps.tmdbApi || undefined }) });
+
+        return yield* Effect.tryPromise({
+          try: (signal) => {
+            const bounded = AbortSignal.any([signal, AbortSignal.timeout(LINKED_TIMEOUT_MS)]);
+
+            return (
+              link.kind === "person"
+                ? client.person(link.id, viewer, bounded)
+                : client.franchise(link.id, viewer, bounded)
+            ).catch((cause: unknown) => {
+              if (cause instanceof TmdbError && cause.failure.kind === "missing") return null;
+              throw cause;
+            });
+          },
+          catch: (cause) =>
+            new Failed({
+              error: {
+                kind: "unexpected",
+                detail:
+                  cause instanceof TmdbError && cause.failure.kind === "refused"
+                    ? t("TMDB refused the key. Check it in Settings.")
+                    : t("TMDB didn't answer."),
+              },
+            }),
+        });
       });
 
     const listedTitle = (source: SavedSubscription, kind: TitleKind, id: string) =>
@@ -1793,6 +1854,62 @@ function make(deps: OnDemandDeps) {
                 : undefined,
             }),
           });
+        }),
+      linked: (link: RelatedLink) =>
+        Effect.gen(function* () {
+          const viewer = yield* language;
+          const key = JSON.stringify([link.kind, link.id, viewer]);
+          const now = yield* Clock.currentTimeMillis;
+          const kept = linkedAnswers.get(key);
+
+          const answer =
+            kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS)
+              ? kept.value
+              : yield* Effect.uninterruptibleMask((restore) =>
+                  Effect.gen(function* () {
+                    let fiber = linkedFlights.get(key);
+
+                    if (!fiber) {
+                      fiber = yield* Effect.forkIn(
+                        restore(askLinked(link, viewer)).pipe(
+                          Effect.tap((value) =>
+                            Effect.sync(() =>
+                              keep(linkedAnswers, key, { at: now, value }, LINKED_KEPT),
+                            ),
+                          ),
+                          Effect.ensuring(Effect.sync(() => linkedFlights.delete(key))),
+                        ),
+                        scope,
+                      );
+                      linkedFlights.set(key, fiber);
+                    }
+
+                    return yield* restore(Fiber.join(fiber));
+                  }),
+                ).pipe(
+                  Effect.catch((failure) =>
+                    kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_EXPIRE_MS)
+                      ? Effect.succeed(kept.value)
+                      : Effect.fail(failure),
+                  ),
+                );
+
+          if (!answer) return { name: null, titles: [] };
+
+          const titles = yield* loaded(
+            (owners, language) =>
+              call("linked", {
+                owners,
+                language,
+                titles: answer.titles.map((each) => ({
+                  kind: each.kind === "tv" ? "series" : "movie",
+                  tmdbId: each.id,
+                })),
+              }),
+            true,
+          );
+
+          return { name: answer.name, titles };
         }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
         loaded((owners, language) => call("tiles", { owners, language, kind, of }), true),

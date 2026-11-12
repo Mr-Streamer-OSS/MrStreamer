@@ -1,10 +1,12 @@
+import { Dialog } from "@base-ui/react/dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import type { TitleDetails } from "@mrstreamer/contracts/ondemand";
+import type { Title, TitleDetails } from "@mrstreamer/contracts/ondemand";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
-import { openRelated, type DetailsPlace } from "../../app/ui-store.ts";
+import { openRelated, type DetailsPlace, type LinkedView } from "../../app/ui-store.ts";
 import { PosterTile } from "../../components/TitleArt.tsx";
+import { appError, describeError } from "../../lib/errors.ts";
 import { queries } from "../../lib/queries.ts";
 
 /**
@@ -86,4 +88,108 @@ export function RelatedTitles({
       )}
     </section>
   );
+}
+
+/**
+ * A person's or film franchise's titles in the viewer's subscriptions, in the details' sheet in
+ * place of the details whose link opened them (`openLinked`): named by TMDB, else by the link's
+ * own text, a person's newest first and a franchise's in release order. Each title opens the
+ * version listed first over this list, which Back returns to as it stood (`here`). Returned to
+ * from `returnTo`, a `Title.key`, it hands `onReturn` that title's tile once the list settles, or
+ * null when it no longer lists it; opened anew, the keyboard starts on its name.
+ */
+export function LinkedTitles({
+  view,
+  here,
+  returnTo = null,
+  onReturn,
+}: {
+  view: LinkedView;
+  /** Where the sheet stands as the title `related` opens from this list. */
+  here: (related: string) => DetailsPlace;
+  returnTo?: string | null;
+  onReturn?: (tile: HTMLElement | null) => void;
+}) {
+  const linked = useQuery(queries.linked(view.link));
+  const titles = linked.data?.titles ?? [];
+  const person = view.link.kind === "person";
+  // Try again after a failure shows the list loading, not the failure, while TMDB is asked.
+  const waiting = linked.isPending || (linked.isError && linked.isFetching);
+
+  const name = useRef<HTMLHeadingElement>(null);
+  const returned = useRef<HTMLButtonElement>(null);
+  const returning = useRef(returnTo !== null);
+  useEffect(() => {
+    if (!returning.current) name.current?.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    if (!returning.current || waiting) return;
+    returning.current = false;
+    onReturn?.(returned.current);
+  });
+
+  return (
+    <div className="px-10 pt-10 pb-12">
+      <Dialog.Title
+        ref={name}
+        tabIndex={-1}
+        className="pr-16 text-4xl font-semibold tracking-tight text-balance outline-none"
+      >
+        {linked.data?.name ?? view.label}
+      </Dialog.Title>
+      {waiting ? (
+        <p className="mt-2 text-[0.9375rem] text-muted-foreground">{t("Loading…")}</p>
+      ) : linked.isError ? (
+        <p role="alert" className="mt-4 text-[0.875rem] text-destructive">
+          {describeError(appError(linked.error))}{" "}
+          {/* The button goes while TMDB is asked again, so the keyboard waits on the name. */}
+          <button
+            onClick={() => {
+              name.current?.focus({ preventScroll: true });
+              void linked.refetch();
+            }}
+            className="text-white underline"
+          >
+            {t("Try again")}
+          </button>
+        </p>
+      ) : titles.length === 0 ? (
+        <p className="mt-4 text-[0.875rem] text-foreground/75">
+          {person
+            ? t("None of their titles are in your subscriptions.")
+            : t("None of its films are in your subscriptions.")}
+        </p>
+      ) : (
+        <>
+          <p className="mt-2 text-[0.9375rem] text-muted-foreground">
+            {person
+              ? t("{count} in your subscriptions, newest first", { count: titles.length })
+              : t("{count} in your subscriptions, in release order", { count: titles.length })}
+          </p>
+          <ul className="mt-6 flex flex-wrap gap-x-4 gap-y-6">
+            {titles.map((title) => (
+              <li key={title.key} className="w-36 shrink-0">
+                <PosterTile
+                  ref={title.key === returnTo ? returned : undefined}
+                  title={title}
+                  line={lineOf(title)}
+                  onOpen={() =>
+                    openRelated(
+                      { kind: title.kind, ...ownedId(title), asked: true },
+                      here(title.key),
+                    )
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The year, and Series for a series, as a person's titles mix both. */
+function lineOf(title: Title): string {
+  return [title.year, title.kind === "series" ? t("Series") : null].filter(Boolean).join(" · ");
 }
