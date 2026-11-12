@@ -1993,6 +1993,17 @@ export const nl: Translation = {
   "Couldn't save. Your changes are kept.": "Bewaren mislukt. Je wijzigingen blijven staan.",
   Discard: "Verwerpen",
   "Save rules": "Regels bewaren",
+  Repair: "Herstellen",
+  "Repair rules": "Regels herstellen",
+  "Some saved rules couldn't be read. Nothing shows until you save these.":
+    "Sommige bewaarde regels konden niet worden gelezen. Er verschijnt niets tot je deze bewaart.",
+  "None of the saved rules could be read.": "Geen van de bewaarde regels kon worden gelezen.",
+  "The saved kind of title isn't one this version knows.":
+    "Het bewaarde soort titel kent deze versie niet.",
+  "Some saved rules aren't ones this version knows.":
+    "Sommige bewaarde regels kent deze versie niet.",
+  "No rules were saved.": "Er waren geen regels bewaard.",
+  "{rule} was left out.": "{rule} is weggelaten.",
   "Smart collection": "Slimme collectie",
   Collection: "Collectie",
   "Titles you add": "Titels die je toevoegt",

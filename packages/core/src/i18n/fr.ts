@@ -2103,6 +2103,17 @@ export const fr: Translation = {
     "Échec de l'enregistrement. Vos modifications sont conservées.",
   Discard: "Annuler les modifications",
   "Save rules": "Enregistrer les règles",
+  Repair: "Réparer",
+  "Repair rules": "Réparer les règles",
+  "Some saved rules couldn't be read. Nothing shows until you save these.":
+    "Certaines règles enregistrées n'ont pas pu être lues. Rien ne s'affiche tant que vous ne les enregistrez pas.",
+  "None of the saved rules could be read.": "Aucune des règles enregistrées n'a pu être lue.",
+  "The saved kind of title isn't one this version knows.":
+    "Cette version ne connaît pas le type de titre enregistré.",
+  "Some saved rules aren't ones this version knows.":
+    "Cette version ne connaît pas certaines règles enregistrées.",
+  "No rules were saved.": "Aucune règle n'était enregistrée.",
+  "{rule} was left out.": "{rule} a été omis.",
   "Smart collection": "Collection intelligente",
   Collection: "Collection",
   "Titles you add": "Titres que vous ajoutez",

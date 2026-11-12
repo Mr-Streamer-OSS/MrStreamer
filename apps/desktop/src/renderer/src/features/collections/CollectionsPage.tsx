@@ -8,6 +8,7 @@
 //   A smart collection (see SmartRules.tsx) shows its rules over its matches instead, and its
 // picks only go to other manual collections. New collection makes either, a smart one of the
 // tab's kind; until its first rule is saved it is a draft in the column, gone with the view.
+// One whose saved rules are withheld opens for repair instead, with no members read (A3.17).
 import { Menu } from "@base-ui/react/menu";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
@@ -15,6 +16,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import {
   collectionKey,
+  isManual,
   type CollectionChange,
   type CollectionMember,
   type CollectionSummary,
@@ -71,6 +73,9 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
 
   if (collections) lastOpen.current = open?.id ?? null;
   const id = collections ? open?.id : lastOpen.current;
+  const withheld = open?.withheld;
+  // Rules of unknown kind are repaired as the tab's.
+  const repairKind = withheld?.kind ?? kind;
 
   return (
     <div className="flex min-h-0 flex-1 pl-10">
@@ -117,6 +122,21 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
           }
           active={active}
         />
+      ) : open && withheld ? (
+        <SmartPane
+          key={open.id}
+          kind={repairKind}
+          name={open.name}
+          saved={withheld.filters}
+          savedTotal={null}
+          repair={withheld.problems}
+          change={(filters) => ({
+            kind: "rules",
+            id: open.id,
+            rules: { kind: repairKind, filters },
+          })}
+          active={active}
+        />
       ) : (
         id && (
           <Members
@@ -124,7 +144,7 @@ function OwnedCollections({ kind, active }: { kind: TitleKind; active: boolean }
             id={id}
             collection={open}
             // Picks go only where members are added: rules decide a smart collection's.
-            others={collections?.filter((each) => each.id !== id && !each.rules) ?? []}
+            others={collections?.filter((each) => each.id !== id && isManual(each)) ?? []}
             active={active}
             commit={commit}
           />
@@ -496,7 +516,7 @@ function Picked({
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>
-        {!collection.rules && (
+        {isManual(collection) && (
           <Button
             size="sm"
             disabled={saving}

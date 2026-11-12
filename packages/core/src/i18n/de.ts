@@ -2010,6 +2010,17 @@ export const de: Translation = {
     "Speichern fehlgeschlagen. Deine Änderungen bleiben erhalten.",
   Discard: "Verwerfen",
   "Save rules": "Regeln speichern",
+  Repair: "Reparieren",
+  "Repair rules": "Regeln reparieren",
+  "Some saved rules couldn't be read. Nothing shows until you save these.":
+    "Einige gespeicherte Regeln konnten nicht gelesen werden. Nichts wird angezeigt, bis du diese speicherst.",
+  "None of the saved rules could be read.": "Keine der gespeicherten Regeln konnte gelesen werden.",
+  "The saved kind of title isn't one this version knows.":
+    "Die gespeicherte Titelart kennt diese Version nicht.",
+  "Some saved rules aren't ones this version knows.":
+    "Einige gespeicherte Regeln kennt diese Version nicht.",
+  "No rules were saved.": "Es wurden keine Regeln gespeichert.",
+  "{rule} was left out.": "{rule} wurde ausgelassen.",
   "Smart collection": "Intelligente Sammlung",
   Collection: "Sammlung",
   "Titles you add": "Titel, die du hinzufügst",

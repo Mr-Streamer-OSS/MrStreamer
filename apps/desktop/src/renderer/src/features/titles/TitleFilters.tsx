@@ -52,6 +52,9 @@ const RULE_NAMES = {
 
 type Rule = keyof typeof RULE_NAMES;
 
+/** A rule's name as its menu shows it. */
+export const ruleName = (rule: Rule) => t(RULE_NAMES[rule]);
+
 const NEEDS_OPTIONS = [
   "genres",
   "quality",
@@ -609,7 +612,7 @@ export function RuleMenus({
 
   const menu = (rule: Rule) => {
     const disabled = !options && needsOptions(rule);
-    const label = t(RULE_NAMES[rule]);
+    const label = ruleName(rule);
 
     switch (rule) {
       case "genres":
@@ -795,7 +798,7 @@ function AddRule({
                   }}
                   className={cn(itemClass, "px-2")}
                 >
-                  {rule === "verified" ? t("Verified sound or subtitles") : t(RULE_NAMES[rule])}
+                  {rule === "verified" ? t("Verified sound or subtitles") : ruleName(rule)}
                 </Menu.Item>
               ))}
               <Description>
