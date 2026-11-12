@@ -327,7 +327,23 @@ describe("credential protection", () => {
 
   it("doesn't ask when https isn't what failed", async () => {
     const provider = await fakeProvider(LOGIN);
-    const { subscriptions } = await app(httpsPanel(provider).fetch);
+    const panel = httpsPanel(provider).fetch;
+
+    // nowhere.invalid never resolves: fail it as fetch does for such a name, now, instead of
+    // waiting on this machine's resolver, which could outlast the test.
+    const unresolved: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+
+      if (url.hostname !== "nowhere.invalid") return panel(input, init);
+
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error(`getaddrinfo ENOTFOUND ${url.hostname}`), {
+          code: "ENOTFOUND",
+        }),
+      });
+    };
+
+    const { subscriptions } = await app(unresolved);
 
     const refused = await failure(
       subscriptions.add({ server: "panel.test", username: LOGIN.username, password: "wrong" }),
