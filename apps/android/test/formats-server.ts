@@ -4,6 +4,7 @@ import { type } from "arktype";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
+import type { Socket } from "node:net";
 import { once } from "node:events";
 import { resolve, extname, join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -41,6 +42,75 @@ function formatFiles() {
       .filter((name) => name.endsWith(".m3u8"))
       .map((name) => ({ name: `native/${name}`, path: join(native, name) })),
   ].map((file, index) => ({ ...file, id: 9000 + index }));
+}
+
+/** `text` without provider addresses, logins or credentials, for diagnostics. */
+function redacted(text: string) {
+  return text
+    .replace(/https?:\/\/[^/\s]+/g, "")
+    .replace(/\/(movie|series|live|timeshift)\/[^/\s]+\/[^/\s]+\//g, "/$1/*/*/")
+    .replace(/(username|password)=[^&\s]*/g, "$1=*");
+}
+
+/** An error and its causes as plain data, messages redacted. */
+interface DescribedError {
+  readonly name?: string | undefined;
+  readonly message: string;
+  readonly code?: string | undefined;
+  readonly syscall?: string | undefined;
+  readonly cause?: DescribedError | undefined;
+}
+
+function described(cause: unknown): DescribedError | undefined {
+  if (cause === undefined) return undefined;
+
+  if (!(cause instanceof Error)) return { message: redacted(String(cause)) };
+
+  return {
+    name: cause.name,
+    message: redacted(cause.message),
+    code: "code" in cause ? String(cause.code) : undefined,
+    syscall: "syscall" in cause ? String(cause.syscall) : undefined,
+    cause: described(cause.cause),
+  };
+}
+
+/**
+ * One transport observation on the formats provider port. `by` says who ended a response or
+ * connection: it finished, the fixture's teardown, the proxy handler, a socket timeout, or
+ * otherwise the peer (or something unknown).
+ */
+interface Diagnostic {
+  readonly event:
+    | "connection"
+    | "socket timeout"
+    | "socket error"
+    | "socket closed"
+    | "request"
+    | "response closed"
+    | "handler failed";
+  readonly at: number;
+  readonly epochMs: number;
+  readonly connection?: number | undefined;
+  readonly peerPort?: number | undefined;
+  /** Time since the connection's previous response closed, or since it opened. */
+  readonly idleMs?: number | undefined;
+  readonly requestId?: number | undefined;
+  readonly requestOnConnection?: number | undefined;
+  /** Path only, logins replaced by `*`. */
+  readonly route?: string | undefined;
+  /** Awaiting the upstream answer, or relaying its body. */
+  readonly phase?: "upstream" | "body" | undefined;
+  readonly expected?: number | null | undefined;
+  readonly queued?: number | undefined;
+  readonly unflushed?: number | undefined;
+  readonly by?:
+    "finished" | "teardown" | "handler" | "socket timeout" | "peer or unknown" | undefined;
+  readonly hadError?: boolean | undefined;
+  readonly requests?: number | undefined;
+  readonly bytesRead?: number | undefined;
+  readonly bytesWritten?: number | undefined;
+  readonly error?: DescribedError | undefined;
 }
 
 export interface LinkConditions {
@@ -283,6 +353,35 @@ export async function startFormats(options: {
       ...details,
     });
 
+  /**
+   * Transport diagnosis for every provider-port request, held in memory for the process that
+   * started the fixture and never served by /state: connection reuse and idle time, the
+   * proxy's phase, original errors and who closed what. Routes and messages are redacted.
+   */
+  const diagnostics: Diagnostic[] = [];
+
+  const note = (
+    event: Diagnostic["event"],
+    details: Omit<Diagnostic, "event" | "at" | "epochMs">,
+  ) => {
+    diagnostics.push({ event, at: performance.now(), epochMs: Date.now(), ...details });
+
+    if (diagnostics.length > 500) diagnostics.shift();
+  };
+
+  let closing = false;
+  let connectionCount = 0;
+
+  /** A provider-port connection: its requests, when it last went idle and who ended it. */
+  interface Connection {
+    readonly id: number;
+    requests: number;
+    idleSince: number;
+    endedBy?: "handler" | "socket timeout";
+  }
+
+  const connections = new WeakMap<Socket, Connection>();
+
   const pending = new Set<Promise<void>>();
   let sequence = 0;
 
@@ -290,6 +389,40 @@ export async function startFormats(options: {
     const task = handle(req, res);
     pending.add(task);
     void task.finally(() => pending.delete(task));
+  });
+
+  server.on("connection", (socket: Socket) => {
+    const connection: Connection = {
+      id: ++connectionCount,
+      requests: 0,
+      idleSince: performance.now(),
+    };
+
+    connections.set(socket, connection);
+    note("connection", { connection: connection.id, peerPort: socket.remotePort });
+
+    socket.on("timeout", () => {
+      connection.endedBy ??= "socket timeout";
+      note("socket timeout", {
+        connection: connection.id,
+        idleMs: Math.round(performance.now() - connection.idleSince),
+      });
+    });
+
+    socket.on("error", (error) =>
+      note("socket error", { connection: connection.id, error: described(error) }),
+    );
+
+    socket.on("close", (hadError) =>
+      note("socket closed", {
+        connection: connection.id,
+        by: closing ? "teardown" : (connection.endedBy ?? "peer or unknown"),
+        hadError,
+        requests: connection.requests,
+        bytesRead: socket.bytesRead,
+        bytesWritten: socket.bytesWritten,
+      }),
+    );
   });
 
   async function handle(
@@ -328,6 +461,40 @@ export async function startFormats(options: {
       exhausted: false,
       completed: false,
     };
+
+    const connection = connections.get(req.socket);
+
+    if (connection) connection.requests++;
+
+    const trace = {
+      requestId: details.requestId,
+      connection: connection?.id,
+      phase: "upstream" as "upstream" | "body",
+      expected: null as number | null,
+    };
+
+    note("request", {
+      ...trace,
+      route: redacted(path),
+      requestOnConnection: connection?.requests,
+      idleMs: connection && Math.round(performance.now() - connection.idleSince),
+    });
+
+    res.on("close", () => {
+      if (connection) connection.idleSince = performance.now();
+      note("response closed", {
+        ...trace,
+        by: res.writableFinished
+          ? "finished"
+          : closing
+            ? "teardown"
+            : connection?.endedBy === "handler"
+              ? "handler"
+              : "peer or unknown",
+        queued: details.bytes,
+        unflushed: res.writableLength,
+      });
+    });
 
     if (media) {
       active++;
@@ -375,6 +542,9 @@ export async function startFormats(options: {
 
       if (media) record("response", details);
       res.writeHead(upstream.status);
+      trace.phase = "body";
+      const length = upstream.headers.get("content-length");
+      trace.expected = length === null ? null : Number(length);
 
       if (!upstream.body) return void res.end();
 
@@ -412,7 +582,10 @@ export async function startFormats(options: {
       const range = /^bytes \d+-(\d+)\/(\d+)$/.exec(upstream.headers.get("content-range") ?? "");
       details.exhausted = upstream.ok && (!range || Number(range[1]) + 1 === Number(range[2]));
       res.end();
-    } catch {
+    } catch (error) {
+      note("handler failed", { ...trace, error: described(error) });
+
+      if (connection) connection.endedBy = "handler";
       res.destroy();
     } finally {
       if (media) {
@@ -475,7 +648,10 @@ export async function startFormats(options: {
 
   return {
     ...identity,
+    /** Recent transport diagnosis, oldest first; read in process, never over the network. */
+    diagnostics: diagnostics as readonly Diagnostic[],
     async close() {
+      closing = true;
       server.closeAllConnections();
       control.closeAllConnections();
       await Promise.all([

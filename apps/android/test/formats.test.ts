@@ -117,40 +117,82 @@ test("invalid complete control commands preserve conditions and event history", 
 });
 
 test("public series episodes and archives serve silent provenance bytes and retain auth failures", async () => {
-  const episode = await fetch(`${fixture.url}/series/fixture/fixture-pass/81000.mkv`);
+  // Hosted runs failed here with a bare `fetch failed`/`read ECONNRESET` (#885). Each network
+  // step names itself on failure, with the time since the previous step (peak() blocks this
+  // process, servers included) and the fixture's recent in-memory transport diagnosis.
+  let settled = performance.now();
+
+  const step = async <T>(name: string, run: () => Promise<T>) => {
+    const started = performance.now();
+
+    try {
+      return await run();
+    } catch (error) {
+      throw new Error(
+        `${name} failed, started at ${Math.round(started)}ms, ${Math.round(started - settled)}ms after the previous step\n${JSON.stringify(fixture.diagnostics.slice(-30))}`,
+        { cause: error },
+      );
+    } finally {
+      settled = performance.now();
+    }
+  };
+
+  const episode = await step("episode fetch", () =>
+    fetch(`${fixture.url}/series/fixture/fixture-pass/81000.mkv`),
+  );
+
   const saved = resolve(out, "served-episode.mkv");
-  writeFileSync(saved, Buffer.from(await episode.arrayBuffer()));
+  writeFileSync(saved, Buffer.from(await step("episode body", () => episode.arrayBuffer())));
   const { peak } = await import("../../ios/scripts/native-fixtures/media.ts");
   expect(peak(saved)).toBeLessThan(-60);
   const movie = fixture.files.find((row) => row.name === "parity/title-h264-eac3-subs.mkv")!;
-  expect(readFileSync(saved)).toEqual(
-    Buffer.from(
-      await (
-        await fetch(`${fixture.url}/movie/fixture/fixture-pass/${movie.id}.mkv`)
-      ).arrayBuffer(),
-    ),
+
+  const title = await step("movie fetch", () =>
+    fetch(`${fixture.url}/movie/fixture/fixture-pass/${movie.id}.mkv`),
   );
 
-  const channels = await (
-    await fetch(
-      `${fixture.url}/player_api.php?username=fixture&password=fixture-pass&action=get_live_streams`,
-    )
-  ).json();
+  expect(readFileSync(saved)).toEqual(
+    Buffer.from(await step("movie body", () => title.arrayBuffer())),
+  );
+
+  const channels = await step("channels", async () =>
+    (
+      await fetch(
+        `${fixture.url}/player_api.php?username=fixture&password=fixture-pass&action=get_live_streams`,
+      )
+    ).json(),
+  );
 
   const channel = channels.find((row: { tv_archive: number }) => row.tv_archive === 1);
   const archive = `/timeshift/fixture/fixture-pass/1/2026-11-05:12-00/${channel.stream_id}.ts`;
-  const recording = await fetch(`${fixture.url}${archive}`);
+  const recording = await step("archive fetch", () => fetch(`${fixture.url}${archive}`));
   expect(recording.status).toBe(200);
   const file = resolve(out, "served-archive.ts");
-  writeFileSync(file, Buffer.from(await recording.arrayBuffer()));
+  writeFileSync(file, Buffer.from(await step("archive body", () => recording.arrayBuffer())));
   expect(peak(file)).toBeLessThan(-60);
-  const live = await fetch(`${fixture.url}/live/fixture/fixture-pass/${channel.stream_id}.ts`);
-  expect(Buffer.from(await live.arrayBuffer())).toEqual(readFileSync(file));
-  expect((await fetch(`${fixture.url}${archive.replace("fixture-pass", "wrong")}`)).status).toBe(
-    401,
+
+  const live = await step("live fetch", () =>
+    fetch(`${fixture.url}/live/fixture/fixture-pass/${channel.stream_id}.ts`),
   );
+
+  expect(Buffer.from(await step("live body", () => live.arrayBuffer()))).toEqual(
+    readFileSync(file),
+  );
+
   expect(
-    (await fetch(`${fixture.url}${archive.replace(String(channel.stream_id), "999999")}`)).status,
+    (
+      await step("wrong login", () =>
+        fetch(`${fixture.url}${archive.replace("fixture-pass", "wrong")}`),
+      )
+    ).status,
+  ).toBe(401);
+
+  expect(
+    (
+      await step("missing channel", () =>
+        fetch(`${fixture.url}${archive.replace(String(channel.stream_id), "999999")}`),
+      )
+    ).status,
   ).toBe(404);
 }, 30000);
 
