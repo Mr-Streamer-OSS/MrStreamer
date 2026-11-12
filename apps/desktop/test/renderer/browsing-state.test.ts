@@ -236,7 +236,7 @@ describe("Recordings", () => {
   const field = () =>
     document.querySelector<HTMLInputElement>('input[aria-label="Find a recording"]')!;
 
-  it("comes back to its shelf, and then to its search", async () => {
+  it("comes back to its shelf and its search, and starts on Overview for another profile", async () => {
     const page = await recordings();
     await until(() => expect(current()).toContain("Overview"));
 
@@ -261,21 +261,11 @@ describe("Recordings", () => {
     await page.leave();
     await page.back();
     expect(field().value).toBe("news");
-  });
 
-  it("starts on Overview for another profile", async () => {
-    const page = await recordings();
-
-    const rules = [...document.querySelectorAll("button")].find((each) =>
-      each.textContent?.startsWith("Rules"),
-    )!;
-
-    await act(async () => rules.click());
     await page.leave();
-
     await act(async () => resetForProfile());
     await page.back();
-
     expect(current()).toContain("Overview");
+    expect(field().value).toBe("");
   });
 });

@@ -787,7 +787,8 @@ function shiftAt(grid: HTMLElement, scrolled: number, room: number) {
 /**
  * The day at the left edge, then a day earlier, Now and a day later as one control, and the half
  * hours along the top, with the time at the line. A day earlier or later is the same time on that
- * day; neither goes where the timeline does not reach. Short of room, the day gives way first.
+ * day; neither goes where the timeline does not reach. Short of room, the day leaves the screen
+ * first, still read out to assistive technology.
  */
 function Head({
   origin,
@@ -832,7 +833,7 @@ function Head({
         style={{ width: columnPx }}
       >
         {day > 0 && (
-          <span className="hidden min-w-0 truncate @[13rem]:block">
+          <span className="sr-only min-w-0 truncate @[13rem]:not-sr-only">
             {formatDate(day, "weekdayDay")}
           </span>
         )}

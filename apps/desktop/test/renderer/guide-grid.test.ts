@@ -219,17 +219,20 @@ async function gridPage(
   unmount = mounted.unmount;
   const grid = () => container.querySelector<HTMLElement>('[role="grid"]');
 
+  /** Leaves Live TV for another page, as a view switch does; `enter` comes back. */
+  const leave = () => mounted.render(null);
+  const enter = () => mounted.render(createElement(GuidePage, { active: true }));
+
   return {
     client,
     grid,
-    /** Leaves Live TV for another page and comes back, as a view switch does. */
+    leave,
+    enter,
+    /** Leaves Live TV for another page and comes back. */
     back: async () => {
-      await mounted.render(null);
-      await mounted.render(createElement(GuidePage, { active: true }));
+      await leave();
+      await enter();
     },
-    /** Leaves Live TV for another page, `enter` coming back. */
-    leave: () => mounted.render(null),
-    enter: () => mounted.render(createElement(GuidePage, { active: true })),
     /** The cell the grid names as its active one, by its accessible name. */
     active: () => {
       const id = grid()?.getAttribute("aria-activedescendant");

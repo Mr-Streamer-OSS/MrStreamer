@@ -25,9 +25,9 @@ import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { formatDecimal, formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { isMac, isTyping } from "../../app/platform.ts";
 import {
+  browsingNow,
   openDetails,
   openView,
-  browsingNow,
   setBrowsing,
   useUi,
   type TitlesPlace,

@@ -82,10 +82,10 @@ export type UpdateReminder =
   "asking" | "done" | { readonly allowed: string } | { readonly kept: string };
 
 /**
- * Where a list or grid stood as its page went: the item the keys were on, by a key that stays
- * the same while the list changes and the position it was at, and how far it was scrolled. A
- * page given one back finds the item by its key again, else keeps the position: what the lists
- * no longer show, as a title hidden since, never comes back by its key.
+ * Where a list or grid stood as its page went: the item the keys were on, by a key that holds
+ * while the list changes and by its position, and how far it was scrolled. Given back, the item
+ * is found by its key, else the position is kept, so an item the list no longer shows, such as a
+ * title hidden since, never comes back.
  */
 export interface Spot {
   readonly key: string | null;
@@ -195,9 +195,9 @@ export function setBrowsing<P extends keyof Browsing>(
 }
 
 /**
- * `setBrowsing` for the account and profile on show now, and for Live TV the list on show too,
- * for what a page keeps as it goes: once they have changed, as a page drawn for the last profile
- * unmounts after the switch, or the rows of the last list as another opens, it changes nothing.
+ * `setBrowsing` for one page, bound to the account and profile on show now, and for Live TV to
+ * the list on show too. Pages keep their place with it as they unmount: once any of those has
+ * changed, as when a page drawn for the last profile unmounts after the switch, it changes nothing.
  */
 export function browsingNow<P extends keyof Browsing>(
   page: P,

@@ -56,14 +56,7 @@ import type { GuideDensity, Preferences } from "@mrstreamer/contracts/preference
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
-import {
-  browsingNow,
-  openView,
-  openWatch,
-  sameList,
-  useUi,
-  type ChannelSpot,
-} from "../../app/ui-store.ts";
+import { browsingNow, openView, openWatch, sameList, useUi } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
@@ -359,13 +352,16 @@ export function GuidePage({ active }: { active: boolean }) {
     : Math.min(kept === -1 ? chosen.index : kept, Math.max(rows.length - 1, 0));
 
   // As the page goes it keeps the search and the selected row, for the list on show then.
-  const leaving = useRef({ keep, text, selected: chosen as ChannelSpot });
   const selectedRow = rows[selected];
-  leaving.current = {
+
+  const leavingNow = {
     keep,
     text,
     selected: { index: selected, channel: selectedRow ? ownedId(selectedRow) : chosen.channel },
   };
+
+  const leaving = useRef(leavingNow);
+  leaving.current = leavingNow;
   useEffect(
     () => () => {
       const { keep, text, selected } = leaving.current;
