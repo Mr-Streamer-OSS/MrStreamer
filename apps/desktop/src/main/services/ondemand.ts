@@ -825,7 +825,11 @@ function make(deps: OnDemandDeps) {
     const publish = (marked: boolean) =>
       Effect.flatMap(status, (current) =>
         PubSub.publish(updates, marked ? { ...current, markedForAdults: true } : current),
-      ).pipe(Effect.updateContext(Context.omit(AdmittedSettings, AdmittedKids)));
+      ).pipe(
+        Effect.updateContext((context: Context.Context<never>) =>
+          Context.omit(AdmittedSettings, AdmittedKids)(context),
+        ),
+      );
 
     const publishStatus = publish(false);
 
