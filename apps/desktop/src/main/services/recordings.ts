@@ -836,24 +836,35 @@ function make(deps: RecordingsDeps) {
     /** Latest file check or deletion, even when it confirms the existing missing state. */
     const observations = new Map<string, symbol>();
 
+    /**
+     * Looks for `record`'s file and records what it found in `missing`, unless a newer check or
+     * deletion did since, even one that left missing as it was. Says whether missing changed.
+     */
+    const observe = async (record: StoredRecording) => {
+      const observation = Symbol();
+      observations.set(record.id, observation);
+
+      const there = await stat(fileOf(record)).then(
+        () => true,
+        () => false,
+      );
+
+      if (observations.get(record.id) !== observation) return { there, changed: false };
+
+      // Listed as missing while there, or the other way round.
+      const changed = there === missing.has(record.id);
+
+      if (there) missing.delete(record.id);
+      else missing.add(record.id);
+
+      return { there, changed };
+    };
+
     const look = Effect.promise(() =>
       Promise.all(
-        [...records.values()].map(async (record) => {
-          if (isLive(record) || record.status.kind === "missed") return;
-          const observation = Symbol();
-          observations.set(record.id, observation);
-
-          const there = await stat(fileOf(record)).then(
-            () => true,
-            () => false,
-          );
-
-          // A newer check or deletion owns the state, even if its missing value stayed the same.
-          if (observations.get(record.id) !== observation) return;
-
-          if (there) missing.delete(record.id);
-          else missing.add(record.id);
-        }),
+        [...records.values()].flatMap((record) =>
+          isLive(record) || record.status.kind === "missed" ? [] : [observe(record)],
+        ),
       ),
     );
 
@@ -3592,28 +3603,15 @@ function make(deps: RecordingsDeps) {
           if (retentionFailures.delete(id)) yield* publish;
 
           // Its file may have gone since the list was read: the list says so at once.
-          const observation = Symbol();
-          observations.set(id, observation);
+          const { there, changed } = yield* Effect.promise(() => observe(record));
 
-          const there = yield* Effect.promise(() =>
-            stat(fileOf(record)).then(
-              () => true,
-              () => false,
-            ),
-          );
+          if (changed) yield* publish;
 
-          if (!there) {
-            if (observations.get(id) === observation && !missing.has(id)) {
-              missing.add(id);
-              yield* publish;
-            }
-
+          if (!there)
             return yield* new Failed({
               error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
             });
-          }
 
-          if (observations.get(id) === observation && missing.delete(id)) yield* publish;
           // One still recording plays as it grows, once its own index has read its program.
           const growing = isLive(record) ? yield* recordingSource(id) : undefined;
 

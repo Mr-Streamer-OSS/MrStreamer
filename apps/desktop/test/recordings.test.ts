@@ -7584,16 +7584,11 @@ describe("recording protection and retention", () => {
     });
     const reading = first.recordings.list();
     await statted.promise;
-
-    try {
-      await rm(file);
-      expect((await first.recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
-        "missing",
-      );
-    } finally {
-      release.resolve();
-    }
-
+    await rm(file);
+    expect((await first.recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
+      "missing",
+    );
+    release.resolve();
     expect((await reading).find((each) => each.id === id)?.status.kind).toBe("missing");
   });
 
