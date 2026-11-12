@@ -1140,6 +1140,12 @@ describe("direct product and reliability events", () => {
   });
 
   it("sends each completed action, setting, screen, outcome and renderer exit with only fixed fields", async () => {
+    // Quit drains within its 500 ms allowance, which a loaded runner can spend before all six
+    // sends land; a held clock lets close() finish them, and keeps them in one usage window.
+    vi.useFakeTimers({
+      toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
     const capture = await captureServer();
     const { owner } = await start({ transport: localCapture(capture.endpoint) });
     // No identity exists before the first foreground observation, so nothing can be queued.

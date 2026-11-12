@@ -547,11 +547,20 @@ describe("a playlist subscription", () => {
     host$.expo!.modules!.Guide = native;
 
     try {
-      const id = (await (await launch()).add({ server: host.link(), ...PLAYLIST }))!;
+      const adding = await launch();
+      const { guide: addingGuide } = await import("../src/guide.ts");
+      const id = (await adding.add({ server: host.link(), ...PLAYLIST }))!;
       await until(
         () => memory.files.has(`/cache/catalogues/${id}.live.json`),
         "the saved channels",
       );
+      // This playlist names no guide, so the first launch's own guide check forgets its guide in
+      // the shared native store. Seeding the saved guide before that check ends would lose it.
+      await until(() => {
+        const { availability, activity } = addingGuide.status(id);
+
+        return availability === "none" && activity === "idle";
+      }, "the first launch's guide check");
       // A guide saved before this launch, which then shows the saved channels.
       const now = Date.now();
       control.activations.set(id, {
