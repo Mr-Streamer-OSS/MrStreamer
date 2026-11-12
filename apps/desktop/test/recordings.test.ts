@@ -5905,10 +5905,58 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await clockTo(TEN_PAST + 2 * MINUTE);
     await until(recordings.schedules, () => provider.streamRequests() > asked);
     expect(provider.streamRequests()).toBeGreaterThan(asked);
+    // While the retry answers, the schedule still says it is trying that time again.
+    const time = { start: at.getTime(), stop: at.getTime() + 10 * MINUTE };
+    const trying = { next: time, status: { kind: "retrying", why: "stream" } };
+    expect((await recordings.schedules())[0]).toMatchObject(trying);
 
-    // The retry is still answering at its stop: the missed result follows its answer.
+    // The retry is still answering at its stop: the schedule stands on that time, not the next,
+    // and the missed result follows its answer.
     await clockTo(at.getTime() + 11 * MINUTE);
+    expect((await recordings.schedules())[0]).toMatchObject(trying);
     releaseRetry();
+    await until(recordings.list, ([each]) => each?.status.kind === "missed");
+    expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
+  });
+
+  it("keeps a programme retry ahead of a refreshed guide hold past its end", async () => {
+    // Every stream breaks off before a packet; the second only once the test lets it.
+    let opened = 0;
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+
+    const { provider, guide, subscriptionId, recordings, listing, programmePlan, clockTo } =
+      await scheduling({
+        streams: (_source, out) => {
+          if (++opened !== 2) return void out.destroy();
+          arrived();
+          void gate.then(() => out.destroy());
+        },
+      });
+
+    onTestFinished(() => open());
+    const { next } = await listing();
+    await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+    await until(recordings.schedules, ([each]) => each?.status.kind === "retrying");
+    await clockTo(next.start + 2 * MINUTE);
+    await asked;
+
+    const trying = {
+      next: { start: next.start, stop: next.stop },
+      status: { kind: "retrying", why: "stream" },
+    };
+
+    provider.serveGuide(
+      fakeGuide(provider.catalogue, TEN_PAST).replaceAll(next.title, "Another show"),
+    );
+    await guide.refresh(subscriptionId);
+    await recordings.check();
+    expect(await recordings.schedules()).toMatchObject([trying]);
+
+    await clockTo(next.stop + MINUTE);
+    expect(await recordings.schedules()).toMatchObject([trying]);
+    open();
     await until(recordings.list, ([each]) => each?.status.kind === "missed");
     expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
   });
