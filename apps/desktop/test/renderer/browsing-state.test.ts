@@ -560,6 +560,7 @@ it.each(["recordings", "downloads"] as const)(
       const shownPage = await shown(() =>
         page === "recordings" ? createElement(RecordingsPage) : createElement(DownloadsPage),
       );
+
       await until(() => expect(shownPage.container.textContent).toContain("List unavailable"));
       await shownPage.leave();
       expect(useUi.getState().browsing[page].top).toBe(700);
