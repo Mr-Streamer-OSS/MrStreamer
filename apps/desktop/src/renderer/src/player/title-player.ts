@@ -133,8 +133,10 @@ export type Speed = (typeof SPEEDS)[number];
 export type SleepChoice =
   { readonly kind: "after"; readonly minutes: number } | { readonly kind: "end" };
 
-/** The sleep timer set: when, in `Date.now()` time, it pauses, or at the end. */
-type Sleep = { readonly kind: "after"; readonly at: number } | { readonly kind: "end" };
+/** The sleep timer set: the minutes chosen and when, in `Date.now()` time, it pauses, or at the end. */
+type Sleep =
+  | { readonly kind: "after"; readonly minutes: number; readonly at: number }
+  | { readonly kind: "end" };
 
 /** The subtitle formats the player shows: all of them. */
 const SHOWN_SUBTITLES: ReadonlySet<SubtitleFormat> = new Set([
@@ -2514,7 +2516,7 @@ export const titlePlayer = {
     if (choice?.kind === "after") {
       const ms = choice.minutes * 60_000;
       sleepTimer = setTimeout(sleep, ms);
-      store.setState({ sleep: { kind: "after", at: Date.now() + ms } });
+      store.setState({ sleep: { kind: "after", minutes: choice.minutes, at: Date.now() + ms } });
     } else if (choice) {
       store.setState({ sleep: choice });
     }

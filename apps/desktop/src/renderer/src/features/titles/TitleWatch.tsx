@@ -1,9 +1,11 @@
 // Playing a movie or an episode: the picture fills the window, with the title, a scrubber and the
 // controls along the bottom, fading when idle. Sound opens the file's sound tracks, CC everything
-// about its subtitles, and Speed plays it slower or faster; a series offers its next episode, and at an
+// about its subtitles, Speed plays it slower or faster and the sleep timer pauses it after some
+// minutes or at its end (SleepMenu.tsx); a series offers its next episode, and at an
 // episode's end counts down to it (see title-player.ts). A downloaded episode does the same with the
-// next episode's copy on this computer, or says why it can't. Back returns to where the title was
-// opened.
+// next episode's copy on this computer, or says why it can't. The time before the scrubber is a
+// button that turns into a field: a typed time, such as 1:02:13, goes there. Back returns to where
+// the title was opened.
 //   Space or K pauses, Left and Right skip the seek step set in Settings (10 seconds unless
 //   changed), Up and Down change the volume, F is full
 //   screen, M mutes, C turns subtitles on or off, N plays the next episode, also during the
@@ -45,7 +47,7 @@ import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { statusLine } from "../../lib/downloads.ts";
 import { describeError } from "../../lib/errors.ts";
-import { clock, runtime } from "../../lib/titles.ts";
+import { clock, parseClock, runtime } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { useTitleSession } from "../../player/media-session.ts";
@@ -80,6 +82,7 @@ import { SpeedMenu, stepSpeed } from "../watch/SpeedMenu.tsx";
 import { nudgeSubtitles } from "../watch/SubtitleSettings.tsx";
 import { PictureSoundMenu } from "../watch/PictureSound.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
+import { SleepMenu } from "./SleepMenu.tsx";
 import { SubtitlePanel, subtitleChoiceNote } from "./SubtitlePanel.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
 
@@ -89,8 +92,11 @@ const IDLE_MS = 3000;
 /** How long the note that subtitles can't be had stays. */
 const SUBTITLES_UNAVAILABLE_MS = 5000;
 
-/** Which menu is open over the title's controls: one of the tracks' or its speed. */
-type TitleMenu = TrackMenu | "speed";
+/**
+ * Which menu is open over the title's controls: one of the tracks', its speed, its sleep timer or
+ * the field for a time to go to. Controls stay while one is open, and the keys are its own.
+ */
+type TitleMenu = TrackMenu | "speed" | "sleep" | "time";
 
 /**
  * Leaves the title for its series' episodes: the details it was played from when they are still
@@ -387,7 +393,10 @@ export function TitleWatch() {
             <div className="truncate text-2xl font-semibold tracking-tight">{now.name}</div>
             {now.detail && <div className="truncate text-sm text-foreground/85">{now.detail}</div>}
           </div>
-          <Scrubber />
+          <Scrubber
+            timeOpen={menu === "time"}
+            onTimeOpen={(open) => setMenu(open ? "time" : null)}
+          />
           <div className="mt-3 flex items-center gap-2">
             <Skip by={-1} />
             <PlayPause />
@@ -482,9 +491,15 @@ function Skip({ by, size = "icon" }: { by: -1 | 1; size?: "icon" | "icon-sm" }) 
 
 /**
  * Where the title is, where it can go, and how long is left. Seeks when let go, and the keys are
- * the player's again: see `SliderControl`.
+ * the player's again: see `SliderControl`. The time before it opens a field for a time to go to.
  */
-function Scrubber() {
+function Scrubber({
+  timeOpen,
+  onTimeOpen,
+}: {
+  timeOpen: boolean;
+  onTimeOpen: (open: boolean) => void;
+}) {
   const position = useTitlePlayer((state) => state.position);
   const duration = useTitlePlayer((state) => state.duration);
   // On a receiver, after a skip: where it last said it was, until it has caught up.
@@ -509,7 +524,7 @@ function Scrubber() {
 
   return (
     <div className="flex items-center gap-4 text-[0.8125rem] tabular-nums">
-      <span className="w-14 text-right">{clock(shown)}</span>
+      <GoToTime shown={shown} open={timeOpen} onOpen={onTimeOpen} />
       <SliderPrimitive.Root
         value={shown}
         min={0}
@@ -551,6 +566,101 @@ function Scrubber() {
         </span>
       ) : (
         <span className="w-16 text-muted-foreground">-{clock(length - shown)}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The time a title is at, as a button that turns into a field for a time to go to: "1:02:13",
+ * "24:51" or "45" seconds. Enter goes there, as far as the title or recording reaches (see
+ * `titlePlayer.seek`); Escape, or leaving the field, puts the time back. A time it can't read stays
+ * in the field, marked, with an example.
+ */
+function GoToTime({
+  shown,
+  open,
+  onOpen,
+}: {
+  shown: number;
+  open: boolean;
+  onOpen: (open: boolean) => void;
+}) {
+  const [text, setText] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const label = t("Go to time");
+
+  const close = (focusButton: boolean) => {
+    setInvalid(false);
+    onOpen(false);
+
+    // Back to the button for the keyboard, after the field is gone.
+    if (focusButton) requestAnimationFrame(() => button.current?.focus());
+  };
+
+  if (!open) {
+    return (
+      <Tooltip label={label}>
+        <button
+          ref={button}
+          aria-label={label}
+          aria-description={clock(shown)}
+          onClick={() => {
+            setText(clock(shown));
+            onOpen(true);
+          }}
+          className="w-[4.5rem] flex-none rounded-md px-2 py-0.5 text-right outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {clock(shown)}
+        </button>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <div className="relative w-[4.5rem] flex-none">
+      <input
+        // A field opened by its button takes the keys at once.
+        autoFocus
+        aria-label={label}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? "go-to-time-hint" : undefined}
+        inputMode="numeric"
+        value={text}
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => {
+          setText(event.target.value);
+          setInvalid(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            const seconds = parseClock(text);
+
+            if (seconds === null) return setInvalid(true);
+            titlePlayer.seek(seconds);
+            close(true);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            close(true);
+          }
+        }}
+        onBlur={() => close(false)}
+        className={cn(
+          "h-7 w-full rounded-lg bg-white/10 px-2 text-right tabular-nums outline-none ring-[1.5px]",
+          invalid ? "ring-destructive" : "ring-foreground",
+        )}
+      />
+      {invalid && (
+        <p
+          id="go-to-time-hint"
+          role="alert"
+          className="absolute bottom-full left-0 mb-1.5 text-xs whitespace-nowrap text-destructive"
+        >
+          {t("Type a time like {time}", { time: "1:02:13" })}
+        </p>
       )}
     </div>
   );
@@ -628,7 +738,7 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
         shows={shows}
         hereOnly={t("Picture subtitles, teletext and captions play on this computer only.")}
         subtitleNote={subtitleChoiceNote(subtitleNote)}
-        open={menu === "speed" ? null : menu}
+        open={menu === "speed" || menu === "sleep" || menu === "time" ? null : menu}
         onOpenChange={onMenu}
         onAudio={(id) => titlePlayer.setAudio(id)}
         onSubtitle={(track) => titlePlayer.setSubtitle(track)}
@@ -644,6 +754,7 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
         onSpeed={(next) => titlePlayer.setSpeed(next)}
         onOpenChange={(next) => onMenu(next ? "speed" : null)}
       />
+      <SleepMenu open={menu === "sleep"} onOpenChange={(next) => onMenu(next ? "sleep" : null)} />
     </>
   );
 }

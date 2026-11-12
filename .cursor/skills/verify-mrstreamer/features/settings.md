@@ -9,7 +9,7 @@ Find a setting searches translated labels, section names and translated synonyms
 | Previous location           | Current location and retained actions                                                                                                 |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | General / App               | General: Interface language and System default                                                                                        |
-| General / Movies and series | Playback: Audio in, Next episode autoplay, exact delay                                                                                |
+| General / Movies and series | Playback: Audio in, Next episode autoplay, exact delay, Seek step (0.0.24)                                                            |
 | General / Live TV           | Live TV: Quality and reset channel-specific qualities, including row failure/retry                                                    |
 | General / Movies and series | Movies and series: Titles in, For adults, TMDB own key/app key/progress                                                               |
 | General / Movies and series | Subtitles: language, Off and Only when forced                                                                                         |

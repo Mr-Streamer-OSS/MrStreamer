@@ -62,6 +62,12 @@ VP8 conversion supports WebM and MKV files; VP9 and AV1 also support MP4. Conver
 
 A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them. While Mr. Streamer is still reading and no line shows, "Subtitles loading" shows at the top right and **CC** says "Loading" beside the track. Text that shows is never called loading, also while an earlier line is still being looked for or right after you move the timing.
 
+From 0.0.24 the time before the scrubber is a button: click it, or reach it with Tab and press Enter, and type a time such as `1:02:13`, `24:51` or `45` for seconds. Enter goes there, as far as the title reaches, or a recording so far; Escape puts the time back. A time it can't read stays in the field, marked, with an example.
+
+Left and Right, the skip buttons and the media keys move by the **Seek step** in **Settings > Playback**: 5, 10, 15, 30 or 60 seconds, 10 unless you change it. The buttons say how far, and Live TV's rewind uses the same step.
+
+**Sleep timer**, the moon after **Speed**, pauses a movie, episode, downloaded copy or recording after 1, 15, 30, 45, 60 or 90 minutes, or at the end of this episode or title, where the next episode then doesn't start. While it is set the button is on and shows the time it pauses at, or **End**. It carries on through the next episode, another title and a pause, and ends once it pauses, when you choose **Off**, or when you leave the player, Live TV starts or you switch profile. When a TV plays the title, the TV pauses. It pauses playback only: downloads and recordings carry on.
+
 ## Picture and sound
 
 _Desktop 0.0.24 development. Sound delay, leveling and the picture's shape, on this computer._

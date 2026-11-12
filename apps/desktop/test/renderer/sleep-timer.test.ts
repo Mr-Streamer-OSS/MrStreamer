@@ -128,7 +128,11 @@ describe("a sleep timer for some minutes", () => {
   it("pauses the title when they run out, saving how far it got and leaving downloads and recordings alone", async () => {
     await open(pilot);
     await sleepAfter(15);
-    expect(titlePlayer.state().sleep).toEqual({ kind: "after", at: Date.now() + 15 * 60_000 });
+    expect(titlePlayer.state().sleep).toEqual({
+      kind: "after",
+      minutes: 15,
+      at: Date.now() + 15 * 60_000,
+    });
 
     await minutes(14);
     expect(phase()).toBe("playing");
