@@ -7,18 +7,20 @@ import { outputs, receiverName, useOutput } from "../../player/output.ts";
 import { MiniPlayerButton } from "./MiniPlayer.tsx";
 import { MultiviewEntry } from "./multiview/Multiview.tsx";
 import { Receivers } from "./Output.tsx";
+import { PictureSoundRows, usePictureSoundAdjusted } from "./PictureSound.tsx";
 import { QualityChoices } from "./QualityMenu.tsx";
 import { Menu, SoundChoices, type TrackMenu } from "./TrackMenus.tsx";
 import { VolumeControl } from "./VolumeControl.tsx";
 
 export type LiveMenu = TrackMenu | "more";
 
-const pages = ["sound", "quality", "output"] as const;
+const pages = ["sound", "picture", "quality", "output"] as const;
 
 type Page = (typeof pages)[number];
 
 const labels = {
   sound: "Sound",
+  picture: "Picture and sound",
   quality: "Quality",
   output: "Play on",
 } as const satisfies Record<Page, PlainKey>;
@@ -48,9 +50,11 @@ export function LiveMore({
   const active = output.kind === "receiver" || output.kind === "lost";
   const destination = active ? receiverName(output.receiver) : t("This computer");
   const listed = offers.includes("cast");
+  const adjusted = usePictureSoundAdjusted();
 
   const available = {
     sound: sound !== null,
+    picture: true,
     quality: quality !== null,
     output: offers.length > 0,
   };
@@ -114,13 +118,14 @@ export function LiveMore({
 
   const values = {
     sound: playingSound?.label,
+    picture: adjusted ? t("Adjusted") : undefined,
     quality: quality
       ? `${quality.chosen === null ? `${t("Automatic")} · ` : ""}${shortQuality(shownQuality) ?? qualityName(shownQuality)}`
       : undefined,
     output: destination,
   };
 
-  const keys = { sound: null, quality: "Q", output: "O" };
+  const keys = { sound: null, picture: null, quality: "Q", output: "O" };
   const done = () => onMenu(null);
 
   const action = (run: () => void) => {
@@ -169,6 +174,7 @@ export function LiveMore({
                 {t(labels[page])}
               </button>
               {page === "sound" && sound && <SoundChoices {...sound} />}
+              {page === "picture" && <PictureSoundRows />}
               {page === "quality" && quality && <QualityChoices {...quality} />}
               {page === "output" && (
                 <Receivers onDone={done} onSystemList={() => action(() => outputs.pick())} />

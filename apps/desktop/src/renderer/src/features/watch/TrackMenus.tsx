@@ -38,7 +38,7 @@ import { flashNote } from "./flash-state.ts";
 import { SubtitleSettingRows } from "./SubtitleSettings.tsx";
 
 /** Which menu is open over the controls, so Escape closes it before anything else. */
-export type TrackMenu = "sound" | "subtitles" | "quality" | "output" | null;
+export type TrackMenu = "sound" | "subtitles" | "picture" | "quality" | "output" | null;
 
 export function TrackMenus({
   audio,

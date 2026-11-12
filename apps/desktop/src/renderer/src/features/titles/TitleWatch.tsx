@@ -77,6 +77,7 @@ import {
 } from "../watch/Output.tsx";
 import { SpeedMenu, stepSpeed } from "../watch/SpeedMenu.tsx";
 import { nudgeSubtitles } from "../watch/SubtitleSettings.tsx";
+import { PictureSoundMenu } from "../watch/PictureSound.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
 import { SubtitlePanel, subtitleChoiceNote } from "./SubtitlePanel.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
@@ -637,6 +638,10 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
         onOpenChange={onMenu}
         onAudio={(id) => titlePlayer.setAudio(id)}
         onSubtitle={(track) => titlePlayer.setSubtitle(track)}
+      />
+      <PictureSoundMenu
+        open={menu === "picture"}
+        onOpenChange={(next) => onMenu(next ? "picture" : null)}
       />
       <SpeedMenu
         speed={speed}

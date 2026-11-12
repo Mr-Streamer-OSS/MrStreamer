@@ -3,7 +3,8 @@
 // the look for any subtitles, those drawn as pictures (PGS, DVD, DVB) taking only size and
 // position. The player keeps both, so they hold after a seek or another track, and changing them
 // never turns subtitles on or picks another track.
-//   On the look's rows, Left and Right pick.
+//   On the look's rows, Left and Right pick. Its Step, Segments and TextButton make the picture
+// and sound rows too (PictureSound.tsx).
 import { type KeyboardEvent, type ReactNode } from "react";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import type { SubtitleLook } from "@mrstreamer/contracts/preferences";
@@ -171,12 +172,15 @@ export function TextButton({
   );
 }
 
-function Step({
+/** A round − or + beside a value; `disabled` at the end of its range. */
+export function Step({
   label,
+  disabled = false,
   onClick,
   children,
 }: {
   label: string;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -184,9 +188,10 @@ function Step({
     <button
       data-item
       aria-label={label}
+      disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className="size-7 rounded-full bg-white/10 outline-none hover:bg-white/16 focus-visible:ring-2 focus-visible:ring-ring"
+      className="size-7 rounded-full bg-white/10 outline-none enabled:hover:bg-white/16 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
     >
       {children}
     </button>
@@ -197,7 +202,7 @@ function Step({
  * A setting with a few values side by side. Only the chosen one is an item, so Up and Down go from
  * row to row, and Left and Right pick within it.
  */
-function Segments<V extends string>({
+export function Segments<V extends string>({
   label,
   options,
   value,

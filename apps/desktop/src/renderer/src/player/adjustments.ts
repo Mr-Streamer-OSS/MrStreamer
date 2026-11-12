@@ -97,6 +97,13 @@ export async function adjustPlayback(
   }
 }
 
+/** Whether anything differs from the stream's own timing, loudness and picture. */
+export function isAdjusted(adjustments: PlaybackAdjustments): boolean {
+  return (Object.keys(DEFAULT_PLAYBACK_ADJUSTMENTS) as (keyof PlaybackAdjustments)[]).some(
+    (key) => adjustments[key] !== DEFAULT_PLAYBACK_ADJUSTMENTS[key],
+  );
+}
+
 /** Back to the stream's own timing, loudness and picture. */
 export function resetPlayback(client?: QueryClient): Promise<void> {
   return adjustPlayback(DEFAULT_PLAYBACK_ADJUSTMENTS, client);

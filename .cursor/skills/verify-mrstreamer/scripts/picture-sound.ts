@@ -1,10 +1,12 @@
 // Run with xvfb-run -a pnpm verify:desktop picture-sound. Plays a direct and a converted channel
-// and a title with two sound tracks through the window, first as the stream comes and then after
-// a restart with saved picture and sound adjustments. Chromium's Web Audio domain shows the route
-// sound takes, never the player's store or IPC. The same window renders synthetic signals through
-// the exact sound chain the player uses, offline, for timing, clipping, latency and cost.
+// and a title with two sound tracks through the window: as the stream comes, then with picture and
+// sound adjustments set in More > Picture and sound, again after a restart, and after Reset from
+// the title's Picture and sound menu, pressed with the keyboard. Chromium's Web Audio domain shows
+// the route sound takes, never the player's store or IPC. The same window renders synthetic
+// signals through the exact sound chain the player uses, offline, for timing, clipping, latency
+// and cost.
 import { spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import type { Writable } from "node:stream";
 import type { FakeChannel } from "../../../../apps/desktop/test/fake-provider.ts";
 import { createRequire } from "node:module";
@@ -70,7 +72,7 @@ export function pictureSoundStreams(channel: FakeChannel, out: Writable, signal:
   signal.addEventListener("abort", () => encoder.kill(), { once: true });
 }
 
-/** What the scenario saves before its second start: every adjustment away from its default. */
+/** What the scenario sets in the panel: every sound adjustment and the picture's crop and zoom. */
 const ADJUSTED: PlaybackAdjustments = {
   soundDelayMs: 200,
   leveling: true,
@@ -193,7 +195,7 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
   d.observed["pictureSoundLimits"] = [
     "Linux Xvfb development build, muted output; Web Audio graphs and offline renders prove routing, timing and level, not audible sound",
     "No native macOS or Windows, physical speakers, surround device, Bluetooth or receiver checks",
-    "Adjustments saved in preferences.json between starts; the controls that set them belong to the player UI",
+    "Adjustments set and reset through the player's Picture and sound controls; aspect is covered by the picture-fit contract test, not this journey",
   ];
   const graph: AudioGraph = { contexts: [], nodes: [], connections: 0 };
 
@@ -306,6 +308,39 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
       await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x + moves++, y: 500 });
   };
 
+  const menu = (selector: string) =>
+    `document.querySelector(${JSON.stringify(`[role=dialog] ${selector}`)})`;
+
+  /** Presses `step` in the open panel until its row reads `value`, as a viewer does. */
+  const stepTo = async (row: string, step: string, value: string) => {
+    const reads = `${menu(`[role=group][aria-label="${row}"] [aria-live]`)}?.textContent === ${JSON.stringify(value)}`;
+
+    for (let presses = 0; !(await d.exists(reads)); presses++) {
+      if (presses > 40) throw new Error(`${row} never read ${value}`);
+      await d.click(`${step} in ${row}`, menu(`button[aria-label="${step}"]`));
+    }
+  };
+
+  const pick = (group: string, choice: string) =>
+    d.click(
+      `${choice} in ${group}`,
+      menu(`[role=radiogroup][aria-label="${group}"] [aria-label="${choice}"]`),
+    );
+
+  /** Sets `ADJUSTED` in Live TV's More > Picture and sound and closes the menu. */
+  const adjustInMore = async () => {
+    await wake();
+    await d.click("Open More", "document.querySelector('button[aria-label=\"More\"]')");
+    await d.click("Open Picture and sound", menu('button[data-live-page="picture"]'));
+    await stepTo("Sound delay", "Sound later", `${ADJUSTED.soundDelayMs} ms`);
+    await pick("Leveling", "On");
+    await pick("Crop", ADJUSTED.crop);
+    await stepTo("Zoom", "Zoom In", `${ADJUSTED.zoom}%`);
+    await d.capture("picture-sound-panel");
+    await d.key("Escape", 27);
+    await d.wait(async () => !(await d.exists("document.querySelector('[role=dialog]')")));
+  };
+
   const channel = async (name: string, stage: string, adjustments: PlaybackAdjustments | null) => {
     // From Watch, Back first: its bar hides while the picture plays.
     if (await d.exists("document.querySelector('[data-live-timeline]')")) {
@@ -354,12 +389,18 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
   await channel("H.264 + AAC", "direct-unadjusted", null);
 
   if (graph.contexts.length > 0) throw new Error("Unadjusted playback opened Web Audio.");
+  // Set while the channel plays: they apply at once, and are saved for the next start.
+  await adjustInMore();
+  await playing("direct-adjusted-at-once", ADJUSTED);
   await d.quit();
 
   const path = join(d.profile, "preferences.json");
-  const saved = JSON.parse(await readFile(path, "utf8")) as Record<string, Json>;
-  await writeFile(path, JSON.stringify({ ...saved, playbackAdjustments: ADJUSTED }));
-  d.action(`Save adjustments ${JSON.stringify(ADJUSTED)} before the next start`);
+
+  const savedAdjustments = async () =>
+    (JSON.parse(await readFile(path, "utf8")) as { playbackAdjustments?: Json })
+      .playbackAdjustments;
+
+  d.observed["savedAfterPanel"] = (await savedAdjustments()) ?? null;
   await d.launch();
   await watchAudio();
   await channel("H.264 + AAC", "direct-adjusted", ADJUSTED);
@@ -378,13 +419,40 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
   if (graph.contexts.length !== 1 || sources !== 1)
     throw new Error(`Expected one context and one routed element, saw ${JSON.stringify(graph)}`);
 
-  // Reset, saved: the next start plays as the stream comes again, with no route at all.
-  await d.quit();
-  await writeFile(
-    path,
-    JSON.stringify({ ...saved, playbackAdjustments: DEFAULT_PLAYBACK_ADJUSTMENTS }),
+  // Reset from the title's menu, with the keyboard: End reaches Reset, Enter presses it. The
+  // picture fills its area again at once; the routed element passes sound on unchanged until the
+  // window closes, and the next start plays as the stream comes, with no route at all.
+  await d.evaluate(
+    "document.querySelector('[data-view=title]').dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))",
   );
-  d.action("Save the defaults Reset restores before the next start");
+  await d.click(
+    "Open Picture and sound",
+    "document.querySelector('[data-view=title] button[aria-label=\"Picture and sound\"]')",
+  );
+  await d.key("End", 35);
+  await d.wait(() => d.exists("document.activeElement?.textContent === 'Reset'"));
+  await d.key("Enter", 13);
+  await d.wait(() =>
+    d.exists(
+      "[...document.querySelectorAll('[role=dialog] button')].some(b => b.textContent === 'Reset' && b.disabled)",
+    ),
+  );
+  await d.key("Escape", 27);
+  await playing("offline-reset", null);
+  const reset = await picture();
+
+  if (
+    Math.abs(reset.box.width - reset.area.width) >= 1 ||
+    Math.abs(reset.box.height - reset.area.height) >= 1
+  )
+    throw new Error(`After Reset the picture is ${JSON.stringify(reset.box)}, not its area`);
+  await d.quit();
+  d.observed["savedAfterReset"] = (await savedAdjustments()) ?? null;
+
+  if (
+    JSON.stringify(d.observed["savedAfterReset"]) !== JSON.stringify(DEFAULT_PLAYBACK_ADJUSTMENTS)
+  )
+    throw new Error(`Reset saved ${JSON.stringify(d.observed["savedAfterReset"])}`);
   await d.launch();
   await watchAudio();
   await channel("H.264 + AAC", "direct-after-reset", null);
