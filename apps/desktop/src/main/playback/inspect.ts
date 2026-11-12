@@ -41,12 +41,6 @@ export interface StreamLayout {
   readonly subtitles: readonly SubtitleStream[];
 }
 
-/** Both forms of H.264 a stream can carry: whatever reads its NAL units reads either. */
-export const H264_CODECS: ReadonlySet<Codec | "unknown"> = new Set<Codec>([
-  "h264",
-  "h264-interlaced",
-]);
-
 /** A track whose codec needs a look at its first frame. */
 type Pending = "mpeg-audio" | "h264" | "hevc" | "aac";
 
@@ -57,6 +51,9 @@ const CANDIDATES: Record<Pending, readonly Codec[]> = {
   hevc: ["hevc", "hevc-10bit"],
   aac: ["aac", "aac-pce"],
 };
+
+/** Both forms of H.264 a stream can carry: whatever reads its NAL units reads either. */
+export const H264_CODECS: ReadonlySet<Codec | "unknown"> = new Set(CANDIDATES.h264);
 
 /** The tracks so far. `open` lists what each still undetermined track may turn out to be. */
 export interface Inspection {
