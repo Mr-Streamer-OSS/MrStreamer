@@ -32,6 +32,7 @@ export interface AdjustmentsState {
    */
   readonly failed: {
     readonly kind: "save" | "sound";
+    readonly owner: ReturnType<typeof profileOwner>;
     readonly adjustments: PlaybackAdjustments;
     readonly message: string;
   } | null;
@@ -45,11 +46,34 @@ const store = createStore<AdjustmentsState>(() => ({
 /** The choice on its way to the file; only its own answer may settle it. */
 let pending: PlaybackAdjustments | null = null;
 let owner = profileOwner();
+let operation = 0;
 
-function play(adjustments: PlaybackAdjustments): Promise<void> {
+function play(
+  adjustments: PlaybackAdjustments,
+  identity: number,
+  captured: ReturnType<typeof profileOwner>,
+): Promise<void> {
   store.setState({ adjustments });
 
-  return setSound(adjustments);
+  return setSound(adjustments, (cause) => {
+    if (identity !== operation || !currentProfile(captured)) return;
+
+    // Keep an unsaved choice retryable across playback lifecycle failures and recovery.
+    if (store.getState().failed?.kind === "save") return;
+
+    if (cause === null) {
+      if (store.getState().failed?.kind === "sound") store.setState({ failed: null });
+    } else {
+      store.setState({
+        failed: {
+          kind: "sound",
+          owner: captured,
+          adjustments,
+          message: describeError(appError(cause)),
+        },
+      });
+    }
+  });
 }
 
 function saved(preferences: Preferences | undefined): PlaybackAdjustments {
@@ -71,17 +95,20 @@ export function hydratePlaybackAdjustments(preferences: Preferences): void {
 
   const captured = profileOwner();
 
-  if (!pending)
-    void play(saved(preferences)).catch((cause: unknown) => {
-      if (!currentProfile(captured) || pending) return;
+  if (!pending) {
+    const identity = ++operation;
+    void play(saved(preferences), identity, captured).catch((cause: unknown) => {
+      if (identity !== operation || !currentProfile(captured) || pending) return;
       store.setState({
         failed: {
           kind: "sound",
+          owner: captured,
           adjustments: saved(preferences),
           message: describeError(appError(cause)),
         },
       });
     });
+  }
 }
 
 /**
@@ -93,6 +120,7 @@ export async function adjustPlayback(
   client?: QueryClient,
 ): Promise<void> {
   const captured = profileOwner();
+  const identity = ++operation;
   const previous = store.getState().adjustments;
   const next = { ...previous, ...change };
   owner = captured;
@@ -102,20 +130,22 @@ export async function adjustPlayback(
   let saving = false;
 
   try {
-    await play(next);
+    await play(next, identity, captured);
+
+    if (identity !== operation || !currentProfile(captured)) return;
     saving = true;
     const preferences = await updatePreferences({ playbackAdjustments: next }, client, captured);
 
-    if (pending !== next || !currentProfile(captured)) return;
-    await play(saved(preferences));
+    if (identity !== operation || pending !== next || !currentProfile(captured)) return;
+    await play(saved(preferences), identity, captured);
 
-    if (pending === next && currentProfile(captured)) pending = null;
+    if (identity === operation && pending === next && currentProfile(captured)) pending = null;
   } catch (cause) {
-    if (pending !== next || !currentProfile(captured)) return;
+    if (identity !== operation || pending !== next || !currentProfile(captured)) return;
     // A write can fail after it reached the file; take what is saved now, if it can be read.
     const readback = await readPreferences(client).catch(() => undefined);
 
-    if (pending !== next || !currentProfile(captured)) return;
+    if (identity !== operation || pending !== next || !currentProfile(captured)) return;
     pending = null;
     const restored = readback ? saved(readback) : previous;
 
@@ -132,13 +162,20 @@ export async function adjustPlayback(
           ? null
           : {
               kind: saving ? "save" : "sound",
+              owner: captured,
               adjustments: next,
               message: describeError(appError(cause)),
             },
     });
-    await play(restored).catch((cause: unknown) => {
+    await play(restored, identity, captured).catch((cause: unknown) => {
+      if (identity !== operation || !currentProfile(captured)) return;
       store.setState({
-        failed: { kind: "sound", adjustments: next, message: describeError(appError(cause)) },
+        failed: {
+          kind: "sound",
+          owner: captured,
+          adjustments: next,
+          message: describeError(appError(cause)),
+        },
       });
     });
   }
@@ -153,7 +190,7 @@ export function resetPlayback(client?: QueryClient): Promise<void> {
 export async function retryPlayback(client?: QueryClient): Promise<void> {
   const { failed } = store.getState();
 
-  if (failed && currentProfile(owner)) await adjustPlayback(failed.adjustments, client);
+  if (failed && currentProfile(failed.owner)) await adjustPlayback(failed.adjustments, client);
 }
 
 /**
@@ -165,15 +202,3 @@ export function useAdjustmentsRefusal(): string | null {
 
   return receiver && t("{receiver} plays the stream as sent", { receiver: receiverName(receiver) });
 }
-
-// Lifecycle resume failures have no pending preference command, but must remain visible/retryable.
-window.addEventListener("sounderror", (event) => {
-  if (!(event instanceof CustomEvent)) return;
-  store.setState({
-    failed: {
-      kind: "sound",
-      adjustments: store.getState().adjustments,
-      message: describeError(appError(event.detail)),
-    },
-  });
-});

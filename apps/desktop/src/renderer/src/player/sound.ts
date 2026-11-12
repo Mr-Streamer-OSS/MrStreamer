@@ -119,7 +119,29 @@ let current = soundOf(DEFAULT_PLAYBACK_ADJUSTMENTS);
 let context: AudioContext | null = null;
 
 /** Each element engines play in, with how many of them hold it: one may start before another stops. */
-const attached = new Map<HTMLMediaElement, number>();
+const attached = new Map<HTMLMediaElement, { holders: number }>();
+let reportSound: ((cause: unknown | null) => void) | undefined;
+const resumes = new WeakMap<HTMLMediaElement, object>();
+
+/** Lifecycle results belong to this attachment, latest resume and adjustment command only. */
+function observeSound(element: HTMLMediaElement, action: () => Promise<void>): void {
+  const attachment = attached.get(element);
+  const report = reportSound;
+  const attempt = {};
+  resumes.set(element, attempt);
+
+  const settled = (cause: unknown | null) => {
+    if (
+      attachment === attached.get(element) &&
+      resumes.get(element) === attempt &&
+      report === reportSound
+    )
+      report?.(cause);
+  };
+
+  void action().then(() => settled(null), settled);
+}
+
 const routes = new WeakMap<HTMLMediaElement, SoundChain>();
 
 /** Routes `element` through its chain, made the first time, and connects it to the speakers. */
@@ -136,6 +158,7 @@ async function route(element: HTMLMediaElement): Promise<void> {
     const owned = chain;
 
     const reset = () => {
+      resumes.delete(element);
       owned.flush();
       owned.output.disconnect();
     };
@@ -147,11 +170,7 @@ async function route(element: HTMLMediaElement): Promise<void> {
       if (!attached.has(element)) return;
       owned.output.disconnect();
       owned.output.connect(speakers);
-      void context!
-        .resume()
-        .catch((cause: unknown) =>
-          window.dispatchEvent(new CustomEvent("sounderror", { detail: cause })),
-        );
+      observeSound(element, () => context!.resume());
     };
 
     element.addEventListener("playing", reconnect);
@@ -173,28 +192,35 @@ async function route(element: HTMLMediaElement): Promise<void> {
  * freed.
  */
 export function attachSound(element: HTMLMediaElement): () => void {
-  attached.set(element, (attached.get(element) ?? 0) + 1);
+  const attachment = attached.get(element) ?? { holders: 0 };
+  attachment.holders++;
+  attached.set(element, attachment);
 
-  if (routes.has(element) || isAdjusted(current))
-    void route(element).catch((cause: unknown) =>
-      window.dispatchEvent(new CustomEvent("sounderror", { detail: cause })),
-    );
+  if (routes.has(element) || isAdjusted(current)) observeSound(element, () => route(element));
   let held = true;
 
   return () => {
     if (!held) return;
     held = false;
-    const holders = (attached.get(element) ?? 1) - 1;
 
-    if (holders > 0) return void attached.set(element, holders);
+    if (--attachment.holders > 0) return;
     attached.delete(element);
+    resumes.delete(element);
     routes.get(element)?.flush();
     routes.get(element)?.output.disconnect();
   };
 }
 
-/** Applies `adjustments` to every attached element at once. */
-export async function setSound(adjustments: SoundAdjustments): Promise<void> {
+/**
+ * Applies `adjustments` to every attached element at once. Subsequent lifecycle resumes report
+ * their error, or null on success, to this command until another command replaces it.
+ */
+export async function setSound(
+  adjustments: SoundAdjustments,
+  report?: (cause: unknown | null) => void,
+): Promise<void> {
+  reportSound = report;
+
   if (
     current.soundDelayMs === adjustments.soundDelayMs &&
     current.leveling === adjustments.leveling &&
@@ -210,5 +236,6 @@ export async function setSound(adjustments: SoundAdjustments): Promise<void> {
 
 /** Discards buffered sound before an engine switches its audio track. */
 export function flushSound(element: HTMLMediaElement): void {
+  resumes.delete(element);
   routes.get(element)?.flush();
 }

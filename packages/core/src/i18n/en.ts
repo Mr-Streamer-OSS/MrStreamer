@@ -1128,7 +1128,6 @@ export const en = {
   "Picture zoom": "Zoom",
   Adjusted: "Adjusted",
   "Sound can only play after the picture.": "Sound can only play after the picture.",
-  "Leveling plays in stereo.": "Leveling plays in stereo.",
   "Picture and sound settings apply on this computer only.":
     "Picture and sound settings apply on this computer only.",
   "Preview waits while {receiver} is connected": "Preview waits while {receiver} is connected",

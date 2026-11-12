@@ -6,7 +6,7 @@ import { selectProfileOwner } from "../../src/renderer/src/lib/ipc.ts";
 import { ipc } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   DEFAULT_PLAYBACK_ADJUSTMENTS,
   defaultPreferences,
@@ -15,6 +15,7 @@ import {
 } from "@mrstreamer/contracts/preferences";
 import { PictureSoundMenu } from "../../src/renderer/src/features/watch/PictureSound.tsx";
 import { acceptPreferences, syncPreferences } from "../../src/renderer/src/lib/preferences.ts";
+import { attachSound, flushSound } from "../../src/renderer/src/player/sound.ts";
 import { hydratePlaybackAdjustments } from "../../src/renderer/src/player/adjustments.ts";
 import { queryView } from "./mount.ts";
 
@@ -175,6 +176,7 @@ it("keeps focus at a step limit and moves vertically by row", async () => {
   await press(plus);
   expect(plus.getAttribute("aria-disabled")).toBe("true");
   expect(document.activeElement).toBe(plus);
+  expect(plus.closest('[role="group"]')?.getAttribute("tabindex")).toBe("-1");
   const sooner = named("Sound sooner");
   sooner.focus();
   await act(async () =>
@@ -213,4 +215,135 @@ it("hydrates the new profile while an old profile save is pending", async () => 
   expect(dialog().textContent).toContain("200%");
   expect(dialog().querySelector('[role="alert"]')).toBeNull();
   selectProfileOwner(null);
+});
+
+const resumeAudio = vi.fn<() => Promise<void>>();
+
+/** Browser audio boundary: only resume completion is controlled, never the sound module. */
+function soundDevice() {
+  const resume = resumeAudio.mockReset().mockResolvedValue();
+
+  const node = () => ({
+    connect: () => {},
+    disconnect: () => {},
+    delayTime: { value: 0, setTargetAtTime: () => {} },
+  });
+
+  vi.stubGlobal(
+    "AudioContext",
+    class {
+      state = "suspended";
+      currentTime = 0;
+      destination = { channelCount: 2, maxChannelCount: 2 };
+      resume = resume;
+      createGain = node;
+      createDelay = node;
+      createMediaElementSource = node;
+    },
+  );
+  const element = document.createElement("video");
+  const detach = attachSound(element);
+  const previousCleanup = cleanup;
+  cleanup = () => {
+    detach();
+    previousCleanup();
+    vi.unstubAllGlobals();
+  };
+
+  return { resume, element, detach };
+}
+
+it("ignores a rollback resume failure after another profile hydrates", async () => {
+  await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+  const { resume } = soundDevice();
+  await act(async () => {});
+  const write = ipc.hold("preferences.update");
+  await press(named("Zoom In"));
+  const rollback = Promise.withResolvers<void>();
+  resume.mockReturnValueOnce(rollback.promise);
+  await act(async () => write.reject({ kind: "unexpected", detail: "disk full" }));
+  await act(async () => {
+    selectProfileOwner({ id: "other", revision: 4 });
+    hydratePlaybackAdjustments({
+      ...defaultPreferences,
+      playbackAdjustments: { ...DEFAULT_PLAYBACK_ADJUSTMENTS, zoom: 200 },
+    });
+    rollback.reject(new Error("old rollback failed"));
+  });
+  expect(dialog().querySelector('[role="alert"]')).toBeNull();
+  expect(dialog().textContent).toContain("200%");
+  expect(saves()).toHaveLength(1);
+  selectProfileOwner(null);
+});
+
+it("ignores a rollback failure superseded by a newer choice", async () => {
+  await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+  const { resume } = soundDevice();
+  await act(async () => {});
+  const write = ipc.hold("preferences.update");
+  await press(named("Zoom In"));
+  const rollback = Promise.withResolvers<void>();
+  resume.mockReturnValueOnce(rollback.promise);
+  await act(async () => write.reject({ kind: "unexpected", detail: "disk full" }));
+  await press(named("Zoom In"));
+  await act(async () => rollback.reject(new Error("old rollback failed")));
+  expect(dialog().querySelector('[role="alert"]')).toBeNull();
+  expect(dialog().textContent).toContain("125%");
+});
+
+it("clears a lifecycle sound failure when playback resumes successfully", async () => {
+  await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+  const { resume, element } = soundDevice();
+  await act(async () => {});
+  resume.mockRejectedValueOnce(new Error("device asleep"));
+  await act(async () => element.dispatchEvent(new Event("playing")));
+  expect(dialog().querySelector('[role="alert"]')?.textContent).toContain("device asleep");
+  await act(async () => element.dispatchEvent(new Event("playing")));
+  expect(dialog().querySelector('[role="alert"]')).toBeNull();
+});
+
+it.each(["detached", "track-switch"])(
+  "ignores a %s source's late lifecycle failure",
+  async (change) => {
+    await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+    const { resume, element, detach } = soundDevice();
+    await act(async () => {});
+    const waking = Promise.withResolvers<void>();
+    resume.mockReturnValueOnce(waking.promise);
+    await act(async () => element.dispatchEvent(new Event("playing")));
+
+    if (change === "detached") detach();
+    else flushSound(element);
+    await act(async () => waking.reject(new Error("obsolete source")));
+    expect(dialog().querySelector('[role="alert"]')).toBeNull();
+  },
+);
+
+it("ignores a lifecycle completion after the profile switches, before hydration", async () => {
+  await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+  const { resume, element } = soundDevice();
+  await act(async () => {});
+  const waking = Promise.withResolvers<void>();
+  resume.mockReturnValueOnce(waking.promise);
+  await act(async () => element.dispatchEvent(new Event("playing")));
+  selectProfileOwner({ id: "other", revision: 5 });
+  await act(async () => waking.reject(new Error("old profile sound")));
+  expect(dialog().querySelector('[role="alert"]')).toBeNull();
+  selectProfileOwner(null);
+});
+
+it("keeps a failed save retryable after sound resumes successfully", async () => {
+  await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+  const { resume, element } = soundDevice();
+  await act(async () => {});
+  const write = ipc.hold("preferences.update");
+  await press(named("Zoom In"));
+  await act(async () => write.reject({ kind: "unexpected", detail: "disk full" }));
+  resume.mockRejectedValueOnce(new Error("device asleep"));
+  await act(async () => element.dispatchEvent(new Event("playing")));
+  await act(async () => element.dispatchEvent(new Event("playing")));
+  expect(dialog().querySelector('[role="alert"]')?.textContent).toContain("disk full");
+  await press(button("Retry"));
+  expect(saves().at(-1)?.zoom).toBe(125);
+  expect(dialog().querySelector('[role="alert"]')).toBeNull();
 });

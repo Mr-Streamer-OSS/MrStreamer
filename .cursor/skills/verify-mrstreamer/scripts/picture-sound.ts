@@ -128,6 +128,9 @@ async function bundledChain(): Promise<string> {
 const MEASURE = `(async () => {
   const { soundChain } = globalThis.__mrStreamerSound;
   const rate = 48000;
+  // Chromium's two compressors each look ahead 6 ms; all onset gates allow 1 ms.
+  const lookaheadMs = 12;
+  const toleranceSamples = rate / 1000;
   const render = async (seconds, channels, fill, adjustments, outputs = channels) => {
     const context = new OfflineAudioContext(outputs, Math.round(seconds * rate), rate);
     const buffer = context.createBuffer(channels, context.length, rate);
@@ -178,10 +181,26 @@ const MEASURE = `(async () => {
     const { out } = await render(1, 6, (data, c) => { data[at / 2 + c * 100] = 1; }, { soundDelayMs: 40, leveling }, 6);
     const onsets = [...Array(6).keys()].map(c => onset(out.getChannelData(c)));
     for (let c = 0; c < 6; c++) {
-      const expected = at / 2 + c * 100 + (40 + (leveling ? 12 : 0)) * rate / 1000;
-      if (Math.abs(onsets[c] - expected) > 1) throw new Error("Channel timing or identity lost: " + JSON.stringify(onsets));
+      const expected = at / 2 + c * 100 + (40 + (leveling ? lookaheadMs : 0)) * rate / 1000;
+      if (Math.abs(onsets[c] - expected) > toleranceSamples) throw new Error("Channel timing or identity lost: " + JSON.stringify(onsets));
     }
     channels.push({ leveling, carrying: onsets.filter(i => i >= 0).length, onsets });
+  }
+  // A centre-only 5.1 source must reach both stereo speakers equally, including with leveling.
+  const stereoCentre = [];
+  for (const leveling of [false, true]) {
+    const { out } = await render(1, 6, (data, c) => { if (c === 2) data[at] = 0.01; }, { soundDelayMs: 40, leveling }, 2);
+    const left = out.getChannelData(0), right = out.getChannelData(1);
+    const onsets = [onset(left), onset(right)];
+    const peaks = [left, right].map(data => data.reduce((peak, x) => Math.max(peak, Math.abs(x)), 0));
+    const expected = at + (40 + (leveling ? lookaheadMs : 0)) * rate / 1000;
+    const mismatch = left.some((x, i) => Math.abs(x - right[i]) > 0.000001);
+    if (mismatch || peaks.some(x => x < 0.001 || x >= 1) || onsets.some(i => Math.abs(i - expected) > toleranceSamples))
+      throw new Error("Stereo centre dialogue lost, unbalanced or mistimed: " + JSON.stringify({ leveling, peaks, onsets, mismatch }));
+    // The unprocessed speaker downmix of centre is sqrt(0.5) in each side (Web Audio speaker rules).
+    if (!leveling && peaks.some(x => Math.abs(x - Math.SQRT1_2 * 0.01) > 0.000001))
+      throw new Error("Unexpected centre speaker downmix: " + JSON.stringify(peaks));
+    stereoCentre.push({ leveling, peaks, onsets, mismatch });
   }
   const flushes = [];
   for (const leveling of [false, true]) {
@@ -202,7 +221,7 @@ const MEASURE = `(async () => {
     const data = out.getChannelData(0);
     const stale = data.slice(Math.ceil(0.3 * rate), Math.floor(0.9 * rate)).some(x => Math.abs(x) > 0.001);
     const freshAt = onset(data);
-    if (stale || Math.abs(freshAt - (0.95 + (leveling ? 0.012 : 0)) * rate) > 1)
+    if (stale || Math.abs(freshAt - (0.95 + (leveling ? lookaheadMs / 1000 : 0)) * rate) > toleranceSamples)
       throw new Error("Flush replayed stale sound or lost fresh sound");
     flushes.push({ leveling, stale, freshAt });
   }
@@ -212,7 +231,7 @@ const MEASURE = `(async () => {
     cost.push({ leveling, secondsRendered: 60, renderMs: ms, timesRealtime: 60000 / ms });
   }
   for (const t of timing) {
-    const expected = t.soundDelayMs + (t.leveling ? 12 : 0);
+    const expected = t.soundDelayMs + (t.leveling ? lookaheadMs : 0);
     if (t.measuredMs === null || Math.abs(t.measuredMs - expected) > 1)
       throw new Error("Impulse delay outside 1 ms: " + JSON.stringify(t));
   }
@@ -221,7 +240,7 @@ const MEASURE = `(async () => {
     throw new Error("Leveling missing, clipping or ineffective: " + JSON.stringify(levels));
   if (channels.some(c => c.carrying !== 6)) throw new Error("Channel loss: " + JSON.stringify(channels));
   if (cost.some(c => !Number.isFinite(c.timesRealtime) || c.timesRealtime < 10)) throw new Error("Render cost exceeds 10% realtime: " + JSON.stringify(cost));
-  return { sampleRate: rate, timing, levels, channels, flushes, cost };
+  return { sampleRate: rate, timing, levels, channels, stereoCentre, flushes, cost };
 })()`;
 
 /**
@@ -557,6 +576,37 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
     "Open Picture and sound",
     "document.querySelector('[data-view=title] button[aria-label=\"Picture and sound\"]')",
   );
+
+  // Browser Tab traversal must leave the first step backwards and return forwards.
+  for (const label of ["Sound sooner", "Zoom Out"]) {
+    await d.evaluate(
+      `document.querySelector('[role="dialog"] button[aria-label="${label}"]').focus()`,
+    );
+    await d.send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "Tab",
+      code: "Tab",
+      windowsVirtualKeyCode: 9,
+      modifiers: 1,
+    });
+    await d.send("Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Tab",
+      code: "Tab",
+      windowsVirtualKeyCode: 9,
+      modifiers: 1,
+    });
+    await d.wait(() =>
+      d.exists(
+        `!document.querySelector('[role="dialog"] button[aria-label="${label}"]').closest('[role="group"]').contains(document.activeElement)`,
+      ),
+    );
+    await d.key("Tab", 9);
+    await d.wait(() =>
+      d.exists(`document.activeElement?.getAttribute('aria-label') === '${label}'`),
+    );
+  }
+
   await d.key("End", 35);
   await d.wait(() => d.exists("document.activeElement?.textContent === 'Reset'"));
   await d.key("Enter", 13);

@@ -1159,7 +1159,6 @@ export const de: Translation = {
   "Picture zoom": "Zoom",
   Adjusted: "Angepasst",
   "Sound can only play after the picture.": "Der Ton kann nur nach dem Bild spielen.",
-  "Leveling plays in stereo.": "Der Lautstärkeausgleich spielt in Stereo.",
   "Picture and sound settings apply on this computer only.":
     "Bild- und Toneinstellungen gelten nur auf diesem Computer.",
   "Preview waits while {receiver} is connected":

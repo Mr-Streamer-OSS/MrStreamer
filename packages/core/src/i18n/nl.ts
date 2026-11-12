@@ -1150,7 +1150,6 @@ export const nl: Translation = {
   "Picture zoom": "Zoom",
   Adjusted: "Aangepast",
   "Sound can only play after the picture.": "Geluid kan alleen na het beeld spelen.",
-  "Leveling plays in stereo.": "Egaliseren speelt in stereo.",
   "Picture and sound settings apply on this computer only.":
     "Beeld- en geluidsinstellingen gelden alleen op deze computer.",
   "Preview waits while {receiver} is connected": "Voorbeeld wacht terwijl {receiver} verbonden is",

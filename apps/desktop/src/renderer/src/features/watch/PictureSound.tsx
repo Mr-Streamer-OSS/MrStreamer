@@ -205,7 +205,7 @@ function Stepper({
       aria-label={label}
       className="flex items-center gap-3 py-1"
       data-item
-      tabIndex={0}
+      tabIndex={-1}
       onFocus={(event) => {
         if (event.target === event.currentTarget)
           event.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
