@@ -537,10 +537,11 @@ function make(deps: RecordingsDeps) {
     };
 
     /**
-     * Folders of failed starts recordings.json still lists, by id (see FAILED): each write leaves
+     * Failed starts recordings.json still lists, by id (see FAILED): kept apart from working
+     * records so they neither resume nor settle schedules. The list includes them; each write leaves
      * them out, and once one is kept their records and folders go, as the next check does.
      */
-    const failedFolders = new Map<string, string>();
+    const failedFolders = new Map<string, StoredRecording>();
 
     /** The id `folder` is marked with (see CHOSEN), null when none; "" for the profile's own. */
     const markOf = async (folder: string) =>
@@ -607,8 +608,8 @@ function make(deps: RecordingsDeps) {
         else unseen.delete(record.id);
 
         if (failed) {
-          records.set(record.id, current ?? record);
-          failedFolders.set(record.id, folderOf(record));
+          records.delete(record.id);
+          failedFolders.set(record.id, current ?? record);
 
           return;
         }
@@ -699,7 +700,8 @@ function make(deps: RecordingsDeps) {
      * the next write to take out, with its folder (see failedFolders).
      */
     const forgetStart = (record: StoredRecording) => {
-      failedFolders.set(record.id, folderOf(record));
+      records.delete(record.id);
+      failedFolders.set(record.id, record);
       unsaved.recordings = true;
     };
 
@@ -726,7 +728,7 @@ function make(deps: RecordingsDeps) {
           // One not read yet (see unseen) is kept as it was, its gap not guessed.
           const kept = [
             ...[...records.values()].flatMap((record) =>
-              record.id === without || failedFolders.has(record.id)
+              record.id === without
                 ? []
                 : [isLive(record) ? (unseen.get(record.id) ?? record) : record],
             ),
@@ -742,12 +744,11 @@ function make(deps: RecordingsDeps) {
           // Failed starts it no longer lists lose their records and marked folders.
           const listed = new Set(kept.map(({ id }) => id));
 
-          for (const [id, folder] of failedFolders) {
+          for (const [id, record] of failedFolders) {
             if (listed.has(id)) continue;
             failedFolders.delete(id);
-            records.delete(id);
             recordingFiles.delete(id);
-            void rm(folder, { recursive: true, force: true }).catch(() => {});
+            void rm(folderOf(record), { recursive: true, force: true }).catch(() => {});
           }
         },
         catch: () =>
@@ -793,7 +794,7 @@ function make(deps: RecordingsDeps) {
         const folder = folderOf(record);
         beginning.delete(record.id);
         // Before the check it wakes can write, so that write removes the folder too.
-        failedFolders.set(record.id, folder);
+        failedFolders.set(record.id, record);
 
         return save.pipe(
           Effect.as(true),
@@ -832,20 +833,23 @@ function make(deps: RecordingsDeps) {
 
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
+    /** Latest file check or deletion, even when it confirms the existing missing state. */
+    const observations = new Map<string, symbol>();
 
     const look = Effect.promise(() =>
       Promise.all(
         [...records.values()].map(async (record) => {
           if (isLive(record) || record.status.kind === "missed") return;
-          const was = missing.has(record.id);
+          const observation = Symbol();
+          observations.set(record.id, observation);
 
           const there = await stat(fileOf(record)).then(
             () => true,
             () => false,
           );
 
-          // Marked or cleared while this looked, as by a deletion: that newer state stays.
-          if (missing.has(record.id) !== was) return;
+          // A newer check or deletion owns the state, even if its missing value stayed the same.
+          if (observations.get(record.id) !== observation) return;
 
           if (there) missing.delete(record.id);
           else missing.add(record.id);
@@ -854,7 +858,7 @@ function make(deps: RecordingsDeps) {
     );
 
     const shown = Effect.sync(() =>
-      [...records.values()]
+      [...records.values(), ...failedFolders.values()]
         .map((record): Recording => {
           const {
             file: _file,
@@ -2450,8 +2454,7 @@ function make(deps: RecordingsDeps) {
         const over: string[] = [];
 
         for (let record of records.values()) {
-          // A failed start still listed waits for the write that takes it out (see failedFolders).
-          if (!isLive(record) || active.has(record.id) || failedFolders.has(record.id)) continue;
+          if (!isLive(record) || active.has(record.id)) continue;
 
           if (
             stopping.has(record.id) ||
@@ -2479,7 +2482,7 @@ function make(deps: RecordingsDeps) {
               continue;
             }
 
-            if (!again || !isLive(again) || failedFolders.has(record.id)) {
+            if (!again || !isLive(again)) {
               resumeTried.delete(record.id);
               over.push(record.id);
               continue;
@@ -2825,6 +2828,7 @@ function make(deps: RecordingsDeps) {
             }),
         });
         recordingFiles.delete(id);
+        observations.set(id, Symbol());
         missing.add(id);
 
         // Listed, as missing, until a write without it is kept. Its record goes before the permit
@@ -2840,6 +2844,7 @@ function make(deps: RecordingsDeps) {
         }
 
         missing.delete(id);
+        observations.delete(id);
         protection.delete(id);
         played.delete(id);
         retentionFailures.delete(id);
@@ -3587,6 +3592,9 @@ function make(deps: RecordingsDeps) {
           if (retentionFailures.delete(id)) yield* publish;
 
           // Its file may have gone since the list was read: the list says so at once.
+          const observation = Symbol();
+          observations.set(id, observation);
+
           const there = yield* Effect.promise(() =>
             stat(fileOf(record)).then(
               () => true,
@@ -3595,7 +3603,7 @@ function make(deps: RecordingsDeps) {
           );
 
           if (!there) {
-            if (!missing.has(id)) {
+            if (observations.get(id) === observation && !missing.has(id)) {
               missing.add(id);
               yield* publish;
             }
@@ -3605,7 +3613,7 @@ function make(deps: RecordingsDeps) {
             });
           }
 
-          if (missing.delete(id)) yield* publish;
+          if (observations.get(id) === observation && missing.delete(id)) yield* publish;
           // One still recording plays as it grows, once its own index has read its program.
           const growing = isLive(record) ? yield* recordingSource(id) : undefined;
 

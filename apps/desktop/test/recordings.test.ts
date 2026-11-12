@@ -4792,6 +4792,83 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect((await recordings.previewRule({ ...plan, mode: "new-only" })).matches).toEqual([]);
   });
 
+  it("retries a failed rule start in the next check without settling its occurrence", async () => {
+    const { provider, recordings, listing, channel, dataDir, quit } = await scheduling();
+
+    const { next } = await listing();
+
+    await recordings.saveRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+
+    await recordings.check();
+
+    const schedule = (await recordings.schedules()).find(
+      (each) => each.next?.start === next.start,
+    )!;
+
+    expect(schedule).toBeDefined();
+    await quit();
+    const root = join(dataDir, "recordings");
+    const id = "00000000-0000-4000-8000-000000000001";
+    await mkdir(join(root, id), { recursive: true });
+    await writeFile(join(root, id, ".mrstreamer-failed"), "");
+    await writeFile(
+      join(root, "recordings.json"),
+      JSON.stringify({
+        version: 1,
+        recordings: [
+          {
+            id,
+            file: "a.ts",
+            channel: channel(GUIDED),
+            channelName: GUIDED,
+            title: next.title,
+            start: next.start,
+            stop: next.stop,
+            ended: null,
+            bytes: 0,
+            status: { kind: "recording" },
+            scheduled: {
+              schedule: schedule.id,
+              from: next.start,
+              late: null,
+              rule: schedule.rule,
+            },
+          },
+        ],
+      }),
+    );
+    const original = fs.rename;
+    let refuse = true;
+
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (refuse && to === join(root, "recordings.json")) throw new Error("inventory refused");
+
+      return original(from, to);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.recordings.check();
+    expect((await again.recordings.list()).map((each) => each.id)).toContain(id);
+    refuse = false;
+    vi.setSystemTime(next.start);
+    await again.recordings.check();
+
+    const made = await until(
+      again.recordings.list,
+      (rows) => rows.some((each) => each.id !== id && each.status.kind === "recording"),
+      1500,
+    );
+
+    expect(made.some((each) => each.id !== id && each.status.kind === "recording")).toBe(true);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
   it("settles a stopped and deleted rule occurrence durably before restart", async () => {
     const { provider, subscriptionId, channel, recordings, listing, clockTo, dataDir, quit } =
       await scheduling();
@@ -7472,72 +7549,162 @@ describe("recording protection and retention", () => {
     });
   });
 
-  it("keeps a failed start listed until recordings.json is written without it", async () => {
+  it("keeps a newer missing observation when the recording was already missing", async () => {
     const { dataDir, root, ids } = await seeded(2);
-    const manifest = join(root, "recordings.json");
-    const id = ids[0]!;
-    const kept = await readRecordings(manifest);
-
-    if (kept.kind !== "read") throw new Error("Seed inventory unreadable");
-    // Recordings.json still lists a start whose folder was marked failed, as the app quit.
-    await writeFile(
-      manifest,
-      JSON.stringify({
-        version: 1,
-        recordings: kept.items.map((each) =>
-          each.id === id
-            ? { ...each, status: { kind: "recording" }, ended: null, stop: Date.now() + HOUR }
-            : each,
-        ),
-      }),
-    );
-    await writeFile(join(root, id, ".mrstreamer-failed"), "");
-    const original = fs.rename;
-    const writing = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    let refuse = true;
-
-    // The first write without it stalls, as on a slow drive, then fails.
-    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
-      if (refuse && to === manifest && !(await fs.readFile(from, "utf8")).includes(id)) {
-        refuse = false;
-        writing.resolve();
-        await release.promise;
-        throw new Error("inventory replacement refused");
-      }
-
-      return original(from, to);
-    });
-
-    onTestFinished(() => adapter.mockRestore());
     const first = await app(dataDir);
     onTestFinished(first.quit);
-    const checking = first.recordings.check();
+    const id = ids[0]!;
+    const file = join(root, id, "a.ts");
+    const bytes = await readFile(file);
+    await rm(file);
+    expect((await first.recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
+      "missing",
+    );
+    await writeFile(file, bytes);
+    const original = fs.stat;
+    const statted = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let hold = true;
+
+    const adapter = vi.spyOn(fs, "stat").mockImplementation(async (path, options) => {
+      const found = await original(path, options);
+
+      if (hold && path === file) {
+        hold = false;
+        statted.resolve();
+        await release.promise;
+      }
+
+      return found;
+    });
+
+    onTestFinished(() => {
+      release.resolve();
+      adapter.mockRestore();
+    });
+    const reading = first.recordings.list();
+    await statted.promise;
 
     try {
-      await writing.promise;
-      expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+      await rm(file);
+      expect((await first.recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
+        "missing",
+      );
     } finally {
       release.resolve();
-      await checking;
     }
 
-    expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
-    expect(existsSync(join(root, id))).toBe(true);
-    // The next check writes it out, and its folder goes.
-    await first.recordings.check();
-    expect((await first.recordings.list()).map((each) => each.id)).not.toContain(id);
-    expect(
-      await until(
-        async () => existsSync(join(root, id)),
-        (there) => !there,
-      ),
-    ).toBe(false);
-    await first.quit();
-    const second = await app(dataDir);
-    onTestFinished(second.quit);
-    expect((await second.recordings.list()).map((each) => each.id)).not.toContain(id);
+    expect((await reading).find((each) => each.id === id)?.status.kind).toBe("missing");
   });
+
+  it.each(["startup", "resume", "expired", "returned"] as const)(
+    "keeps a failed start listed until recordings.json is written without it (%s)",
+    async (when) => {
+      const { dataDir, root, ids } = await seeded(2);
+      const manifest = join(root, "recordings.json");
+      const id = ids[0]!;
+      const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
+      const setup = await app(dataDir);
+      const { id: subscriptionId } = await setup.subscriptions.add(demoLogin(provider));
+      await setup.library.refresh(subscriptionId);
+      await setup.quit();
+      const source = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+      const kept = await readRecordings(manifest);
+
+      if (kept.kind !== "read") throw new Error("Seed inventory unreadable");
+      // Recordings.json still lists a start whose folder was marked failed, as the app quit.
+      await writeFile(
+        manifest,
+        JSON.stringify({
+          version: 1,
+          recordings: kept.items.map((each) =>
+            each.id === id
+              ? {
+                  ...each,
+                  channel: { subscriptionId, id: String(source.streamId) },
+                  status: { kind: "recording" },
+                  ended: null,
+                  stop: Date.now() + (when === "expired" ? -MINUTE : HOUR),
+                }
+              : each,
+          ),
+        }),
+      );
+      await writeFile(join(root, id, ".mrstreamer-failed"), "");
+      const originalStat = fs.stat;
+      let exposed = when === "startup";
+      let unreadReckon = when === "resume" || when === "expired";
+
+      const marker = vi.spyOn(fs, "stat").mockImplementation(async (path, options) => {
+        if (path === join(root, id, ".mrstreamer-failed")) {
+          if (!exposed || unreadReckon) {
+            if (exposed) unreadReckon = false;
+            throw Object.assign(new Error("marker unreadable"), { code: "EACCES" });
+          }
+        }
+
+        return originalStat(path, options);
+      });
+
+      onTestFinished(() => marker.mockRestore());
+      const original = fs.rename;
+      const writing = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let refuse = true;
+      let stalled = false;
+
+      // The first write without it stalls, as on a slow drive, then fails.
+      const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        if (refuse && to === manifest && !(await fs.readFile(from, "utf8")).includes(id)) {
+          if (!stalled) {
+            stalled = true;
+            writing.resolve();
+            await release.promise;
+          }
+
+          throw new Error("inventory replacement refused");
+        }
+
+        return original(from, to);
+      });
+
+      onTestFinished(() => adapter.mockRestore());
+      const first = await app(dataDir);
+      onTestFinished(first.quit);
+      exposed = true;
+      const checking = first.recordings.check();
+
+      try {
+        await writing.promise;
+        expect(provider.streamRequests()).toBe(0);
+        expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+      } finally {
+        release.resolve();
+        await checking;
+      }
+
+      expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+      expect(existsSync(join(root, id))).toBe(true);
+      expect(provider.streamRequests()).toBe(0);
+      expect(await first.recordings.live()).toMatchObject({ recording: false });
+      expect(await first.recordings.holdStarts(true)).toBe(true);
+      await first.recordings.holdStarts(false);
+      // The next check writes it out, and its folder goes.
+      refuse = false;
+      await first.recordings.check();
+      expect((await first.recordings.list()).map((each) => each.id)).not.toContain(id);
+      expect(
+        await until(
+          async () => existsSync(join(root, id)),
+          (there) => !there,
+        ),
+      ).toBe(false);
+      await first.quit();
+      const second = await app(dataDir);
+      onTestFinished(second.quit);
+      expect((await second.recordings.list()).map((each) => each.id)).not.toContain(id);
+    },
+  );
 
   it("starts a scheduled recording while retention waits on a stalled recording drive", async () => {
     const { dataDir, root } = await seeded(2);
