@@ -17,7 +17,6 @@ import {
   DEFAULT_PLAYBACK_ADJUSTMENTS,
   type PlaybackAdjustments,
 } from "../../../../packages/contracts/src/preferences.ts";
-import { pictureBox } from "../../../../apps/desktop/src/renderer/src/player/picture-fit.ts";
 import type { Driver } from "./language.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -177,14 +176,52 @@ const MEASURE = `(async () => {
   const channels = [];
   for (const leveling of [false, true]) {
     const { out } = await render(1, 6, (data, c) => { data[at / 2 + c * 100] = 1; }, { soundDelayMs: 40, leveling }, 6);
-    channels.push({ leveling, carrying: [...Array(6).keys()].filter((c) => onset(out.getChannelData(c)) >= 0).length });
+    const onsets = [...Array(6).keys()].map(c => onset(out.getChannelData(c)));
+    for (let c = 0; c < 6; c++) {
+      const expected = at / 2 + c * 100 + (40 + (leveling ? 12 : 0)) * rate / 1000;
+      if (Math.abs(onsets[c] - expected) > 1) throw new Error("Channel timing or identity lost: " + JSON.stringify(onsets));
+    }
+    channels.push({ leveling, carrying: onsets.filter(i => i >= 0).length, onsets });
+  }
+  const flushes = [];
+  for (const leveling of [false, true]) {
+    const context = new OfflineAudioContext(2, rate * 2, rate);
+    const buffer = context.createBuffer(2, rate * 2, rate);
+    for (let c = 0; c < 2; c++) { buffer.getChannelData(c)[rate / 4] = 1; buffer.getChannelData(c)[rate * 3 / 4] = 1; }
+    const source = new AudioBufferSourceNode(context, { buffer });
+    const chain = soundChain(context, source);
+    chain.set({ soundDelayMs: 200, leveling });
+    chain.output.connect(context.destination);
+    source.start();
+    const suspended = context.suspend(0.3);
+    const rendering = context.startRendering();
+    await suspended;
+    chain.flush();
+    await context.resume();
+    const out = await rendering;
+    const data = out.getChannelData(0);
+    const stale = data.slice(Math.ceil(0.3 * rate), Math.floor(0.9 * rate)).some(x => Math.abs(x) > 0.001);
+    const freshAt = onset(data);
+    if (stale || Math.abs(freshAt - (0.95 + (leveling ? 0.012 : 0)) * rate) > 1)
+      throw new Error("Flush replayed stale sound or lost fresh sound");
+    flushes.push({ leveling, stale, freshAt });
   }
   const cost = [];
   for (const leveling of [false, true]) {
     const { ms } = await render(60, 2, program, { soundDelayMs: 200, leveling });
     cost.push({ leveling, secondsRendered: 60, renderMs: ms, timesRealtime: 60000 / ms });
   }
-  return { sampleRate: rate, timing, levels, channels, cost };
+  for (const t of timing) {
+    const expected = t.soundDelayMs + (t.leveling ? 12 : 0);
+    if (t.measuredMs === null || Math.abs(t.measuredMs - expected) > 1)
+      throw new Error("Impulse delay outside 1 ms: " + JSON.stringify(t));
+  }
+  const plain = levels.find(x => !x.leveling), leveled = levels.find(x => x.leveling);
+  if (!leveled || !plain || leveled.peak <= 0 || leveled.peak >= 1 || leveled.samplesAtOrAboveFullScale !== 0 || leveled.quietToLoudDb >= plain.quietToLoudDb - 5)
+    throw new Error("Leveling missing, clipping or ineffective: " + JSON.stringify(levels));
+  if (channels.some(c => c.carrying !== 6)) throw new Error("Channel loss: " + JSON.stringify(channels));
+  if (cost.some(c => !Number.isFinite(c.timesRealtime) || c.timesRealtime < 10)) throw new Error("Render cost exceeds 10% realtime: " + JSON.stringify(cost));
+  return { sampleRate: rate, timing, levels, channels, flushes, cost };
 })()`;
 
 /**
@@ -236,6 +273,52 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
     return reply.realtimeData;
   };
 
+  // These are Chromium's reported route latencies, not an acoustic A/V measurement.
+  const outputLatency = async () => {
+    const prototype = (await d.send("Runtime.evaluate", {
+      expression: "AudioContext.prototype",
+    })) as { result: { objectId: string } };
+
+    const objects = (await d.send("Runtime.queryObjects", {
+      prototypeObjectId: prototype.result.objectId,
+    })) as { objects: { objectId: string } };
+
+    try {
+      const result = (await d.send("Runtime.callFunctionOn", {
+        objectId: objects.objects.objectId,
+        functionDeclaration:
+          "function() { return this.map(c => ({ state: c.state, baseLatency: c.baseLatency, outputLatency: c.outputLatency, timestamp: c.getOutputTimestamp() })); }",
+        returnByValue: true,
+      })) as {
+        result: {
+          value: {
+            state: string;
+            baseLatency: number;
+            outputLatency: number;
+            timestamp: { contextTime: number; performanceTime: number };
+          }[];
+        };
+      };
+
+      for (const c of result.result.value) {
+        if (
+          ![
+            c.baseLatency,
+            c.outputLatency,
+            c.timestamp.contextTime,
+            c.timestamp.performanceTime,
+          ].every((n) => Number.isFinite(n) && n >= 0)
+        )
+          throw new Error("Invalid reported output latency");
+      }
+
+      return result.result.value;
+    } finally {
+      await d.send("Runtime.releaseObject", { objectId: objects.objects.objectId });
+      await d.send("Runtime.releaseObject", { objectId: prototype.result.objectId });
+    }
+  };
+
   /** The video against the box `picture-fit.ts` gives its frame in the picture's area. */
   const picture = () =>
     d.evaluate<{
@@ -245,11 +328,12 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
       time: number;
       frames: number;
       paused: boolean;
+      clip: string;
     }>(`(() => {
       const v = document.querySelector('video'), area = v.parentElement.getBoundingClientRect(), box = v.getBoundingClientRect();
       return { frame: { width: v.videoWidth, height: v.videoHeight }, area: { width: area.width, height: area.height },
         box: { left: box.left - area.left, top: box.top - area.top, width: box.width, height: box.height },
-        time: v.currentTime, frames: v.getVideoPlaybackQuality().totalVideoFrames, paused: v.paused };
+        clip: getComputedStyle(v).clipPath, time: v.currentTime, frames: v.getVideoPlaybackQuality().totalVideoFrames, paused: v.paused };
     })()`);
 
   const playing = async (name: string, adjustments: PlaybackAdjustments | null) => {
@@ -265,7 +349,24 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
       );
     }, 60_000);
     const now = await picture();
-    const expected = adjustments ? pictureBox(now.frame, now.area, adjustments) : null;
+
+    // Independent fixture geometry: every source is 16:9, crop keeps its central 4:3,
+    // then zoom is 150%. Do not reuse the production placement calculation here.
+    if (adjustments && Math.abs(now.frame.width / now.frame.height - 16 / 9) > 0.01)
+      throw new Error(`${name}: fixture is no longer 16:9`);
+    const h = Math.min(now.area.height, (now.area.width * 3) / 4) * 1.5;
+    const w = (h * 16) / 9;
+
+    const expected = adjustments
+      ? { left: (now.area.width - w) / 2, top: (now.area.height - h) / 2, width: w, height: h }
+      : null;
+
+    if (adjustments) {
+      const clip = now.clip.match(/[\d.]+/g)?.map(Number);
+
+      if (!clip || Math.abs(clip[0]!) > 0.5 || Math.abs(clip[1]! - w / 8) > 0.5)
+        throw new Error(`${name}: missing central crop clip: ${now.clip}`);
+    }
 
     const placed =
       expected === null ||
@@ -286,6 +387,29 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
       wallSeconds: (Date.now() - began) / 1000,
     };
 
+    if (Math.abs(paced.mediaSeconds - paced.wallSeconds) > 1)
+      throw new Error(`${name}: media clock drift exceeds one second: ${JSON.stringify(paced)}`);
+    const latency = await outputLatency();
+    const realtime = await live();
+    const sources = graph.nodes.filter((node) => node === "MediaElementAudioSource").length;
+
+    if (adjustments || name === "offline-reset") {
+      if (
+        graph.contexts.length !== 1 ||
+        sources !== 1 ||
+        latency.length !== 1 ||
+        latency[0]?.state !== "running"
+      )
+        throw new Error(`${name}: expected one running routed element`);
+
+      if (
+        !realtime ||
+        !Number.isFinite(realtime["renderCapacity"]) ||
+        realtime["renderCapacity"]! >= 0.5
+      )
+        throw new Error(`${name}: audio render capacity missing or above 50%`);
+    }
+
     d.observed[name] = {
       picture: now,
       expected: expected && { ...expected },
@@ -295,7 +419,8 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
         nodes: [...graph.nodes],
         connections: graph.connections,
       },
-      realtime: await live(),
+      realtime,
+      latency,
     };
     await d.capture(name);
   };
@@ -401,6 +526,9 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
       .playbackAdjustments;
 
   d.observed["savedAfterPanel"] = (await savedAdjustments()) ?? null;
+
+  if (JSON.stringify(d.observed["savedAfterPanel"]) !== JSON.stringify(ADJUSTED))
+    throw new Error("Panel choices did not persist");
   await d.launch();
   await watchAudio();
   await channel("H.264 + AAC", "direct-adjusted", ADJUSTED);
@@ -420,7 +548,7 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
     throw new Error(`Expected one context and one routed element, saw ${JSON.stringify(graph)}`);
 
   // Reset from the title's menu, with the keyboard: End reaches Reset, Enter presses it. The
-  // picture fills its area again at once; the routed element passes sound on unchanged until the
+  // picture fills its area again at once; the routed element retains output latency until the
   // window closes, and the next start plays as the stream comes, with no route at all.
   await d.evaluate(
     "document.querySelector('[data-view=title]').dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))",
@@ -434,7 +562,7 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
   await d.key("Enter", 13);
   await d.wait(() =>
     d.exists(
-      "[...document.querySelectorAll('[role=dialog] button')].some(b => b.textContent === 'Reset' && b.disabled)",
+      "[...document.querySelectorAll('[role=dialog] button')].some(b => b.textContent === 'Reset' && b.getAttribute('aria-disabled') === 'true')",
     ),
   );
   await d.key("Escape", 27);

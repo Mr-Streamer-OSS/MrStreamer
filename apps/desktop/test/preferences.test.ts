@@ -96,6 +96,25 @@ const stored = async (dataDir: string): Promise<Json> =>
   JSON.parse(await readFile(join(dataDir, "preferences.json"), "utf8"));
 
 describe("preferences", () => {
+  it("recovers a malformed adjustment without erasing other saved preferences", async () => {
+    const dataDir = await tempDir();
+
+    const raw = {
+      volume: 0.37,
+      muted: false,
+      lastChannelId: null,
+      lastCategoryId: null,
+      playbackAdjustments: { zoom: 99 },
+      futureSetting: "keep",
+    };
+
+    await writeFile(join(dataDir, "preferences.json"), JSON.stringify(raw));
+    const settings = await settingsIn(dataDir);
+    expect((await settings.get()).volume).toBe(0.37);
+    await settings.update({ muted: true });
+    expect(await stored(dataDir)).toMatchObject({ ...raw, muted: true });
+  });
+
   it("logs schema failures in preferences.json without saved values", async ({
     onTestFinished,
   }) => {

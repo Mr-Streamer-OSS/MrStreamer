@@ -1,3 +1,4 @@
+import { TextButton } from "../watch/menu-rows.tsx";
 // The CC panel's Timing section. A file's own track moves in tenths until the title closes.
 // Downloaded text uses its original cue clock: each edit is stored for this exact result and file.
 import { ChevronRight } from "lucide-react";
@@ -11,7 +12,7 @@ import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { cn } from "../../lib/utils.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
-import { delayLabel, TextButton, TrackTiming } from "../watch/SubtitleSettings.tsx";
+import { delayLabel, TrackTiming } from "../watch/SubtitleSettings.tsx";
 import { PanelSection } from "./PanelSection.tsx";
 
 const FPS = [23.976, 24, 25] as const;

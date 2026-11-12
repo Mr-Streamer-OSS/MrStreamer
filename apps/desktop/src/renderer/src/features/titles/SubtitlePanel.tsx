@@ -1,3 +1,4 @@
+import { TextButton } from "../watch/menu-rows.tsx";
 // CC, while a title plays here: every subtitle control in one panel. The file's tracks and the
 // saved download, their timing and look, then online search and its results. The picture keeps
 // playing and the panel stays open while the viewer compares results and steps the timing. The
@@ -17,7 +18,7 @@ import { comingTime } from "../../lib/format.ts";
 import { onlineSubtitles, useOnlineSubtitles } from "../../player/online-subtitles.ts";
 import { titlePlayer, useSubtitleNote, useTitlePlayer } from "../../player/title-player.ts";
 import { subtitleSettingsQuery } from "../settings/OnlineSubtitlesSection.tsx";
-import { LookRows, subtitleSettingsFor, TextButton } from "../watch/SubtitleSettings.tsx";
+import { LookRows, subtitleSettingsFor } from "../watch/SubtitleSettings.tsx";
 import { Choice, moveFocus } from "../watch/TrackMenus.tsx";
 import { PanelSection } from "./PanelSection.tsx";
 import { SubtitleTimingSection } from "./SubtitleTimingControls.tsx";

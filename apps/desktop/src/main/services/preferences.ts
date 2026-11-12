@@ -10,6 +10,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { UsageObservers } from "../analytics/observers.ts";
 import {
   DEFAULT_LIVE_QUALITY,
+  PlaybackAdjustments,
   DEFAULT_NEXT_EPISODE_DELAY,
   DEFAULT_SUBTITLE_LOOK,
 } from "@mrstreamer/contracts/preferences";
@@ -54,7 +55,7 @@ import { defined } from "@mrstreamer/core/defined";
  */
 const Stored = lazy(() =>
   Preferences()
-    .omit("nextEpisodeDelaySeconds", "multiviewLayouts")
+    .omit("nextEpisodeDelaySeconds", "multiviewLayouts", "playbackAdjustments")
     .merge(SubscriptionPreferences())
     .merge({
       "favouriteChannelIds?": "string[]",
@@ -70,6 +71,7 @@ const Stored = lazy(() =>
 type Stored = Infer<typeof Stored> & {
   /** Preserve malformed and future values until the viewer explicitly replaces this leaf. */
   nextEpisodeDelaySeconds?: Json;
+  playbackAdjustments?: Json;
   multiviewLayouts?: Json;
   rememberedLiveBrowse?: Json;
   /**
@@ -568,7 +570,8 @@ function general({
 
 /** Normalize replies only. File reconstruction must keep unsupported raw values intact. */
 function effective(file: Stored): Preferences {
-  const { nextEpisodeDelaySeconds, multiviewLayouts, ...preferences } = general(file);
+  const { nextEpisodeDelaySeconds, multiviewLayouts, playbackAdjustments, ...preferences } =
+    general(file);
 
   const layouts = Array.isArray(multiviewLayouts)
     ? multiviewLayouts.filter((layout) => MultiviewLayout().allows(layout))
@@ -576,6 +579,7 @@ function effective(file: Stored): Preferences {
 
   return {
     ...preferences,
+    ...(PlaybackAdjustments().allows(playbackAdjustments) && { playbackAdjustments }),
     ...(layouts.length > 0 && { multiviewLayouts: layouts }),
     nextEpisodeDelaySeconds:
       type("number | number.NaN").allows(nextEpisodeDelaySeconds) &&

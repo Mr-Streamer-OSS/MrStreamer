@@ -9,6 +9,8 @@ interface Size {
 
 /** Where the whole picture is drawn, in CSS pixels from the area's top left. */
 export interface PictureBox extends Size {
+  readonly clipX: number;
+  readonly clipY: number;
   readonly left: number;
   readonly top: number;
 }
@@ -46,5 +48,12 @@ export function pictureBox(
   const width = keptWidth / Math.min(1, kept / shown);
   const height = keptHeight / Math.min(1, shown / kept);
 
-  return { left: (area.width - width) / 2, top: (area.height - height) / 2, width, height };
+  return {
+    left: (area.width - width) / 2,
+    top: (area.height - height) / 2,
+    width,
+    height,
+    clipX: (width - keptWidth) / 2,
+    clipY: (height - keptHeight) / 2,
+  };
 }

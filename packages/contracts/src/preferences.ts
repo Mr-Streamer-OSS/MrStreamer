@@ -26,13 +26,13 @@ export const PICTURE_ZOOM = { min: 100, max: 300 } as const;
 
 /**
  * Picture and sound adjustments for local playback. Sound can only wait: a player can hold sound
- * back behind the picture, never play it before the picture has arrived.
+ * back behind the picture. Advancing audio would require a separate delayed video presentation path.
  */
 export const PlaybackAdjustments = lazy(() =>
   type({
     /** Milliseconds the sound plays after the picture, to fix sound that runs ahead. */
     soundDelayMs: `0 <= number.integer <= ${SOUND_DELAY_MAX_MS}`,
-    /** Quiet passages are raised and loud ones lowered, never past full scale. */
+    /** Quiet passages are raised and loud ones lowered; peak reduction is signal-dependent. */
     leveling: "boolean",
     /** The shape the whole picture is shown at: as the stream says, or a ratio of `PICTURE_RATIOS`. */
     aspect: type.enumerated("source", ...PICTURE_RATIOS),

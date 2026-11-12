@@ -42,7 +42,16 @@ function move(parent: Element, node: Element): void {
 }
 
 /** The styles an adjusted picture sets on the video, cleared when it leaves. */
-const PLACED = ["position", "left", "top", "width", "height", "max-width", "max-height"] as const;
+const PLACED = [
+  "position",
+  "left",
+  "top",
+  "width",
+  "height",
+  "max-width",
+  "max-height",
+  "clip-path",
+] as const;
 
 /**
  * Draws `video` in `container` at `adjustments`, again whenever either changes size. Returns the
@@ -55,6 +64,8 @@ function place(
   fit: "contain" | "cover",
 ): () => void {
   const layout = () => {
+    if (video.parentElement !== container) return;
+
     const box = pictureBox(
       { width: video.videoWidth, height: video.videoHeight },
       { width: container.clientWidth, height: container.clientHeight },
@@ -69,6 +80,7 @@ function place(
     }
 
     Object.assign(video.style, {
+      clipPath: `inset(${box.clipY}px ${box.clipX}px)`,
       position: "absolute",
       left: `${box.left}px`,
       top: `${box.top}px`,
@@ -90,8 +102,10 @@ function place(
     resized.disconnect();
     video.removeEventListener("resize", layout);
 
-    for (const property of PLACED) video.style.removeProperty(property);
-    video.style.objectFit = fit;
+    if (video.parentElement === container) {
+      for (const property of PLACED) video.style.removeProperty(property);
+      video.style.objectFit = fit;
+    }
   };
 }
 
@@ -124,6 +138,8 @@ export function Picture({
     const container = box.current;
 
     if (!active || !container) return;
+
+    for (const property of PLACED) video.style.removeProperty(property);
     video.style.objectFit = fit;
     move(container, video);
     const subtitleLayer = subtitleLayerFor(video);

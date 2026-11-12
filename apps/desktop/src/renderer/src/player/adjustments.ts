@@ -18,7 +18,8 @@ import {
 } from "@mrstreamer/contracts/preferences";
 import { t } from "@mrstreamer/core/i18n";
 import { appError, describeError } from "../lib/errors.ts";
-import { currentPreferences, readPreferences, updatePreferences } from "../lib/preferences.ts";
+import { readPreferences, updatePreferences } from "../lib/preferences.ts";
+import { profileOwner, currentProfile } from "../lib/ipc.ts";
 import { receiverName, receiverOf, useOutput } from "./output.ts";
 import { setSound } from "./sound.ts";
 
@@ -29,7 +30,11 @@ export interface AdjustmentsState {
    * The last choice that could not be saved and what went wrong, translated. Playback went back to
    * the saved adjustments. Null once another choice is made.
    */
-  readonly failed: { readonly adjustments: PlaybackAdjustments; readonly message: string } | null;
+  readonly failed: {
+    readonly kind: "save" | "sound";
+    readonly adjustments: PlaybackAdjustments;
+    readonly message: string;
+  } | null;
 }
 
 const store = createStore<AdjustmentsState>(() => ({
@@ -39,10 +44,12 @@ const store = createStore<AdjustmentsState>(() => ({
 
 /** The choice on its way to the file; only its own answer may settle it. */
 let pending: PlaybackAdjustments | null = null;
+let owner = profileOwner();
 
-function play(adjustments: PlaybackAdjustments): void {
+function play(adjustments: PlaybackAdjustments): Promise<void> {
   store.setState({ adjustments });
-  setSound(adjustments);
+
+  return setSound(adjustments);
 }
 
 function saved(preferences: Preferences | undefined): PlaybackAdjustments {
@@ -56,7 +63,25 @@ export function usePlaybackAdjustments<T>(selector: (state: AdjustmentsState) =>
 
 /** Composition applies saved adjustments, unless a newer choice awaits its answer. */
 export function hydratePlaybackAdjustments(preferences: Preferences): void {
-  if (!pending) play(saved(preferences));
+  if (!currentProfile(owner)) {
+    owner = profileOwner();
+    pending = null;
+    store.setState({ failed: null });
+  }
+
+  const captured = profileOwner();
+
+  if (!pending)
+    void play(saved(preferences)).catch((cause: unknown) => {
+      if (!currentProfile(captured) || pending) return;
+      store.setState({
+        failed: {
+          kind: "sound",
+          adjustments: saved(preferences),
+          message: describeError(appError(cause)),
+        },
+      });
+    });
 }
 
 /**
@@ -67,26 +92,55 @@ export async function adjustPlayback(
   change: Partial<PlaybackAdjustments>,
   client?: QueryClient,
 ): Promise<void> {
-  const next = { ...store.getState().adjustments, ...change };
+  const captured = profileOwner();
+  const previous = store.getState().adjustments;
+  const next = { ...previous, ...change };
+  owner = captured;
   pending = next;
   store.setState({ failed: null });
-  play(next);
+
+  let saving = false;
 
   try {
-    const preferences = await updatePreferences({ playbackAdjustments: next }, client);
+    await play(next);
+    saving = true;
+    const preferences = await updatePreferences({ playbackAdjustments: next }, client, captured);
 
-    if (pending !== next) return;
-    pending = null;
-    play(saved(preferences));
+    if (pending !== next || !currentProfile(captured)) return;
+    await play(saved(preferences));
+
+    if (pending === next && currentProfile(captured)) pending = null;
   } catch (cause) {
-    if (pending !== next) return;
+    if (pending !== next || !currentProfile(captured)) return;
     // A write can fail after it reached the file; take what is saved now, if it can be read.
-    await readPreferences(client).catch(() => {});
+    const readback = await readPreferences(client).catch(() => undefined);
 
-    if (pending !== next) return;
+    if (pending !== next || !currentProfile(captured)) return;
     pending = null;
-    store.setState({ failed: { adjustments: next, message: describeError(appError(cause)) } });
-    play(saved(currentPreferences(client)));
+    const restored = readback ? saved(readback) : previous;
+
+    const landed =
+      restored.soundDelayMs === next.soundDelayMs &&
+      restored.leveling === next.leveling &&
+      restored.aspect === next.aspect &&
+      restored.crop === next.crop &&
+      restored.zoom === next.zoom;
+
+    store.setState({
+      failed:
+        landed && saving
+          ? null
+          : {
+              kind: saving ? "save" : "sound",
+              adjustments: next,
+              message: describeError(appError(cause)),
+            },
+    });
+    await play(restored).catch((cause: unknown) => {
+      store.setState({
+        failed: { kind: "sound", adjustments: next, message: describeError(appError(cause)) },
+      });
+    });
   }
 }
 
@@ -99,7 +153,7 @@ export function resetPlayback(client?: QueryClient): Promise<void> {
 export async function retryPlayback(client?: QueryClient): Promise<void> {
   const { failed } = store.getState();
 
-  if (failed) await adjustPlayback(failed.adjustments, client);
+  if (failed && currentProfile(owner)) await adjustPlayback(failed.adjustments, client);
 }
 
 /**
@@ -111,3 +165,15 @@ export function useAdjustmentsRefusal(): string | null {
 
   return receiver && t("{receiver} plays the stream as sent", { receiver: receiverName(receiver) });
 }
+
+// Lifecycle resume failures have no pending preference command, but must remain visible/retryable.
+window.addEventListener("sounderror", (event) => {
+  if (!(event instanceof CustomEvent)) return;
+  store.setState({
+    failed: {
+      kind: "sound",
+      adjustments: store.getState().adjustments,
+      message: describeError(appError(event.detail)),
+    },
+  });
+});

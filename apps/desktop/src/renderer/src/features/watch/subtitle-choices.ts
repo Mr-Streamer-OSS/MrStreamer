@@ -1,5 +1,5 @@
 import type { SubtitleLook } from "@mrstreamer/contracts/preferences";
-import type { PlainKey } from "@mrstreamer/core/i18n";
+import type { Segment } from "./menu-rows.tsx";
 
 /** Each choice's word on its button, and its whole name for assistive technology. */
 export const SUBTITLE_SIZES = [
@@ -17,9 +17,3 @@ export const SUBTITLE_POSITIONS = [
   { value: "low", short: "Low", label: "Low" },
   { value: "high", short: "Higher", label: "Higher" },
 ] as const satisfies readonly Segment<SubtitleLook["position"]>[];
-
-export interface Segment<V extends string> {
-  readonly value: V;
-  readonly short: PlainKey;
-  readonly label: PlainKey;
-}

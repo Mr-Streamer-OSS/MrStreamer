@@ -2,7 +2,7 @@
 // this computer (player/adjustments.ts). A title opens them from its bar's button, which is on
 // while anything differs from the stream; Live TV from its More page. Up and Down go from row to
 // row, Left and Right pick within a row.
-//   Sound can only wait behind the picture, and leveling mixes to stereo; the panel says both. A
+//   Sound can only wait behind the picture, and leveling preserves the device's output channels. A
 // choice that can't be saved plays the saved one again and offers Retry. While a receiver plays,
 // the panel says it plays the stream as sent instead of offering choices.
 import { SlidersHorizontal } from "lucide-react";
@@ -22,8 +22,7 @@ import {
   useAdjustmentsRefusal,
   usePlaybackAdjustments,
 } from "../../player/adjustments.ts";
-import { Segments, Step, TextButton } from "./SubtitleSettings.tsx";
-import type { Segment } from "./subtitle-choices.ts";
+import { Segments, Step, TextButton, type Segment } from "./menu-rows.tsx";
 import { Menu, MenuNote } from "./TrackMenus.tsx";
 
 /** One press of − or +. */
@@ -97,6 +96,7 @@ export function PictureSoundRows() {
           value={t("{milliseconds} ms", { milliseconds: formatNumber(soundDelayMs) })}
         >
           <Step
+            item={false}
             label={t("Sound sooner")}
             disabled={soundDelayMs <= 0}
             onClick={() =>
@@ -106,6 +106,7 @@ export function PictureSoundRows() {
             −
           </Step>
           <Step
+            item={false}
             label={t("Sound later")}
             disabled={soundDelayMs >= SOUND_DELAY_MAX_MS}
             onClick={() =>
@@ -124,10 +125,7 @@ export function PictureSoundRows() {
           onPick={(value) => adjust({ leveling: value === "on" })}
         />
       </div>
-      <MenuNote>
-        {t("Sound can only play after the picture.")}
-        {leveling && ` ${t("Leveling plays in stereo.")}`}
-      </MenuNote>
+      <MenuNote>{t("Sound can only play after the picture.")}</MenuNote>
       <div role="separator" className="my-1 border-t border-white/12" />
       <div className="px-2">
         <Segments
@@ -144,6 +142,7 @@ export function PictureSoundRows() {
         />
         <Stepper label={t("Picture zoom")} value={formatPercent(zoom / 100)}>
           <Step
+            item={false}
             label={t("Zoom Out")}
             disabled={zoom <= PICTURE_ZOOM.min}
             onClick={() => adjust({ zoom: Math.max(PICTURE_ZOOM.min, zoom - ZOOM_STEP) })}
@@ -151,6 +150,7 @@ export function PictureSoundRows() {
             −
           </Step>
           <Step
+            item={false}
             label={t("Zoom In")}
             disabled={zoom >= PICTURE_ZOOM.max}
             onClick={() => adjust({ zoom: Math.min(PICTURE_ZOOM.max, zoom + ZOOM_STEP) })}
@@ -162,17 +162,21 @@ export function PictureSoundRows() {
       <div role="separator" className="my-1 border-t border-white/12" />
       <button
         data-item
-        disabled={!isAdjusted(adjustments)}
+        aria-disabled={!isAdjusted(adjustments)}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => void resetPlayback()}
-        className="flex w-full items-center rounded-lg px-2 py-1.5 text-left text-foreground/80 outline-none enabled:hover:bg-white/6 focus-visible:bg-white/10 disabled:opacity-40"
+        onClick={() => {
+          if (isAdjusted(adjustments)) void resetPlayback();
+        }}
+        className="flex w-full items-center rounded-lg px-2 py-1.5 text-left text-foreground/80 outline-none enabled:hover:bg-white/6 focus-visible:bg-white/10 aria-disabled:opacity-40"
       >
         {t("Reset")}
       </button>
       {failed && (
         <div role="alert" className="px-2 pt-1.5 pb-1 text-[0.8125rem] leading-snug">
           <div className="flex items-baseline gap-3">
-            <span className="flex-1 text-destructive">{t("Couldn't save. Nothing changed.")}</span>
+            <span className="flex-1 text-destructive">
+              {failed.kind === "sound" ? t("Sound") : t("Couldn't save. Nothing changed.")}
+            </span>
             <TextButton onClick={() => void retryPlayback()}>{t("Retry")}</TextButton>
           </div>
           <p className="text-destructive">{failed.message}</p>
@@ -196,7 +200,23 @@ function Stepper({
   children: readonly [ReactNode, ReactNode];
 }) {
   return (
-    <div role="group" aria-label={label} className="flex items-center gap-3 py-1">
+    <div
+      role="group"
+      aria-label={label}
+      className="flex items-center gap-3 py-1"
+      data-item
+      tabIndex={0}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget)
+          event.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>("button");
+        buttons[event.key === "ArrowLeft" ? 0 : 1]?.focus();
+      }}
+    >
       <span className="flex-1">{label}</span>
       <div className="flex items-center gap-1">
         {less}
