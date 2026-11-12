@@ -20,6 +20,8 @@ import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { queries, syncGuideUpdates } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { defined } from "@mrstreamer/core/defined";
+import { formatDate, t } from "@mrstreamer/core/i18n";
+import { guideScale } from "../../src/renderer/src/features/live/guide-grid.ts";
 
 // The tests' clock: 10:40:20 on a day without a clock change, well inside most of the test
 // guide's programmes (ten minutes into One's half hour, twenty-five into Two's hour) and twenty
@@ -302,6 +304,10 @@ async function gridPage(
 }
 
 const THREE = [channel("1", "One"), channel("2", "Two"), channel("3", "Three")];
+
+/** The button with this accessible name. */
+const labelled = (label: string) =>
+  document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 
 /** The list's rows that show the keyboard's selection ring, by channel name. */
 const ringed = () =>
@@ -703,6 +709,7 @@ describe("the guide grid", () => {
   it("comes back to its cursor and the hours in view from another page", async () => {
     const page = await gridPage(THREE);
     await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+
     for (let step = 0; step < 6; step++) await page.press("ArrowRight");
     await page.press("ArrowDown");
     const left = page.grid()!.scrollLeft;
@@ -729,7 +736,10 @@ describe("the guide grid", () => {
     await page.back();
 
     await ready(() => expect(ringed()).toEqual(["Three"]));
-    const searchField = () => document.querySelector<HTMLInputElement>('input[aria-label^="Search"]');
+
+    const searchField = () =>
+      document.querySelector<HTMLInputElement>('input[aria-label^="Search"]');
+
     const field = searchField()!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "Tw");
@@ -754,6 +764,58 @@ describe("the guide grid", () => {
     await page.enter();
 
     await ready(() => expect(page.selected()).toBe(now));
+  });
+
+  it("goes a day ahead and back at the same time of day with Day after and Day before", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+    const today = formatDate(new Date().setHours(0, 0, 0, 0), "weekdayDay");
+    const tomorrow = formatDate(new Date().setHours(24, 0, 0, 0), "weekdayDay");
+
+    const leftDate = () =>
+      page.grid()!.querySelector(".sticky.left-0")?.textContent?.split(t("Now"))[0] ?? "";
+
+    expect(leftDate()).toContain(today);
+    const left = page.grid()!.scrollLeft;
+
+    await act(async () => labelled("Day after")!.click());
+    expect(leftDate()).toContain(tomorrow);
+    expect(page.grid()!.scrollLeft).toBeGreaterThan(left);
+    await act(async () => labelled("Day before")!.click());
+    expect(leftDate()).toContain(today);
+    expect(page.grid()!.scrollLeft).toBe(left);
+
+    // The timeline goes back two hours here, no channel keeping an archive.
+    expect(labelled("Day before")!.disabled).toBe(true);
+  });
+
+  it("shows more or fewer hours across as the preferences keep it, and says when that can't be saved", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+    ipc.answer("preferences.update", (patch) =>
+      ipc.snapshot({ ...defaultPreferences, liveView: "grid", ...patch }),
+    );
+
+    // The grid's whole width: its channels' column and its hours.
+    const width = () =>
+      Number.parseFloat((page.grid()!.firstElementChild as HTMLElement).style.width);
+
+    const standard = width();
+
+    await act(async () => labelled("More hours")!.click());
+    await ready(() =>
+      expect(ipc.argsOf("preferences.update").at(-1)).toEqual({ guideDensity: "compact" }),
+    );
+    expect(width()).toBeLessThan(standard);
+    expect(labelled("More hours")!.disabled).toBe(true);
+
+    ipc.refuse("preferences.update", { kind: "unexpected", detail: "The disk is full." });
+    await act(async () => labelled("Fewer hours")!.click());
+    await ready(() =>
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain(t("Guide")),
+    );
+    // What shows is what was saved.
+    expect(labelled("More hours")!.disabled).toBe(true);
   });
 
   it("keeps the cursor on its channel when the list changes under it", async () => {
@@ -1004,5 +1066,22 @@ describe("reminders in the guide grid", () => {
     expect(button?.getAttribute("aria-busy")).toBeNull();
     await act(async () => held.reject({ kind: "unexpected", detail: "disk full" }));
     await ready(() => expect(page.details()).not.toContain("Couldn't save"));
+  });
+});
+
+describe("the guide's widths", () => {
+  it("gives the channels' column at most a third of a narrow grid, down to its least", () => {
+    // At a 16 px rem: 224 px in a wide grid, a third of 600, and 8.5 rem in a very narrow one.
+    expect(guideScale(1600, 16, "standard").columnPx).toBe(224);
+    expect(guideScale(600, 16, "standard").columnPx).toBe(200);
+    expect(guideScale(300, 16, "standard").columnPx).toBe(136);
+    // Larger text widens the least: 8.5 rem at 24 px.
+    expect(guideScale(300, 24, "standard").columnPx).toBe(204);
+  });
+
+  it("shows more hours across at a denser setting", () => {
+    expect(guideScale(1600, 16, "compact").hourPx).toBe(144);
+    expect(guideScale(1600, 16, "standard").hourPx).toBe(224);
+    expect(guideScale(1600, 16, "roomy").hourPx).toBe(320);
   });
 });

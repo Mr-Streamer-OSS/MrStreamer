@@ -35,7 +35,8 @@ import type { AppError } from "@mrstreamer/contracts/errors";
 import { copyShelf, type ShelfSeries } from "@mrstreamer/core/downloads/series";
 import { formatBytes, formatNumber, t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
-import { openView, useUi } from "../../app/ui-store.ts";
+import { browsingNow, openView, useUi } from "../../app/ui-store.ts";
+import { useKeptScroll } from "../../lib/use-kept-scroll.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -120,6 +121,15 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   });
 
   const storage = list.data?.storage;
+  // How far the page was scrolled when the viewer last left it, kept again as it goes. The picks
+  // stay behind: a bulk action is chosen anew for what the page shows.
+  const scroller = useRef<HTMLDivElement>(null);
+  const [kept] = useState(() => useUi.getState().browsing.downloads.top);
+  const keep = useMemo(() => browsingNow("downloads"), []);
+  useKeptScroll(scroller, {
+    from: { key: null, index: 0, top: kept },
+    keep: ({ top }) => keep(() => ({ top })),
+  });
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const chosen = items.filter((item) => selected.has(item.id));
@@ -219,7 +229,7 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   return (
     <div className="flex h-full flex-col">
       {standalone ? <OfflineBar /> : <WindowBar className="bg-black" />}
-      <div className="min-h-0 flex-1 overflow-y-auto px-10 pt-2 pb-10">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-10 pt-2 pb-10">
         <div className="mb-3 flex items-baseline gap-3">
           <h1
             ref={heading}

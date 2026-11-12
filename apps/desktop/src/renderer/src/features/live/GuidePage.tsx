@@ -51,7 +51,7 @@ import {
 import { EMPTY_LIVE_FILTERS } from "@mrstreamer/contracts/live-browse";
 import { automaticSearchCopy } from "@mrstreamer/core/catalogue/search";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { LiveView } from "@mrstreamer/contracts/preferences";
+import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
@@ -148,7 +148,8 @@ export function watchLive(channel: LiveChannel): void {
 
 export function GuidePage({ active }: { active: boolean }) {
   const list = useUi((state) => state.list);
-  const [liveView, setLiveView, viewError] = useLiveView();
+  const [liveView, setLiveView, viewError] = useSavedChoice("liveView", "list");
+  const [density, setDensity, densityError] = useSavedChoice("guideDensity", "standard");
   const grid = useRef<GridKeys>(null);
   const categories = useQuery(queries.categories());
   const categoryMap = useCategoryMap();
@@ -829,9 +830,9 @@ export function GuidePage({ active }: { active: boolean }) {
     // Until an order being saved is answered, the page takes no input: nothing leaves it.
     <div ref={page} className="flex h-full flex-col" inert={waiting ? true : undefined}>
       <WindowBar className="bg-black" />
-      {viewError && (
+      {(viewError ?? densityError) && (
         <p role="alert" className="px-9 py-2 text-sm text-destructive">
-          {t("Guide")}: {viewError}
+          {t("Guide")}: {viewError ?? densityError}
         </p>
       )}
       {notice ? (
@@ -1077,6 +1078,8 @@ export function GuidePage({ active }: { active: boolean }) {
                         if (canUseSearch()) watchLive(channel);
                       }}
                       onKeys={() => setFocus("channels")}
+                      density={density}
+                      onDensity={setDensity}
                       restore={{
                         from: place.guide?.surface === search.query ? place.guide : null,
                         keep: (spot) =>
@@ -1413,27 +1416,34 @@ function NowStrip({
 }
 
 /**
- * How Live TV shows its lists, the list or the grid, as the preferences keep it, and a way to
- * change it: at once on screen, then saved. The list until the preferences are read.
+ * A choice of how Live TV shows its lists that the preferences keep, such as the list or the grid
+ * (`liveView`) or how many hours the grid shows across (`guideDensity`), and a way to change it:
+ * at once on screen, then saved. `fallback` until the preferences are read or while none is
+ * saved. A failed save says why, until the next change, and shows the saved choice again.
  */
-function useLiveView(): [LiveView, (view: LiveView) => void, string | null] {
-  const client = useQueryClient();
-  const saved = useQuery(queries.preferences()).data?.liveView ?? "list";
-  const [pendingView, setPendingView] = useState<{ value: LiveView } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const latestView = useRef<object | null>(null);
+function useSavedChoice<Key extends "liveView" | "guideDensity">(
+  key: Key,
+  fallback: NonNullable<Preferences[Key]>,
+): [NonNullable<Preferences[Key]>, (value: NonNullable<Preferences[Key]>) => void, string | null] {
+  type Value = NonNullable<Preferences[Key]>;
 
-  const set = (liveView: LiveView) => {
-    const draft = { value: liveView };
-    latestView.current = draft;
+  const client = useQueryClient();
+  const saved: Value = useQuery(queries.preferences()).data?.[key] ?? fallback;
+  const [pending, setPending] = useState<{ value: Value } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const latest = useRef<object | null>(null);
+
+  const set = (value: Value) => {
+    const draft = { value };
+    latest.current = draft;
     setError(null);
-    setPendingView(draft);
-    void updatePreferences({ liveView }, client)
+    setPending(draft);
+    void updatePreferences({ [key]: value }, client)
       .catch((cause: unknown) => {
-        if (latestView.current === draft) setError(describeError(appError(cause)));
+        if (latest.current === draft) setError(describeError(appError(cause)));
       })
-      .finally(() => setPendingView((current) => (current === draft ? null : current)));
+      .finally(() => setPending((current) => (current === draft ? null : current)));
   };
 
-  return [pendingView?.value ?? saved, set, error];
+  return [pending?.value ?? saved, set, error];
 }

@@ -20,6 +20,7 @@ import {
   useUi,
 } from "../../src/renderer/src/app/ui-store.ts";
 import { openCollection, TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
+import { RecordingsPage } from "../../src/renderer/src/features/recordings/RecordingsPage.tsx";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 
 // happy-dom lays nothing out; the grid draws the rows that fit this height, in one column.
@@ -138,14 +139,25 @@ describe("Movies", () => {
   });
 
   it("comes back with its filter and the poster the keys were on", async () => {
-    ipc.always("ondemand.filterOptions", { qualities: ["4k"], languages: [], verified: [], files: 0 });
+    ipc.always("ondemand.filterOptions", {
+      qualities: ["4k"],
+      languages: [],
+      verified: [],
+      files: 0,
+    });
     const page = await movies();
-    const quality = page.container.querySelector<HTMLElement>('[role=group][aria-label="Quality"]')!;
+
+    const quality = page.container.querySelector<HTMLElement>(
+      '[role=group][aria-label="Quality"]',
+    )!;
+
     await act(async () => quality.querySelector("button")!.click());
     await until(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+
     const fourK = [...document.querySelectorAll<HTMLElement>("[role=menuitemradio]")].find(
       (each) => each.textContent === "4K",
     )!;
+
     await act(async () => fourK.click());
     await until(() =>
       expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({ quality: "4k" }),
@@ -169,7 +181,10 @@ describe("Movies", () => {
     const other = "9d2b7c41-6e0a-4f3b-8a15-c4e7f1d09b62";
     const page = await movies();
     await act(async () =>
-      setBrowsing("movie", (place) => ({ ...place, filters: { sourceIds: [SUBSCRIPTION, other] } })),
+      setBrowsing("movie", (place) => ({
+        ...place,
+        filters: { sourceIds: [SUBSCRIPTION, other] },
+      })),
     );
     await page.leave();
 
@@ -205,3 +220,62 @@ const press = (key: string) =>
 /** The poster that holds the grid's one Tab stop: the one the keys are on. */
 const selectedPoster = () =>
   document.querySelector('[role="listitem"] button[tabindex="0"]')?.getAttribute("aria-label");
+
+describe("Recordings", () => {
+  beforeEach(() => {
+    ipc.always("recordings.list", []);
+    ipc.always("recordings.schedules", []);
+    ipc.always("recordings.rules", []);
+  });
+
+  const recordings = () => shown(() => createElement(RecordingsPage));
+
+  const current = () =>
+    document.querySelector('[aria-label="Recordings"] [aria-current="page"]')?.textContent ?? null;
+
+  const field = () =>
+    document.querySelector<HTMLInputElement>('input[aria-label="Find a recording"]')!;
+
+  it("comes back to its shelf, and then to its search", async () => {
+    const page = await recordings();
+    await until(() => expect(current()).toContain("Overview"));
+
+    const rules = [...document.querySelectorAll("button")].find((each) =>
+      each.textContent?.startsWith("Rules"),
+    )!;
+
+    await act(async () => rules.click());
+    expect(current()).toContain("Rules");
+
+    await page.leave();
+    await page.back();
+    expect(current()).toContain("Rules");
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        field(),
+        "news",
+      );
+      field().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.leave();
+    await page.back();
+    expect(field().value).toBe("news");
+  });
+
+  it("starts on Overview for another profile", async () => {
+    const page = await recordings();
+
+    const rules = [...document.querySelectorAll("button")].find((each) =>
+      each.textContent?.startsWith("Rules"),
+    )!;
+
+    await act(async () => rules.click());
+    await page.leave();
+
+    await act(async () => resetForProfile());
+    await page.back();
+
+    expect(current()).toContain("Overview");
+  });
+});

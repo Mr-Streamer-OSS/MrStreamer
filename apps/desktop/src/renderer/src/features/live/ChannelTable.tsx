@@ -270,6 +270,7 @@ export function ChannelTable({
   // The list opens on the playing channel, unless it was kept.
   useEffect(() => {
     if (restore?.from) return;
+
     const index = channels.findIndex((channel, at) =>
       rowPlays(channel, searchRows?.[at], playingKey),
     );

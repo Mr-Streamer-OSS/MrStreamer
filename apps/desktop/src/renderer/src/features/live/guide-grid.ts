@@ -4,8 +4,11 @@
 // and a moment: the cell is whatever covers that moment, so Up and Down keep the time, and the
 // cell follows when the programmes come in.
 //   What a programme offers follows from when it is and the channel's catch-up: see `actionsOf`.
+// How wide its hours and channel column are follows from the window, the text size and the
+// viewer's density: see `guideScale`.
 import type { GuideSlot } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { GuideDensity } from "@mrstreamer/contracts/preferences";
 import { archiveHolds, DAY_MS } from "@mrstreamer/core/catchup";
 
 export const MINUTE_MS = 60_000;
@@ -28,6 +31,32 @@ export const PAGE_ROWS = 25;
 
 /** Hours one read covers, aligned to the epoch, within `GUIDE_RANGE`. */
 export const PAGE_MS = 6 * HOUR_MS;
+
+/** The densities from the most hours across to the fewest, for stepping between them. */
+export const GUIDE_DENSITIES: readonly GuideDensity[] = ["compact", "standard", "roomy"];
+
+/** An hour's width in rem at each density: standard is 196 px at the 14 px rem it was drawn at. */
+const HOUR_REMS: Readonly<Record<GuideDensity, number>> = { compact: 9, standard: 14, roomy: 20 };
+
+/** The channels' column, at most, and at least: a number, a logo and the start of a name. */
+const COLUMN_REM = 14;
+const COLUMN_LEAST_REM = 8.5;
+
+/**
+ * The guide's widths, in px, for a grid `width` px wide with text at `rem` px: an hour as the
+ * density says, and the channels' column, which gives up room in a narrow window or with large
+ * text so that it takes no more than a third of the grid, down to its least.
+ */
+export function guideScale(
+  width: number,
+  rem: number,
+  density: GuideDensity,
+): { readonly hourPx: number; readonly columnPx: number } {
+  return {
+    hourPx: HOUR_REMS[density] * rem,
+    columnPx: Math.max(COLUMN_LEAST_REM * rem, Math.min(COLUMN_REM * rem, width / 3)),
+  };
+}
 
 /** A stretch of time, [start, stop) in epoch milliseconds. */
 export interface Span {

@@ -28,7 +28,16 @@
 // is in, nothing. The details read the programme's description with `guide.programme`.
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import { Bell, History, Play, RotateCcw } from "lucide-react";
+import {
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  History,
+  Play,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import {
   memo,
   useCallback,
@@ -40,6 +49,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type ReactNode,
   type Ref,
 } from "react";
 import type { GuideSlot, Programme } from "@mrstreamer/contracts/guide";
@@ -57,7 +67,8 @@ import { comingTime, endOfDay, pastTime, progressOf, timeLeft } from "../../lib/
 import { queries } from "../../lib/queries.ts";
 import { reminderAt, useReminders } from "../../lib/reminders.ts";
 import { useOutput } from "../../player/output.ts";
-import { archiveHolds } from "@mrstreamer/core/catchup";
+import { archiveHolds, DAY_MS } from "@mrstreamer/core/catchup";
+import type { GuideDensity } from "@mrstreamer/contracts/preferences";
 import { useKeptScroll, type Kept } from "../../lib/use-kept-scroll.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
@@ -83,18 +94,14 @@ import {
   nextCell,
   PAGE_MS,
   PAGE_ROWS,
+  GUIDE_DENSITIES,
+  guideScale,
   pagesFor,
   timeline,
   type Cell,
   type GridAction,
   type Span,
 } from "./guide-grid.ts";
-
-/** An hour's width: 196 px at the 14 px rem the design was drawn at. */
-const HOUR_REM = 14;
-
-/** The channels' column. */
-const COLUMN_REM = 14;
 
 /** A channel's row, 48 px at 14 px. */
 const ROW_REM = 48 / 14;
@@ -153,6 +160,8 @@ export function GuideGrid({
   onPlayArchive,
   onKeys,
   restore,
+  density,
+  onDensity,
   ref,
 }: {
   channels: readonly LiveChannel[];
@@ -167,6 +176,9 @@ export function GuideGrid({
   /** The grid took the keys from the lists: the focus went into it, or a programme was picked. */
   onKeys: () => void;
   restore?: Kept<GuideSpot>;
+  /** How many hours show across, and a way to change it, as the preferences keep it. */
+  density: GuideDensity;
+  onDensity: (density: GuideDensity) => void;
   ref?: Ref<GridKeys>;
 }) {
   const rem = useRem();
@@ -207,8 +219,6 @@ export function GuideGrid({
   const visible = usePresentationVisible();
   const minute = Math.floor(now / MINUTE_MS) * MINUTE_MS;
   const scroller = useRef<HTMLDivElement>(null);
-  const msPx = (HOUR_REM * rem) / HOUR_MS;
-  const columnPx = COLUMN_REM * rem;
   const headPx = HEAD_REM * rem;
   // Whole pixels, its line included: a row measures as estimated, so one scrolling in moves no
   // other, and the thousands of rows aren't laid out again.
@@ -226,6 +236,8 @@ export function GuideGrid({
 
     return () => observer.disconnect();
   }, []);
+  const { hourPx, columnPx } = guideScale(width, rem, density);
+  const msPx = hourPx / HOUR_MS;
 
   // The cursor starts on the playing channel at now, and keeps to its channel when the list
   // changes under it.
@@ -235,6 +247,7 @@ export function GuideGrid({
 
       return { index, channel, at, asked: 0 };
     }
+
     const index = Math.max(
       channels.findIndex((channel) => ownedKey(channel) === playingKey),
       0,
@@ -697,6 +710,11 @@ export function GuideGrid({
             msPx={msPx}
             columnPx={columnPx}
             onNow={() => scrollTo(nowAt())}
+            onDay={(days) => scrollTo((leftAt.current ?? minute) + days * DAY_MS)}
+            earlier={drawn.start > origin}
+            later={drawn.stop < end}
+            density={density}
+            onDensity={onDensity}
           />
           {/* Under the rows: programmes show it through, the channels and details cover it. */}
           {minute >= origin && minute < end && (
@@ -780,7 +798,11 @@ function shiftAt(grid: HTMLElement, scrolled: number, room: number) {
   }
 }
 
-/** The day at the left edge, Now, and the half hours along the top, with the time at the line. */
+/**
+ * The day at the left edge, a day earlier, Now and a day later, more or fewer hours across, and
+ * the half hours along the top, with the time at the line. A day earlier or later is the same
+ * time on that day; each goes where the timeline does not reach.
+ */
 function Head({
   origin,
   drawn,
@@ -789,6 +811,11 @@ function Head({
   msPx,
   columnPx,
   onNow,
+  onDay,
+  earlier,
+  later,
+  density,
+  onDensity,
 }: {
   origin: number;
   drawn: Span;
@@ -797,7 +824,15 @@ function Head({
   msPx: number;
   columnPx: number;
   onNow: () => void;
+  onDay: (days: -1 | 1) => void;
+  earlier: boolean;
+  later: boolean;
+  density: GuideDensity;
+  onDensity: (density: GuideDensity) => void;
 }) {
+  const step = GUIDE_DENSITIES.indexOf(density);
+  const denser = GUIDE_DENSITIES[step - 1];
+  const roomier = GUIDE_DENSITIES[step + 1];
   const ticks: number[] = [];
 
   for (
@@ -818,13 +853,27 @@ function Head({
         style={{ width: columnPx }}
       >
         {day > 0 && formatDate(day, "weekdayDay")}
-        <button
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={onNow}
-          className="flex h-[1.375rem] items-center rounded-full bg-white/10 px-2.5 text-white hover:bg-white/16"
+        <HeadButton label={t("Day before")} disabled={!earlier} onClick={() => onDay(-1)}>
+          <ChevronLeft />
+        </HeadButton>
+        <HeadButton onClick={onNow}>{t("Now")}</HeadButton>
+        <HeadButton label={t("Day after")} disabled={!later} onClick={() => onDay(1)}>
+          <ChevronRight />
+        </HeadButton>
+        <HeadButton
+          label={t("More hours")}
+          disabled={!denser}
+          onClick={() => denser && onDensity(denser)}
         >
-          {t("Now")}
-        </button>
+          <ZoomOut />
+        </HeadButton>
+        <HeadButton
+          label={t("Fewer hours")}
+          disabled={!roomier}
+          onClick={() => roomier && onDensity(roomier)}
+        >
+          <ZoomIn />
+        </HeadButton>
       </div>
       <div className="relative flex-1 overflow-clip">
         {ticks.map((at) => (
@@ -851,6 +900,32 @@ function Head({
         )}
       </div>
     </div>
+  );
+}
+
+/** A control along the top that leaves the focus where it was when clicked. */
+function HeadButton({
+  label,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      className="flex h-[1.375rem] flex-none items-center rounded-full bg-white/10 px-2.5 text-white hover:bg-white/16 disabled:opacity-40 [&_svg]:size-3.5"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1068,6 +1143,7 @@ const GridRow = memo(function GridRow({
           cell={cursor}
           minute={minute}
           width={details}
+          indent={columnPx}
           actions={actions ?? ["live"]}
           remind={remind}
           onAction={(action) => onAction(channel, cursor, action)}
@@ -1087,6 +1163,7 @@ function Details({
   cell,
   minute,
   width,
+  indent,
   actions,
   remind,
   onAction,
@@ -1096,6 +1173,8 @@ function Details({
   minute: number;
   /** The grid's width in view: the details stay in place while it scrolls across. */
   width: number;
+  /** The channels' column, which the details start beside. */
+  indent: number;
   actions: readonly GridAction[];
   /** It is still to come: Remind me follows what it plays. */
   remind: boolean;
@@ -1127,7 +1206,7 @@ function Details({
       role="region"
       aria-label={slot?.title ?? channel.title}
       className="sticky left-0 z-10 rounded-b-xl bg-[#141414] pt-3.5 pr-4 pb-4"
-      style={{ width, paddingLeft: `${COLUMN_REM + 2.5}rem` }}
+      style={{ width, paddingLeft: `calc(${indent}px + 2.5rem)` }}
     >
       <div className="truncate text-lg font-semibold tracking-tight">
         {slot?.title ?? t("No programme information")}

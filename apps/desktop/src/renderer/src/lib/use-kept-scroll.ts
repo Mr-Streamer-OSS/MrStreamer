@@ -38,6 +38,7 @@ export function useKeptScroll(
     function finish() {
       resized.disconnect();
       changed.disconnect();
+
       for (const type of TAKEN) element!.removeEventListener(type, finish);
     }
 
@@ -60,9 +61,11 @@ export function useKeptScroll(
     const element = ref.current;
 
     if (!element) return;
+
     const onScroll = () => {
       top.current = element.scrollTop;
     };
+
     element.addEventListener("scroll", onScroll, { passive: true });
 
     return () => {

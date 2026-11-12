@@ -364,6 +364,7 @@ export function Grid<T>({
     key: kept?.from?.key ?? null,
     index: kept?.from?.index ?? 0,
   }));
+
   const found = locate(chosen, total, itemAt, keyOf);
   // A title the loaded pages lack keeps its key while a page is still being read: a refresh
   // answers them one at a time, and the title can be in none of them for a moment. Meanwhile it

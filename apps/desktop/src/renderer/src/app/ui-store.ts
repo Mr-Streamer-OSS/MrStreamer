@@ -85,8 +85,7 @@ export type UpdateReminder =
  * Where a list or grid stood as its page went: the item the keys were on, by a key that stays
  * the same while the list changes and the position it was at, and how far it was scrolled. A
  * page given one back finds the item by its key again, else keeps the position: what the lists
- * no longer show, as a title hidden since or a channel of a removed subscription, never comes
- * back by its key.
+ * no longer show, as a title hidden since, never comes back by its key.
  */
 export interface Spot {
   readonly key: string | null;
@@ -95,7 +94,7 @@ export interface Spot {
 }
 
 /** A `Spot` and what it was of, such as a collection by its sort and filters. */
-export interface SurfaceSpot extends Spot {
+interface SurfaceSpot extends Spot {
   readonly surface: string;
 }
 
@@ -119,13 +118,19 @@ export interface TitlesPlace {
   readonly spots: { readonly tab: SurfaceSpot | null; readonly collection: SurfaceSpot | null };
 }
 
-/** A channel the keys were on, and the row it was at. */
+/**
+ * A channel the keys were on, and the row it was at. Given back, the channel is found again, else
+ * the row: a channel the list no longer shows never comes back.
+ */
 export interface ChannelSpot {
   readonly channel: OwnedId | null;
   readonly index: number;
 }
 
-/** Where the guide stood: its cursor's channel and moment, the moment at its left edge and how far down it was. */
+/**
+ * Where the guide stood: its cursor's channel and moment (`at`), the moment at its left edge and
+ * how far down it was scrolled.
+ */
 export interface GuideSpot extends ChannelSpot {
   readonly at: number;
   readonly left: number;
@@ -136,7 +141,7 @@ export interface GuideSpot extends ChannelSpot {
  * Where Live TV stood in the list on show, `UiState.list`; another list starts over. The rows'
  * and the guide's places are for the search they showed (`surface`).
  */
-export interface LivePlace {
+interface LivePlace {
   readonly search: string;
   readonly selected: ChannelSpot | null;
   readonly rows: SurfaceSpot | null;
