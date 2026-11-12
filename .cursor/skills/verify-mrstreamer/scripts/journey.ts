@@ -64,17 +64,17 @@ export type JourneyKit = {
  */
 export type Journey = (d: Driver, kit: JourneyKit) => Promise<void>;
 
-/** Runs the journey module at `path` on the owned session. */
-export async function runJourney(
-  path: string,
-  d: Driver,
-  fixtures: Pick<JourneyKit, "provider" | "tmdb">,
-) {
+/** Loads and validates a journey before the runner builds or launches the app. */
+export async function loadJourney(path: string) {
   const loaded: { default?: unknown } = await import(pathToFileURL(path).href);
 
   if (!isCallable(loaded.default))
     throw new Error(`Journey ${path} has no default export function.`);
+  // Runtime validation checks callability; the module author supplies the Journey contract.
   const journey = loaded.default as Journey;
-  d.observed["journey"] = path;
-  await journey(d, { ...fixtures, named, poster, dialog, focused });
+
+  return async (d: Driver, fixtures: Pick<JourneyKit, "provider" | "tmdb">) => {
+    d.observed["journey"] = path;
+    await journey(d, { ...fixtures, named, poster, dialog, focused });
+  };
 }

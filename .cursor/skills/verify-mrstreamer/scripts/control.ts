@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node
 import { guideSearchScenario, searchGuide } from "./guide-search.ts";
 import type { Driver, Observations } from "./language.ts";
-import { focused, runJourney } from "./journey.ts";
+import { focused, loadJourney } from "./journey.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // Drives the built Electron app through its window. Fixtures replace only provider and TMDB APIs.
@@ -258,7 +258,7 @@ Each scenario owns a fresh app/profile/ports and retains proof in .local/verific
 } else if (command === "custom-lists-round-trip" && selected !== undefined) {
   await run(command, { prior: selected });
 } else if (command === "journey" && selected !== undefined) {
-  await run(command, { journey: resolve(selected) });
+  await run(command, { journey: await loadJourney(resolve(selected)) });
 } else if (
   scenarios.some((scenario) => scenario === command) &&
   command !== "custom-lists-round-trip" &&
@@ -321,7 +321,7 @@ async function until(check: () => Promise<boolean>, signal: AbortSignal, timeout
  */
 async function run(
   scenario: Scenario,
-  { prior, journey }: { prior?: string; journey?: string } = {},
+  { prior, journey }: { prior?: string; journey?: Awaited<ReturnType<typeof loadJourney>> } = {},
 ) {
   const build = await preflight();
 
@@ -698,6 +698,7 @@ async function run(
         if (target.matches(':disabled, [aria-disabled=true]')) return 'it is disabled';
         for (let parent = target; parent; parent = parent.parentElement)
           if (parent.getAnimations().some(a => a.playState === 'running' || a.pending)) return 'it is animating';
+        target.scrollIntoView({ block: "nearest", inline: "nearest" });
         const before = target.getBoundingClientRect();
         const inViewport = box => {
           const x = box.x + box.width / 2, y = box.y + box.height / 2;
@@ -721,7 +722,7 @@ async function run(
           return 'it is moving';
         const hit = document.elementFromPoint(after.x + after.width / 2, after.y + after.height / 2);
         if (hit && target.contains(hit)) return '';
-        const cover = hit?.closest('[role=dialog], [aria-label], [data-view]') ?? hit;
+        const cover = hit;
         return 'it is covered by ' + (cover ? cover.tagName.toLowerCase() +
           (cover.getAttribute('role') ? '[role=' + cover.getAttribute('role') + ']' : '') +
           (cover.getAttribute('aria-label') ? ' "' + cover.getAttribute('aria-label') + '"' : '') : 'nothing');
@@ -729,6 +730,7 @@ async function run(
 
       try {
         await wait(async () => {
+          blocked = "";
           blocked = await probe();
 
           return blocked === "";
@@ -1565,7 +1567,7 @@ async function run(
       };
 
       if (!journey) throw new Error("No journey module was given.");
-      await runJourney(journey, driver, { provider, tmdb });
+      await journey(driver, { provider, tmdb });
     } else {
       if (scenario === "watchlist") {
         await wait(async () => !(await exists(button("header button", "Watchlist"))));
