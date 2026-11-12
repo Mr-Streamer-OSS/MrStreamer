@@ -332,18 +332,22 @@ it("ignores a lifecycle completion after the profile switches, before hydration"
   selectProfileOwner(null);
 });
 
-it("keeps a failed save retryable after sound resumes successfully", async () => {
-  await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
-  const { resume, element } = soundDevice();
-  await act(async () => {});
-  const write = ipc.hold("preferences.update");
-  await press(named("Zoom In"));
-  await act(async () => write.reject({ kind: "unexpected", detail: "disk full" }));
-  resume.mockRejectedValueOnce(new Error("device asleep"));
-  await act(async () => element.dispatchEvent(new Event("playing")));
-  await act(async () => element.dispatchEvent(new Event("playing")));
-  expect(dialog().querySelector('[role="alert"]')?.textContent).toContain("disk full");
-  await press(button("Retry"));
-  expect(saves().at(-1)?.zoom).toBe(125);
-  expect(dialog().querySelector('[role="alert"]')).toBeNull();
-});
+it.each(["rollback", "playback"])(
+  "keeps a failed save retryable after %s sound recovers",
+  async (failure) => {
+    await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+    const { resume, element } = soundDevice();
+    await act(async () => {});
+    const write = ipc.hold("preferences.update");
+    await press(named("Zoom In"));
+    if (failure === "rollback") resume.mockRejectedValueOnce(new Error("device asleep"));
+    await act(async () => write.reject({ kind: "unexpected", detail: "disk full" }));
+    if (failure === "playback") resume.mockRejectedValueOnce(new Error("device asleep"));
+    await act(async () => element.dispatchEvent(new Event("playing")));
+    await act(async () => element.dispatchEvent(new Event("playing")));
+    expect(dialog().querySelector('[role="alert"]')?.textContent).toContain("disk full");
+    await press(button("Retry"));
+    expect(saves().at(-1)?.zoom).toBe(125);
+    expect(dialog().querySelector('[role="alert"]')).toBeNull();
+  },
+);

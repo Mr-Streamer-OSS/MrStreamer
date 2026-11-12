@@ -68,8 +68,8 @@ _Desktop 0.0.24 development. Sound delay, leveling and the picture's shape, on t
 
 **Picture and sound** sets how everything playing on this computer sounds and fits the window: channels, movies, episodes, recordings and downloads alike. Movies and episodes have its button in the player's bar, which stays highlighted while anything differs from the stream; for Live TV, open **More > Picture and sound**, which says **Adjusted** then. A change plays at once and is kept for your viewing profile on this computer. Previews and multiview panes keep their own picture fit.
 
-- **Sound delay** holds the sound back behind the picture, in 50 ms steps up to 2 seconds, for sound that runs ahead of lips. Sound earlier is not available: it would require a separate buffered video presentation clock, which the current shared media-element path does not provide. The dispatcher scoped #859 to delay only; [Let viewers play sound earlier than the picture](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=302242842) is a separate 0.0.24 Planned follow-up, blocked by #859.
-- **Leveling** raises quiet passages and lowers loud ones, processing each device output channel separately. An earlier synthetic Linux measurement added about 12 ms and kept peaks below full scale on a quiet/full-scale/burst signal; this is not a guarantee for every signal or an acoustic measurement. The revised channel-preserving chain still needs built-window qualification.
+- **Sound delay** holds the sound back behind the picture, in 50 ms steps up to 2 seconds, for sound that runs ahead of lips. It can't make sound play earlier than the picture.
+- **Leveling** raises quiet passages and lowers loud ones while keeping your device's output channels. It can add a small sound delay.
 - **Aspect** shows the whole picture at 16:9, 4:3 or 21:9 instead of the shape the stream gives, **Auto**.
 - **Crop** cuts the picture to 16:9, 4:3 or 21:9 around its centre, as for black bars inside the picture.
 - **Zoom** enlarges the picture in 25 % steps up to 300 %; what leaves the window is cut.
@@ -146,7 +146,7 @@ _What doesn't work yet, or works differently._
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
 - Sound delay only holds sound back; it can't play sound before the picture.
-- After the first sound delay or leveling, sound takes Mr. Streamer's own route until you restart it, also once you reset them; that route retains its AudioContext output latency. Chromium-reported base/output latency and timestamps are collected by the qualification journey, but do not measure acoustic A/V offset. Leveling adds its own lookahead delay while enabled.
+- After the first sound delay or leveling, sound takes Mr. Streamer's own route until you restart it, also once you reset them. That route can add a small delay; leveling adds a little more while enabled.
 - On a TV, a movie or episode plays at normal speed with the stream's own picture and sound, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
 - If your TV doesn't show up or doesn't play, please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its make and model.
 
