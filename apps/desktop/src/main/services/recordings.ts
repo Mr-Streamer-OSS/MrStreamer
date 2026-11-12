@@ -22,14 +22,15 @@
 // mark from when it was first chosen: nothing records into one without it, as a mount point's own
 // empty folder while its drive is away, and a recording there waits until its own is back. A record is
 // written once its connection is held, before its folder is made, and listed once capture has the
-// stream's program table on disk; it is written again with how it ended, only after its provider
+// stream's program table on disk, except failed-start cleanup rows; its end is written after its provider
 // request ended and its file closed: the list never claims more than the file holds. A record still
 // recording as the app starts is one the app didn't see end, as after a crash: it goes on, from a
 // gap since its file was last written, or, its time over, counts as cut short by the quit. A
 // recording's folder left without its record, as a crash leaves one as its start fails, or a
 // failed start whose folder couldn't be removed, or an older version's crash as it started, goes
-// then. A failed start whose record recordings.json couldn't take out marks its folder instead, so
-// a relaunch, also after a Quit, drops that record rather than going on with it.
+// then. A failed start whose record recordings.json couldn't take out tries to mark its folder.
+// Once that mark is saved, a relaunch keeps it listed until cleanup saves, without capturing. If
+// both writes fail before exit, a relaunch still treats its saved record as a crash resume.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
@@ -488,6 +489,8 @@ function make(deps: RecordingsDeps) {
      * until they capture; a start that doesn't takes its own out again.
      */
     const beginning = new Map<string, StoredRecording>();
+    /** Starts included in a committed inventory, even if their capture hasn't opened yet. */
+    const savedStarts = new Set<string>();
     const active = new Map<string, Active>();
 
     /**
@@ -537,10 +540,11 @@ function make(deps: RecordingsDeps) {
     };
 
     /**
-     * Folders of failed starts recordings.json still lists, by id (see FAILED): they go once it is
-     * written without them, as the next check does.
+     * Failed starts recordings.json still lists, by id (see FAILED): kept apart from working
+     * records so they neither resume nor settle schedules. The list includes them; each write leaves
+     * them out, and once one is kept their records and folders go, as the next check does.
      */
-    const failedFolders = new Map<string, string>();
+    const failedFolders = new Map<string, StoredRecording>();
 
     /** The id `folder` is marked with (see CHOSEN), null when none; "" for the profile's own. */
     const markOf = async (folder: string) =>
@@ -580,7 +584,8 @@ function make(deps: RecordingsDeps) {
     const unseen = new Map<string, StoredRecording>();
 
     /**
-     * Reads `record`, which the app didn't see end, as of `now`: a failed start goes (see FAILED);
+     * Reads `record`, which the app didn't see end, as of `now`: a failed start stays listed as
+     * ended until a write takes it out (see failedFolders);
      * its time over, it was cut short by the quit, with what its file holds; else it goes on,
      * missing the time since its file was last written, or since it paused. While its chosen folder
      * isn't there, nor are its marks and file: it is read again once that folder is (see unseen).
@@ -607,8 +612,7 @@ function make(deps: RecordingsDeps) {
 
         if (failed) {
           records.delete(record.id);
-          recordingFiles.delete(record.id);
-          failedFolders.set(record.id, folderOf(record));
+          failedFolders.set(record.id, current ?? record);
 
           return;
         }
@@ -695,13 +699,12 @@ function make(deps: RecordingsDeps) {
     );
 
     /**
-     * Drops a failed start's record (see FAILED) whose mark couldn't be read as the app started,
-     * for the next write to take out, with its folder.
+     * Gives a failed start's record (see FAILED) whose mark couldn't be read as the app started to
+     * the next write to take out, with its folder (see failedFolders).
      */
     const forgetStart = (record: StoredRecording) => {
       records.delete(record.id);
-      recordingFiles.delete(record.id);
-      failedFolders.set(record.id, folderOf(record));
+      failedFolders.set(record.id, record);
       unsaved.recordings = true;
     };
 
@@ -719,19 +722,22 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Writes recordings.json with every record but `without`, the one deleteRecord takes out while
-     * it stays listed until this write is kept. Run it holding `writing`.
+     * it stays listed until this write is kept, and the failed starts in failedFolders, which go
+     * once it is. Run it holding `writing`.
      */
     const writeInventory = (without?: string) =>
       Effect.tryPromise({
         try: async () => {
           // One not read yet (see unseen) is kept as it was, its gap not guessed.
+          const starts = [...beginning.values()];
+
           const kept = [
             ...[...records.values()].flatMap((record) =>
               record.id === without
                 ? []
                 : [isLive(record) ? (unseen.get(record.id) ?? record) : record],
             ),
-            ...beginning.values(),
+            ...starts,
           ];
 
           await writeRecordings(
@@ -740,13 +746,16 @@ function make(deps: RecordingsDeps) {
               protection.has(record.id) ? { ...record, protected: true as const } : record,
             ),
           );
-          // Failed starts it no longer lists lose their marked folders.
+
+          for (const { id } of starts) if (beginning.has(id)) savedStarts.add(id);
+          // Failed starts it no longer lists lose their records and marked folders.
           const listed = new Set(kept.map(({ id }) => id));
 
-          for (const [id, folder] of failedFolders) {
+          for (const [id, record] of failedFolders) {
             if (listed.has(id)) continue;
             failedFolders.delete(id);
-            void rm(folder, { recursive: true, force: true }).catch(() => {});
+            recordingFiles.delete(id);
+            void rm(folderOf(record), { recursive: true, force: true }).catch(() => {});
           }
         },
         catch: () =>
@@ -785,71 +794,96 @@ function make(deps: RecordingsDeps) {
     /**
      * Takes a failed start's record out of recordings.json and removes its folder. While it can't
      * be taken out, its folder is marked instead (see FAILED), for the next check, which it wakes,
-     * to remove; one that can't be marked is removed all the same.
+     * to remove. An unmarked folder is removed all the same; a committed record stays until saved.
      */
     const dropStart = (record: StoredRecording) =>
-      Effect.suspend(() => {
-        const folder = folderOf(record);
-        beginning.delete(record.id);
-        // Before the check it wakes can write, so that write removes the folder too.
-        failedFolders.set(record.id, folder);
+      writing(
+        Effect.suspend(() => {
+          beginning.delete(record.id);
 
-        return save.pipe(
-          Effect.as(true),
-          Effect.catch(() =>
-            Effect.andThen(
-              Effect.sync(() => (unsaved.recordings = true)),
-              Effect.as(wake, false),
+          // A queued write may have kept this beginning before its own save failed. Decide under
+          // the write permit, so only starts inventory may hold become visible cleanup records.
+          if (savedStarts.delete(record.id)) failedFolders.set(record.id, record);
+
+          return saveInventory.pipe(
+            Effect.as(true),
+            Effect.catch(() =>
+              Effect.andThen(
+                Effect.sync(() => (unsaved.recordings = true)),
+                Effect.as(wake, false),
+              ),
             ),
-          ),
-          Effect.flatMap((out) =>
-            Effect.promise(async () => {
-              // Never made anew where its parent went, or in another folder in its place, as on a
-              // drive away.
-              const marked =
-                !out &&
-                (await isThere(placeOf(record), record.mark)) &&
-                (await mkdir(folder)
-                  .catch((cause: NodeJS.ErrnoException) => {
-                    if (cause.code !== "EEXIST") throw cause;
-                  })
-                  .then(() => (record.folder ? writeFile(join(folder, OURS), root) : undefined))
-                  .then(() => writeFile(join(folder, FAILED), ""))
-                  .then(
-                    () => true,
-                    () => false,
-                  ));
+          );
+        }),
+      ).pipe(
+        Effect.flatMap((out) =>
+          Effect.promise(async () => {
+            const folder = folderOf(record);
 
-              // Still listed as far as this knows: else a save took it out as it was marked.
-              if (marked && failedFolders.has(record.id)) return;
-              failedFolders.delete(record.id);
-              await rm(folder, { recursive: true, force: true }).catch(() => {});
-            }),
-          ),
-        );
-      });
+            // Never made anew where its parent went, or in another folder in its place, as on a
+            // drive away.
+            const marked =
+              !out &&
+              (await isThere(placeOf(record), record.mark)) &&
+              (await mkdir(folder)
+                .catch((cause: NodeJS.ErrnoException) => {
+                  if (cause.code !== "EEXIST") throw cause;
+                })
+                .then(() => (record.folder ? writeFile(join(folder, OURS), root) : undefined))
+                .then(() => writeFile(join(folder, FAILED), ""))
+                .then(
+                  () => true,
+                  () => false,
+                ));
+
+            // Still listed as far as this knows: else a save took it out as it was marked.
+            if (marked && failedFolders.has(record.id)) return;
+            // A refused marker does not remove a record the inventory still holds.
+            await rm(folder, { recursive: true, force: true }).catch(() => {});
+          }),
+        ),
+        Effect.ensuring(Effect.suspend(() => publish)),
+      );
 
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
+    /** Latest file check or deletion, even when it confirms the existing missing state. */
+    const observations = new Map<string, symbol>();
+
+    /**
+     * Looks for `record`'s file and records what it found in `missing`, unless a newer check or
+     * deletion did since, even one that left missing as it was. Says whether missing changed.
+     */
+    const observe = async (record: StoredRecording) => {
+      const observation = Symbol();
+      observations.set(record.id, observation);
+
+      const there = await stat(fileOf(record)).then(
+        () => true,
+        () => false,
+      );
+
+      if (observations.get(record.id) !== observation) return { there, changed: false };
+
+      // Listed as missing while there, or the other way round.
+      const changed = there === missing.has(record.id);
+
+      if (there) missing.delete(record.id);
+      else missing.add(record.id);
+
+      return { there, changed };
+    };
 
     const look = Effect.promise(() =>
       Promise.all(
-        [...records.values()].map(async (record) => {
-          if (isLive(record) || record.status.kind === "missed") return;
-
-          const there = await stat(fileOf(record)).then(
-            () => true,
-            () => false,
-          );
-
-          if (there) missing.delete(record.id);
-          else missing.add(record.id);
-        }),
+        [...records.values()].flatMap((record) =>
+          isLive(record) || record.status.kind === "missed" ? [] : [observe(record)],
+        ),
       ),
     );
 
     const shown = Effect.sync(() =>
-      [...records.values()]
+      [...records.values(), ...failedFolders.values()]
         .map((record): Recording => {
           const {
             file: _file,
@@ -869,6 +903,14 @@ function make(deps: RecordingsDeps) {
             ...(protection.has(record.id) && { protected: true }),
             ...(retentionFailures.has(record.id) && { retentionFailed: true }),
           };
+
+          if (failedFolders.has(record.id))
+            return {
+              ...marked,
+              status: { kind: "missing" },
+              ended: record.start,
+              unsaved: true,
+            };
 
           const capturing = active.get(record.id);
 
@@ -1385,6 +1427,7 @@ function make(deps: RecordingsDeps) {
 
         records.set(id, started);
         beginning.delete(id);
+        savedStarts.delete(id);
         active.set(id, live);
         remeasure(started);
         settle();
@@ -2819,6 +2862,7 @@ function make(deps: RecordingsDeps) {
             }),
         });
         recordingFiles.delete(id);
+        observations.set(id, Symbol());
         missing.add(id);
 
         // Listed, as missing, until a write without it is kept. Its record goes before the permit
@@ -2834,6 +2878,7 @@ function make(deps: RecordingsDeps) {
         }
 
         missing.delete(id);
+        observations.delete(id);
         protection.delete(id);
         played.delete(id);
         retentionFailures.delete(id);
@@ -3397,6 +3442,7 @@ function make(deps: RecordingsDeps) {
       start,
       stop: (id: string) =>
         Effect.gen(function* () {
+          if (failedFolders.has(id)) return yield* save.pipe(Effect.ensuring(publish));
           stopping.add(id);
           // A start going on with it ends first: it ends as stopped, or never begins. A failed
           // write of how it ended is written below, with the rest.
@@ -3479,6 +3525,8 @@ function make(deps: RecordingsDeps) {
         retaining(
           Effect.gen(function* () {
             yield* usable;
+
+            if (failedFolders.has(id)) return yield* save.pipe(Effect.ensuring(publish));
             const record = records.get(id);
 
             if (!record) return;
@@ -3581,25 +3629,15 @@ function make(deps: RecordingsDeps) {
           if (retentionFailures.delete(id)) yield* publish;
 
           // Its file may have gone since the list was read: the list says so at once.
-          const there = yield* Effect.promise(() =>
-            stat(fileOf(record)).then(
-              () => true,
-              () => false,
-            ),
-          );
+          const { there, changed } = yield* Effect.promise(() => observe(record));
 
-          if (!there) {
-            if (!missing.has(id)) {
-              missing.add(id);
-              yield* publish;
-            }
+          if (changed) yield* publish;
 
+          if (!there)
             return yield* new Failed({
               error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
             });
-          }
 
-          if (missing.delete(id)) yield* publish;
           // One still recording plays as it grows, once its own index has read its program.
           const growing = isLive(record) ? yield* recordingSource(id) : undefined;
 

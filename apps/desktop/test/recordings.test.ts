@@ -1577,6 +1577,94 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await leftBehind(dataDir)).toEqual([]);
   });
 
+  it.each(["initial save", "capture", "capture marker", "capture cleanup"] as const)(
+    "only lists a failed start that reached inventory (%s)",
+    async (failure) => {
+      const { dataDir, channel, recordings, runtime, provider, quit } = await connected({
+        streams: (_source, out) => out.end(Buffer.alloc(64 * 1024, 0x20)),
+      });
+
+      const heard = await collect(runtime, recordings.changes);
+      const manifest = join(dataDir, "recordings", "recordings.json");
+      const write = fs.writeFile;
+
+      const marker = vi.spyOn(fs, "writeFile").mockImplementation(async (path, data, options) => {
+        if (failure === "capture marker" && String(path).endsWith(".mrstreamer-failed"))
+          throw new Error("failed-start marker refused");
+
+        return write(path, data, options);
+      });
+
+      const original = fs.rename;
+      const writing = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let refuse = true;
+      let stalled = false;
+
+      const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        if (refuse && to === manifest) {
+          const inventory = JSON.parse(await fs.readFile(from, "utf8"));
+
+          if (inventory.recordings.length === 0) {
+            if (!stalled) {
+              stalled = true;
+              writing.resolve();
+              await release.promise;
+
+              if (!refuse) return original(from, to);
+            }
+          } else if (failure !== "initial save") return original(from, to);
+
+          throw new Error("inventory replacement refused");
+        }
+
+        return original(from, to);
+      });
+
+      onTestFinished(async () => {
+        release.resolve();
+        adapter.mockRestore();
+        marker.mockRestore();
+        await quit();
+      });
+      const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+      starting.catch(() => {});
+      await writing.promise;
+
+      try {
+        if (failure === "initial save") expect(await recordings.list()).toEqual([]);
+        else
+          expect(await recordings.list()).toMatchObject([
+            { status: { kind: "missing" }, unsaved: true },
+          ]);
+      } finally {
+        if (failure === "capture cleanup") refuse = false;
+        release.resolve();
+      }
+
+      await expect(starting).rejects.toMatchObject({
+        error: { kind: failure === "initial save" ? "unexpected" : "stream" },
+      });
+
+      if (failure === "initial save") {
+        expect(existsSync(manifest)).toBe(false);
+        expect(provider.streamRequests()).toBe(0);
+        expect(await recordings.list()).toEqual([]);
+        expect(heard.every((list) => list.length === 0)).toBe(true);
+      } else if (failure === "capture" || failure === "capture marker") {
+        expect(await recordings.list()).toMatchObject([
+          { status: { kind: "missing" }, unsaved: true },
+        ]);
+        expect(heard.at(-1)).toMatchObject([{ status: { kind: "missing" }, unsaved: true }]);
+      } else expect(heard.at(-1)).toEqual([]);
+
+      refuse = false;
+      await recordings.check();
+      expect(await recordings.list()).toEqual([]);
+      expect(heard.at(-1)).toEqual([]);
+    },
+  );
+
   it("takes a failed start's record out of recordings.json once storage works, unasked", async () => {
     // The stream answers once recordings.json can't be written, with no MPEG-TS program.
     const asked = Promise.withResolvers<Writable>();
@@ -4792,6 +4880,83 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect((await recordings.previewRule({ ...plan, mode: "new-only" })).matches).toEqual([]);
   });
 
+  it("retries a failed rule start in the next check without settling its occurrence", async () => {
+    const { provider, recordings, listing, channel, dataDir, quit } = await scheduling();
+
+    const { next } = await listing();
+
+    await recordings.saveRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+
+    await recordings.check();
+
+    const schedule = (await recordings.schedules()).find(
+      (each) => each.next?.start === next.start,
+    )!;
+
+    expect(schedule).toBeDefined();
+    await quit();
+    const root = join(dataDir, "recordings");
+    const id = "00000000-0000-4000-8000-000000000001";
+    await mkdir(join(root, id), { recursive: true });
+    await writeFile(join(root, id, ".mrstreamer-failed"), "");
+    await writeFile(
+      join(root, "recordings.json"),
+      JSON.stringify({
+        version: 1,
+        recordings: [
+          {
+            id,
+            file: "a.ts",
+            channel: channel(GUIDED),
+            channelName: GUIDED,
+            title: next.title,
+            start: next.start,
+            stop: next.stop,
+            ended: null,
+            bytes: 0,
+            status: { kind: "recording" },
+            scheduled: {
+              schedule: schedule.id,
+              from: next.start,
+              late: null,
+              rule: schedule.rule,
+            },
+          },
+        ],
+      }),
+    );
+    const original = fs.rename;
+    let refuse = true;
+
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (refuse && to === join(root, "recordings.json")) throw new Error("inventory refused");
+
+      return original(from, to);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.recordings.check();
+    expect((await again.recordings.list()).map((each) => each.id)).toContain(id);
+    refuse = false;
+    vi.setSystemTime(next.start);
+    await again.recordings.check();
+
+    const made = await until(
+      again.recordings.list,
+      (rows) => rows.some((each) => each.id !== id && each.status.kind === "recording"),
+      1500,
+    );
+
+    expect(made.some((each) => each.id !== id && each.status.kind === "recording")).toBe(true);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
   it("settles a stopped and deleted rule occurrence durably before restart", async () => {
     const { provider, subscriptionId, channel, recordings, listing, clockTo, dataDir, quit } =
       await scheduling();
@@ -7407,6 +7572,254 @@ describe("recording protection and retention", () => {
     onTestFinished(second.quit);
     expect((await second.recordings.list()).map((each) => each.id)).not.toContain(id);
   });
+
+  it("keeps a deleted recording missing when a list read before its deletion answers late", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const id = ids[0]!;
+    const heard = await collect(first.runtime, first.recordings.changes);
+    const originalStat = fs.stat;
+    const originalRename = fs.rename;
+    const statted = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    const writing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let hold = true;
+
+    // A list's look finds the file there, then answers only after the deletion took it.
+    const looking = vi.spyOn(fs, "stat").mockImplementation(async (path, options) => {
+      const found = await originalStat(path, options);
+
+      if (hold && path === join(root, id, "a.ts")) {
+        hold = false;
+        statted.resolve();
+        await answer.promise;
+      }
+
+      return found;
+    });
+
+    // The inventory write after the folder went stalls, then fails.
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === join(root, "recordings.json") && !existsSync(join(root, id))) {
+        writing.resolve();
+        await release.promise;
+        throw new Error("inventory replacement refused after folder removal");
+      }
+
+      return originalRename(from, to);
+    });
+
+    onTestFinished(() => {
+      looking.mockRestore();
+      adapter.mockRestore();
+    });
+    const reading = first.recordings.list();
+    await statted.promise;
+    const removing = first.recordings.remove(id);
+    removing.catch(() => {});
+
+    try {
+      await writing.promise;
+    } finally {
+      answer.resolve();
+      await reading;
+      release.resolve();
+    }
+
+    await expect(removing).rejects.toMatchObject({
+      error: { detail: "Recordings could not be saved." },
+    });
+    // What the window was told last, without a list read since, says its file is gone.
+    expect(heard.at(-1)?.find((each) => each.id === id)).toMatchObject({
+      status: { kind: "missing" },
+    });
+  });
+
+  it("keeps a newer missing observation when the recording was already missing", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const id = ids[0]!;
+    const file = join(root, id, "a.ts");
+    const bytes = await readFile(file);
+    await rm(file);
+    expect((await first.recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
+      "missing",
+    );
+    await writeFile(file, bytes);
+    const original = fs.stat;
+    const statted = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let hold = true;
+
+    const adapter = vi.spyOn(fs, "stat").mockImplementation(async (path, options) => {
+      const found = await original(path, options);
+
+      if (hold && path === file) {
+        hold = false;
+        statted.resolve();
+        await release.promise;
+      }
+
+      return found;
+    });
+
+    onTestFinished(() => {
+      release.resolve();
+      adapter.mockRestore();
+    });
+    const reading = first.recordings.list();
+    await statted.promise;
+    await rm(file);
+    expect((await first.recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
+      "missing",
+    );
+    release.resolve();
+    expect((await reading).find((each) => each.id === id)?.status.kind).toBe("missing");
+  });
+
+  it.each(["startup", "resume", "expired", "returned"] as const)(
+    "keeps a failed start listed until recordings.json is written without it (%s)",
+    async (when) => {
+      const { dataDir, root, ids } = await seeded(2);
+      const manifest = join(root, "recordings.json");
+      const id = ids[0]!;
+      const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
+      const setup = await app(dataDir);
+      const { id: subscriptionId } = await setup.subscriptions.add(demoLogin(provider));
+      await setup.library.refresh(subscriptionId);
+      await setup.quit();
+      const source = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+      const kept = await readRecordings(manifest);
+
+      if (kept.kind !== "read") throw new Error("Seed inventory unreadable");
+      // Recordings.json still lists a start whose folder was marked failed, as the app quit.
+      await writeFile(
+        manifest,
+        JSON.stringify({
+          version: 1,
+          recordings: kept.items.map((each) =>
+            each.id === id
+              ? {
+                  ...each,
+                  channel: { subscriptionId, id: String(source.streamId) },
+                  status: { kind: "recording" },
+                  ended: null,
+                  stop: Date.now() + (when === "expired" ? -MINUTE : HOUR),
+                }
+              : each,
+          ),
+        }),
+      );
+      await writeFile(join(root, id, ".mrstreamer-failed"), "");
+      const originalStat = fs.stat;
+      let exposed = when === "startup";
+      let unreadReckon = when === "resume" || when === "expired";
+
+      const marker = vi.spyOn(fs, "stat").mockImplementation(async (path, options) => {
+        if (path === join(root, id, ".mrstreamer-failed")) {
+          if (!exposed || unreadReckon) {
+            if (exposed) unreadReckon = false;
+            throw Object.assign(new Error("marker unreadable"), { code: "EACCES" });
+          }
+        }
+
+        return originalStat(path, options);
+      });
+
+      onTestFinished(() => marker.mockRestore());
+      const original = fs.rename;
+      let writing = Promise.withResolvers<void>();
+      let release = Promise.withResolvers<void>();
+      let refuse = true;
+      let stalled = false;
+
+      // The first write without it stalls, as on a slow drive, then fails.
+      const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        if (refuse && to === manifest && !(await fs.readFile(from, "utf8")).includes(id)) {
+          if (!stalled) {
+            stalled = true;
+            writing.resolve();
+            await release.promise;
+          }
+
+          throw new Error("inventory replacement refused");
+        }
+
+        return original(from, to);
+      });
+
+      onTestFinished(() => adapter.mockRestore());
+      const first = await app(dataDir);
+      onTestFinished(first.quit);
+      exposed = true;
+      const checking = first.recordings.check();
+
+      try {
+        await writing.promise;
+        expect(provider.streamRequests()).toBe(0);
+        expect((await first.recordings.list()).find((each) => each.id === id)).toMatchObject({
+          status: { kind: "missing" },
+          unsaved: true,
+        });
+      } finally {
+        release.resolve();
+        await checking;
+      }
+
+      expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+      expect(existsSync(join(root, id))).toBe(true);
+      expect(provider.streamRequests()).toBe(0);
+      expect(await first.recordings.live()).toMatchObject({ recording: false });
+      expect(await first.recordings.holdStarts(true)).toBe(true);
+      await first.recordings.holdStarts(false);
+      const heard = await collect(first.runtime, first.recordings.changes);
+
+      for (const action of [first.recordings.stop, first.recordings.remove]) {
+        writing = Promise.withResolvers<void>();
+        release = Promise.withResolvers<void>();
+        stalled = false;
+        const acting = action(id);
+
+        const settled = acting.then(
+          () => "succeeded",
+          () => "failed",
+        );
+
+        try {
+          expect(await Promise.race([writing.promise.then(() => "writing"), settled])).toBe(
+            "writing",
+          );
+          expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+        } finally {
+          release.resolve();
+        }
+
+        await expect(acting).rejects.toMatchObject({
+          error: { detail: "Recordings could not be saved." },
+        });
+        expect(heard.at(-1)?.find((each) => each.id === id)).toMatchObject({ unsaved: true });
+      }
+
+      // A viewer retry writes it out, and its folder goes.
+      refuse = false;
+      await first.recordings.remove(id);
+      expect(heard.at(-1)?.some((each) => each.id === id)).toBe(false);
+      expect((await first.recordings.list()).map((each) => each.id)).not.toContain(id);
+      expect(
+        await until(
+          async () => existsSync(join(root, id)),
+          (there) => !there,
+        ),
+      ).toBe(false);
+      await first.quit();
+      const second = await app(dataDir);
+      onTestFinished(second.quit);
+      expect((await second.recordings.list()).map((each) => each.id)).not.toContain(id);
+    },
+  );
 
   it("starts a scheduled recording while retention waits on a stalled recording drive", async () => {
     const { dataDir, root } = await seeded(2);
