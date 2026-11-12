@@ -77,6 +77,7 @@ import {
 } from "../watch/Output.tsx";
 import { SpeedMenu, stepSpeed } from "../watch/SpeedMenu.tsx";
 import { nudgeSubtitles } from "../watch/SubtitleSettings.tsx";
+import { PictureSoundMenu } from "../watch/PictureSound.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
 import { SubtitlePanel, subtitleChoiceNote } from "./SubtitlePanel.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
@@ -318,6 +319,7 @@ export function TitleWatch() {
       >
         <Picture
           active
+          adjusted
           fit="contain"
           className="absolute inset-0"
           onClick={() => titlePlayer.togglePause()}
@@ -366,6 +368,7 @@ export function TitleWatch() {
       {/* In a window the picture starts below the bar, so the bar never draws on it. */}
       <Picture
         active
+        adjusted
         fit="contain"
         className="absolute inset-x-0 bottom-0"
         style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}
@@ -635,6 +638,10 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
         onOpenChange={onMenu}
         onAudio={(id) => titlePlayer.setAudio(id)}
         onSubtitle={(track) => titlePlayer.setSubtitle(track)}
+      />
+      <PictureSoundMenu
+        open={menu === "picture"}
+        onOpenChange={(next) => onMenu(next ? "picture" : null)}
       />
       <SpeedMenu
         speed={speed}

@@ -38,7 +38,7 @@ import { flashNote } from "./flash-state.ts";
 import { SubtitleSettingRows } from "./SubtitleSettings.tsx";
 
 /** Which menu is open over the controls, so Escape closes it before anything else. */
-export type TrackMenu = "sound" | "subtitles" | "quality" | "output" | null;
+export type TrackMenu = "sound" | "subtitles" | "picture" | "quality" | "output" | null;
 
 export function TrackMenus({
   audio,
@@ -332,8 +332,12 @@ export function Menu({
 /** The usable choice a menu opens on: the selected row, else its first non-Back row. */
 function chosenItem(popup: HTMLElement): HTMLElement | null {
   return (
-    popup.querySelector<HTMLElement>("[data-item][aria-pressed=true]:not(:disabled)") ??
-    popup.querySelector<HTMLElement>("[data-item]:not(:disabled):not([data-live-back])")
+    popup.querySelector<HTMLElement>(
+      "[data-item][aria-pressed=true]:not(:disabled):not([aria-disabled=true])",
+    ) ??
+    popup.querySelector<HTMLElement>(
+      "[data-item]:not(:disabled):not([aria-disabled=true]):not([data-live-back])",
+    )
   );
 }
 
@@ -347,9 +351,13 @@ export function moveFocus(event: KeyboardEvent<HTMLElement>): void {
 
   const items = [
     ...event.currentTarget.querySelectorAll<HTMLElement>("[data-item]:not(:disabled)"),
-  ];
+  ].filter(
+    (item) => item.getAttribute("aria-disabled") !== "true" || item === document.activeElement,
+  );
 
-  const at = items.findIndex((item) => item === document.activeElement);
+  const at = items.findIndex(
+    (item) => item === document.activeElement || item.contains(document.activeElement),
+  );
 
   const target =
     event.key === "ArrowDown"

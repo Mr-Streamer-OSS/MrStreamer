@@ -40,6 +40,7 @@ import { controlsScenario } from "./controls.ts";
 import { backupChannel, customListSourcesScenario, customListsScenario } from "./custom-lists.ts";
 import { customListRoundTripScenario } from "./custom-lists-round-trip.ts";
 import { multiviewScenario } from "./multiview.ts";
+import { pictureSoundScenario, pictureSoundStreams } from "./picture-sound.ts";
 import { breakRewindStream, liveRewindScenario, rewindStreams } from "./live-rewind.ts";
 import { liveNamesScenario, longNamed } from "./live-names.ts";
 import { preferencesScenario } from "./preferences.ts";
@@ -86,6 +87,7 @@ const scenarios = [
   "live-tv",
   "live-rewind",
   "multiview",
+  "picture-sound",
   "live-names",
   "guides",
   "guide-labels",
@@ -142,6 +144,8 @@ function scenarioProvider(scenario: Scenario): FakeProviderOptions {
       return { guideHours: { past: 6, ahead: 24 }, guideLengths: [1, 2, 30], channelOf: gridded };
     case "multiview":
       return { maxConnections: 2, streams: rewindStreams };
+    case "picture-sound":
+      return { streams: pictureSoundStreams };
     case "live-rewind":
       return {
         guideHours: { past: 1, ahead: 3 },
@@ -1375,6 +1379,24 @@ async function run(scenario: Scenario, prior?: string) {
           streams: provider!.streamRequests(),
           active: provider!.activeStreams(),
         }),
+      );
+    } else if (scenario === "picture-sound") {
+      await pictureSoundScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        () => (event, listener) => live().on(event, listener),
       );
     } else if (scenario === "multiview") {
       await multiviewScenario(

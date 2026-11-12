@@ -1,3 +1,4 @@
+import { flushSound } from "./sound.ts";
 import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { PaneRefusal, LiveTimeline } from "@mrstreamer/contracts/playback";
 import { readPreferences, updatePreferences } from "../lib/preferences.ts";
@@ -2104,6 +2105,7 @@ function createLiveController(video: HTMLVideoElement) {
       const retained = timeline !== null && !retainedSession?.convertedHls;
 
       if (!channel || !track || (!own && retained && admissionPending())) return;
+      flushSound(video);
       manualAudio = true;
       store.setState({ audioId: id });
 

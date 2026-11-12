@@ -88,7 +88,7 @@ _The channel list, the controls, quality, and what to do when a channel doesn't 
 
 While watching, the channel list opens over the left of the picture with the list button, Enter or the left arrow. Click a channel to switch; its title switches to another category, with the same countries and **Find** as Live TV. Clicking the picture shows the controls, and a double click toggles full screen. Scroll over the picture to switch channel, once per gesture.
 
-The bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, full screen and **More**. More holds channel up, channel down, the previous channel, Sound, Quality, Play on and Mini player.
+The bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, full screen and **More**. More holds channel up, channel down, the previous channel, Sound, [Picture and sound](playback.md#picture-and-sound), Quality, Play on and Mini player.
 
 - **Sound**, in More, shows when a channel has more than one sound track. Picking another starts the channel again with it, which takes a moment. An HLS channel, as most of a playlist's are, switches without starting again.
 - **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions, and on an HLS channel the subtitles its stream offers. C turns the last ones you picked on and off.

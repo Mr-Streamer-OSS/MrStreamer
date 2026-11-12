@@ -62,6 +62,21 @@ VP8 conversion supports WebM and MKV files; VP9 and AV1 also support MP4. Conver
 
 A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them. While Mr. Streamer is still reading and no line shows, "Subtitles loading" shows at the top right and **CC** says "Loading" beside the track. Text that shows is never called loading, also while an earlier line is still being looked for or right after you move the timing.
 
+## Picture and sound
+
+_Desktop 0.0.24 development. Sound delay, leveling and the picture's shape, on this computer._
+
+**Picture and sound** sets how everything playing on this computer sounds and fits the window: channels, movies, episodes, recordings and downloads alike. Movies and episodes have its button in the player's bar, which stays highlighted while anything differs from the stream; for Live TV, open **More > Picture and sound**, which says **Adjusted** then. A change plays at once and is kept for your viewing profile on this computer. Previews and multiview panes keep their own picture fit.
+
+- **Sound delay** holds the sound back behind the picture, in 50 ms steps up to 2 seconds, for sound that runs ahead of lips. It can't make sound play earlier than the picture.
+- **Leveling** raises quiet passages and lowers loud ones while keeping your device's output channels. It can add a small sound delay.
+- **Aspect** shows the whole picture at 16:9, 4:3 or 21:9 instead of the shape the stream gives, **Auto**.
+- **Crop** cuts the picture to 16:9, 4:3 or 21:9 around its centre, as for black bars inside the picture.
+- **Zoom** enlarges the picture in 25 % steps up to 300 %; what leaves the window is cut.
+- **Reset** returns all of them to the stream's own.
+
+Up and Down move between the rows, Left and Right move within each row, and End reaches Reset while a change is active and no Retry follows it. If a change can't be saved, the menu says so and plays what was saved before; **Retry** saves it again. While a TV plays, the menu says the TV plays the stream as sent: these settings apply on this computer only.
+
 ## Recordings
 
 _From 0.0.23, now in Nightly. The channel's stream as sent, nothing converted._
@@ -130,7 +145,9 @@ _What doesn't work yet, or works differently._
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
-- On a TV, a movie or episode plays at normal speed, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
+- Sound delay only holds sound back; it can't play sound before the picture.
+- After the first sound delay or leveling, sound takes Mr. Streamer's own route until you restart it, also once you reset them. That route can add a small delay; leveling adds a little more while enabled.
+- On a TV, a movie or episode plays at normal speed with the stream's own picture and sound, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
 - If your TV doesn't show up or doesn't play, please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its make and model.
 
 ## When something won't play

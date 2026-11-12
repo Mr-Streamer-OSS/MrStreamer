@@ -23,6 +23,7 @@ import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import { t } from "@mrstreamer/core/i18n";
 import { isEngineError, type EngineError, type StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
+import { attachSound } from "./sound.ts";
 import {
   addTextCue,
   clearSubtitles,
@@ -130,6 +131,8 @@ export interface TitleEngine {
 
 export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine {
   const observation = observeMediaPlayback(video);
+  // Titles and downloads sound as the viewer's adjustments say, as channels do (see sound.ts).
+  const releaseSound = attachSound(video);
   const abort = new AbortController();
   /** Ends the subtitles with the run, or before it, when the viewer turns them off. */
   const subtitlesOff = new AbortController();
@@ -738,6 +741,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       video.removeAttribute("src");
       video.load();
       URL.revokeObjectURL(objectUrl);
+      releaseSound();
     },
   };
 }
