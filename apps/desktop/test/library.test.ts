@@ -184,7 +184,7 @@ describe("live library", () => {
       name: "TEST | Formats and failures",
       group: null,
       title: "TEST | Formats and failures",
-      channelCount: 13,
+      channelCount: 14,
       members: [own("1")],
     });
     expect(categories[1]).toMatchObject({ group: "United Kingdom", title: "Entertainment" });

@@ -34,6 +34,11 @@ export type StreamFormat = "mpegts" | "hls";
  */
 export const CODECS = [
   "h264",
+  /**
+   * H.264 whose sequence allows field pictures, as interlaced broadcasts send. A browser decodes
+   * it but shows both fields in one picture, so moving edges comb; the app's player leaves it out.
+   */
+  "h264-interlaced",
   "hevc",
   "hevc-10bit",
   "mpeg2",

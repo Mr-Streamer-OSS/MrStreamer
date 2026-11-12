@@ -6,6 +6,7 @@
   "license": "GPL-3.0-only",
   "exports": {
     "./adult": "./src/adult.ts",
+    "./bitstream": "./src/bitstream.ts",
     "./catalogue/browse": "./src/catalogue/browse.ts",
     "./catalogue/normalize": "./src/catalogue/normalize.ts",
     "./catalogue/regions": "./src/catalogue/regions.ts",

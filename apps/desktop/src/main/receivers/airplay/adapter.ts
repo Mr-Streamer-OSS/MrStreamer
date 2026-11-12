@@ -10,9 +10,9 @@
 //
 // None of this has been tried against a receiver yet. What that leaves open is marked below.
 import type { Receiver } from "@mrstreamer/contracts/output";
-import type { Codec } from "@mrstreamer/contracts/playback";
 import { withoutAddresses } from "@mrstreamer/core/provider";
 import {
+  RECEIVER_DECODERS,
   ReceiverFailed,
   type AdapterEvent,
   type Connection,
@@ -62,12 +62,6 @@ const RESTARTS = 3;
 
 /** The system keeps the receiver's name to itself. */
 const RECEIVER: Receiver = { id: "airplay", kind: "airplay", name: null };
-
-/**
- * What is sent as it is; everything else converts. A first profile that every AirPlay video
- * receiver should play, not what a particular one was seen to play: unproven on hardware.
- */
-const DECODERS: readonly Codec[] = ["h264", "aac"];
 
 export interface AirplayOptions {
   /** The helper's executable, or null where the app has none: off macOS, or a build without it. */
@@ -193,7 +187,7 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
         receiver: RECEIVER,
         // The system doesn't say which of this computer's addresses the receiver reaches.
         localAddress: null,
-        decoders: DECODERS,
+        decoders: RECEIVER_DECODERS,
         // AVPlayer's volume is the one documented control; what it does on a receiver is unverified.
         volume: true,
         async load(media, signal) {

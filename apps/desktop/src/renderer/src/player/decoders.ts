@@ -3,7 +3,10 @@
 // converting part of it.
 import type { Codec } from "@mrstreamer/contracts/playback";
 
-/** MediaSource types that stand for each codec the player might decode. */
+/**
+ * MediaSource types that stand for each codec the player might decode. Interlaced H.264 is never
+ * listed: Chromium decodes it without deinterlacing, so the main process converts it, deinterlaced.
+ */
 const PROBES: readonly [Codec, string][] = [
   ["h264", 'video/mp4; codecs="avc1.640028"'],
   ["hevc", 'video/mp4; codecs="hvc1.1.6.L150.90"'],

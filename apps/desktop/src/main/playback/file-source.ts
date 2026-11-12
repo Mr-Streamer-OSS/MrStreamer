@@ -9,7 +9,7 @@ import { Readable } from "node:stream";
 
 import type { RecordingCopyState } from "@mrstreamer/contracts/downloads";
 
-import { createInspector, type Inspection } from "./inspect.ts";
+import { createInspector, H264_CODECS, type Inspection } from "./inspect.ts";
 
 const TYPES: Readonly<Record<string, string>> = {
   mkv: "video/x-matroska",
@@ -513,7 +513,14 @@ export function indexRecording(path: string, source: RecordingFile): RecordingFi
           // How ffmpeg places a wrapped clock is not established; points stop there.
           if (unwrapped !== pts) refused = true;
 
-          if (before === null || !layout || refused || video?.codec !== "h264" || pid !== video.pid)
+          if (
+            before === null ||
+            !layout ||
+            refused ||
+            !video ||
+            !H264_CODECS.has(video.codec) ||
+            pid !== video.pid
+          )
             continue;
           const flags = pes[7]! >> 6;
 

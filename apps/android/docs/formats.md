@@ -29,6 +29,7 @@ The parity rows come from `docs/contributing/testing.md` and the repository fixt
 | parity/h264-ac3.mpegts                 | h264 High, ac3                                             |
 | parity/h264-damaged.mpegts             | h264 High, aac LC                                          |
 | parity/h264-eac3.mpegts                | h264 High, eac3                                            |
+| parity/h264-interlaced.mpegts          | h264 High, aac LC                                          |
 | parity/h264-mp2.mpegts                 | h264 High, mp2                                             |
 | parity/h264-mp3.mpegts                 | h264 High, mp3                                             |
 | parity/h264-open-gop-joined.mpegts     | h264 High, aac LC                                          |

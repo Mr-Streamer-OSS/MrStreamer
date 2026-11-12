@@ -127,7 +127,7 @@ describe("AirPlay adapter", () => {
     expect(await connecting).toMatchObject({
       receiver: { id: "airplay", kind: "airplay", name: null },
       localAddress: null,
-      decoders: ["h264", "aac"],
+      decoders: ["h264", "h264-interlaced", "aac"],
       volume: true,
     });
     await helper.took("hidePicker");

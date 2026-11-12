@@ -9,6 +9,13 @@
 import type { OutputFailure, Receiver, ReceiverKind } from "@mrstreamer/contracts/output";
 import type { Codec } from "@mrstreamer/contracts/playback";
 
+/**
+ * The first profile every receiver is taken to decode: H.264 with AAC. No hardware has proved
+ * more yet, so the rest converts. Interlaced H.264 goes as it is, as it did before the app's own
+ * player had it deinterlaced; whether a receiver deinterlaces it is unproven too.
+ */
+export const RECEIVER_DECODERS: readonly Codec[] = ["h264", "h264-interlaced", "aac"];
+
 /** One load: an HLS playlist for the receiver to play, and how to start it. */
 export interface ReceiverMedia {
   readonly generation: number;

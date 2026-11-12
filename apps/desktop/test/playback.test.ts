@@ -646,6 +646,51 @@ describe("playback", () => {
       await playback.dispose();
     });
 
+    it("deinterlaces an interlaced H.264 channel, keeping its frame rate and its sound as sent", async () => {
+      const { provider, playback } = await connectedPlayback({ ffmpeg: true });
+
+      const session = await playback.open(channelNamed(provider, "TEST | H.264 interlaced"), LINUX);
+      const received = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+
+      // ffmpeg's interlace detector compares each picture's lines with its neighbours': combed
+      // pictures read as top or bottom field first, as all 75 of the fixture's do.
+      const scan = (body: Buffer) => {
+        const run = spawnSync(
+          FFMPEG,
+          ["-hide_banner", "-i", "pipe:0", "-an", "-vf", "idet", "-f", "null", "-"],
+          { input: body, encoding: "utf8" },
+        );
+
+        // It reports once for a graph ffmpeg sets up and drops, then for the stream.
+        const [, tff, bff, progressive] =
+          [
+            ...run.stderr.matchAll(
+              /Multi frame detection: TFF: *(\d+) BFF: *(\d+) Progressive: *(\d+)/g,
+            ),
+          ].at(-1) ?? [];
+
+        return { combed: Number(tff) + Number(bff), progressive: Number(progressive) };
+      };
+
+      expect(scan(fixture("h264-interlaced.mpegts")).combed).toBe(75);
+      expect(scan(received)).toEqual({ combed: 0, progressive: 75 });
+
+      const probe = spawnSync(
+        FFPROBE,
+        [
+          ...["-v", "error", "-show_entries", "stream=codec_name,avg_frame_rate"],
+          ...["-of", "json", "-i", "pipe:0"],
+        ],
+        { input: received, encoding: "utf8" },
+      );
+
+      expect(JSON.parse(probe.stdout).streams).toEqual([
+        { codec_name: "h264", avg_frame_rate: "25/1" },
+        { codec_name: "aac", avg_frame_rate: "0/0" },
+      ]);
+      await playback.dispose();
+    });
+
     it.each([
       ["TEST | H.264 + MP2", LINUX, { video: "h264", audio: "aac" }],
       ["TEST | H.264 + AC-3", LINUX, { video: "h264", audio: "aac" }],

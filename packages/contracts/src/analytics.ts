@@ -95,11 +95,13 @@ export function diagnosticCodecs(
 ): PlaybackDiagnostic {
   return {
     diagnostic_video_codec:
-      video === "h264" || video === "mpeg2"
-        ? video
-        : video === "hevc" || video === "hevc-10bit"
-          ? "hevc"
-          : "unknown",
+      video === "h264" || video === "h264-interlaced"
+        ? "h264"
+        : video === "mpeg2"
+          ? video
+          : video === "hevc" || video === "hevc-10bit"
+            ? "hevc"
+            : "unknown",
     diagnostic_audio_codec:
       audio === "aac" || audio === "aac-pce" || audio === "aac-latm"
         ? "aac"

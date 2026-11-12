@@ -16,7 +16,12 @@ export type Opened =
   | { readonly ok: false; readonly failure: StreamFailure };
 
 /** Video codecs whose streams start on a keyframe; see ../playback/clean-start.ts. */
-export const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set(["h264", "hevc", "hevc-10bit"]);
+export const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set([
+  "h264",
+  "h264-interlaced",
+  "hevc",
+  "hevc-10bit",
+]);
 
 /** How much of a stream the proxy reads, at most, before deciding how to deliver it. */
 export const INSPECT_LIMIT = { bytes: 2 * 1024 * 1024, ms: 2500 };

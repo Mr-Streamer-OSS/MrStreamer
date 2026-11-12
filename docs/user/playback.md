@@ -24,6 +24,7 @@ Most channels play directly. For the rest, Mr. Streamer converts only what the p
 | HEVC (H.265) video on macOS                                        | Plays directly, including 10-bit and 4K                                       |
 | HEVC video on Windows or Linux without a hardware decoder          | The picture is converted to H.264; 4K is reduced to 1080p                     |
 | MPEG-2 video                                                       | The picture is converted to H.264 and deinterlaced                            |
+| Interlaced H.264 video, common in European HD broadcasts           | The picture is converted and deinterlaced, at the same frame rate             |
 | A picture the player can't decode because the broadcast is damaged | Mr. Streamer retries once with the picture re-encoded, which hides the damage |
 | Several sound tracks                                               | The one in the language you picked last plays, else the channel's first       |
 | DVB subtitles                                                      | Drawn over the picture                                                        |

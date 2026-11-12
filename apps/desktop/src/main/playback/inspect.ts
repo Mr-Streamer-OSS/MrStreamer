@@ -1,8 +1,9 @@
 // Reads the start of an MPEG-TS stream to learn which tracks it carries, before any byte reaches
 // the player. The program tables name each track's format, language and, for teletext and DVB
-// subtitles, their pages; for MPEG audio, HEVC and AAC the first frame header adds what the tables
-// leave open: MP2 or MP3, 8 or 10-bit, the channel layout.
+// subtitles, their pages; for MPEG audio, H.264, HEVC and AAC the first frame header adds what the
+// tables leave open: MP2 or MP3, interlaced or progressive, 8 or 10-bit, the channel layout.
 import type { Codec } from "@mrstreamer/contracts/playback";
+import { bitReader, unescape } from "@mrstreamer/core/bitstream";
 
 const PACKET = 188;
 const SYNC = 0x47;
@@ -40,12 +41,19 @@ export interface StreamLayout {
   readonly subtitles: readonly SubtitleStream[];
 }
 
+/** Both forms of H.264 a stream can carry: whatever reads its NAL units reads either. */
+export const H264_CODECS: ReadonlySet<Codec | "unknown"> = new Set<Codec>([
+  "h264",
+  "h264-interlaced",
+]);
+
 /** A track whose codec needs a look at its first frame. */
-type Pending = "mpeg-audio" | "hevc" | "aac";
+type Pending = "mpeg-audio" | "h264" | "hevc" | "aac";
 
 /** The codecs a pending track can turn out to be. */
 const CANDIDATES: Record<Pending, readonly Codec[]> = {
   "mpeg-audio": ["mp2", "mp3"],
+  h264: ["h264", "h264-interlaced"],
   hevc: ["hevc", "hevc-10bit"],
   aac: ["aac", "aac-pce"],
 };
@@ -61,7 +69,7 @@ export interface Inspection {
 /**
  * Feed chunks from the start of a stream. Once the program table has arrived, `push` returns the
  * tracks, and `open` lists the ones whose first frame has not shown its exact codec yet; the
- * layout assumes the variant that needs the most help for those. Null means no table yet, and
+ * layout assumes `fallback`'s variant for those. Null means no table yet, and
  * `notTransportStream` tells when the data is something else, such as a raw radio stream.
  */
 export function createInspector() {
@@ -361,7 +369,7 @@ function classify(
     case 0x02:
       return { kind: "video", codec: "mpeg2", pending: null };
     case 0x1b:
-      return { kind: "video", codec: "h264", pending: null };
+      return { kind: "video", codec: "unknown", pending: "h264" };
     case 0x24:
       return { kind: "video", codec: "unknown", pending: "hevc" };
     case 0x10:
@@ -454,6 +462,16 @@ function examine(pending: Pending, data: Uint8Array): Codec | null {
       }
 
       return null;
+    case "h264":
+      for (const nal of nalUnits(data)) {
+        if ((nal[0]! & 0x1f) === 7) {
+          const fields = allowsFields(nal);
+
+          if (fields !== null) return fields ? "h264-interlaced" : "h264";
+        }
+      }
+
+      return null;
     case "hevc":
       for (const nal of nalUnits(data)) {
         if (((nal[0]! >> 1) & 0x3f) === 33 && nal.length > 3) {
@@ -467,16 +485,83 @@ function examine(pending: Pending, data: Uint8Array): Codec | null {
   }
 }
 
-/** When a track's first frame never shows up, assume the variant that needs the most help. */
+/**
+ * When a track's first frame never shows up, assume the variant that needs the most help. H.264 is
+ * the exception: taken for progressive, an interlaced picture plays as it always did, combed;
+ * taken for interlaced, a progressive one would be re-encoded for nothing.
+ */
 function fallback(pending: Pending): Codec {
   switch (pending) {
     case "mpeg-audio":
       return "mp2";
+    case "h264":
+      return "h264";
     case "aac":
       return "aac";
     case "hevc":
       return "hevc-10bit";
   }
+}
+
+/** H.264 profiles whose sequence parameter set carries chroma format, bit depths and scaling lists. */
+const HIGH_PROFILES = new Set([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]);
+
+/**
+ * Whether an H.264 sequence parameter set allows field pictures, its frame_mbs_only_flag 0, read
+ * as section 7.3.2.1.1 of the specification lays it out. Null when the NAL unit is cut short.
+ */
+function allowsFields(nal: Uint8Array): boolean | null {
+  const sps = bitReader(unescape(nal.subarray(1)));
+  const profile = sps.bits(8);
+  // Constraint flags and level, then seq_parameter_set_id.
+  sps.bits(16);
+  sps.ue();
+
+  if (HIGH_PROFILES.has(profile)) {
+    const chroma = sps.ue();
+
+    if (chroma === 3) sps.bits(1);
+    // Luma and chroma bit depths, and the lossless flag.
+    sps.ue();
+    sps.ue();
+    sps.bits(1);
+
+    if (sps.bits(1)) {
+      for (let list = 0; list < (chroma === 3 ? 12 : 8) && !sps.overrun; list++) {
+        if (!sps.bits(1)) continue;
+        let last = 8;
+        let next = 8;
+
+        for (let entry = 0; entry < (list < 6 ? 16 : 64) && next !== 0; entry++) {
+          next = (last + sps.se() + 256) % 256;
+          last = next === 0 ? last : next;
+        }
+      }
+    }
+  }
+
+  // log2_max_frame_num_minus4, then the picture order count type and what it brings.
+  sps.ue();
+  const order = sps.ue();
+
+  if (order === 0) sps.ue();
+
+  if (order === 1) {
+    sps.bits(1);
+    sps.se();
+    sps.se();
+
+    for (let cycle = sps.ue(); cycle > 0 && !sps.overrun; cycle--) sps.se();
+  }
+
+  // max_num_ref_frames, gaps allowed, width and height in macroblocks.
+  sps.ue();
+  sps.bits(1);
+  sps.ue();
+  sps.ue();
+  const frameOnly = sps.bits(1);
+
+  return sps.overrun ? null : frameOnly === 0;
 }
 
 /** NAL units in Annex B data, each starting at its header byte. */

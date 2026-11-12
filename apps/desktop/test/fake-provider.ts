@@ -1208,6 +1208,19 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
     });
   }
 
+  // Listed with the test channels, but numbered after every other channel, so adding it moved
+  // none of theirs. A white bar crosses its picture fast, as fields: it combs wherever both show.
+  channels.push({
+    streamId: 1000 + FIXTURE_CHANNELS.length,
+    num: channels.length + 1,
+    name: "TEST | H.264 interlaced",
+    categoryId: "1",
+    hasLogo: false,
+    offline: false,
+    fixture: "h264-interlaced.mpegts",
+    guideId: null,
+  });
+
   if (adultChannels) {
     const adult = String(categories.length + 1);
     categories.push({ id: adult, name: "XXX | ADULTS" });
