@@ -6,7 +6,7 @@ import { DatabaseSync, constants as sqlite } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { createServer, get as httpGet, type IncomingMessage } from "node:http";
+import { createServer, get as httpGet, type IncomingMessage, ServerResponse } from "node:http";
 import {
   chmod,
   cp,
@@ -5857,6 +5857,29 @@ describe.skipIf(!hasTools)("recording schedules", () => {
   });
 
   it("tries a start that failed again, and says why it was missed", async () => {
+    // Hold the retried start response until after the stop-time check, so the stop time
+    // comes while that start is still answering.
+    const end = ServerResponse.prototype.end;
+    let offline = 0;
+    const { promise: retryReleased, resolve: releaseRetry } = Promise.withResolvers<void>();
+
+    const responseDelay = vi.spyOn(ServerResponse.prototype, "end").mockImplementation(function (
+      this: ServerResponse,
+      ...args: Parameters<ServerResponse["end"]>
+    ) {
+      const answer = () => end.apply(this, args);
+
+      if (this.statusCode === 404 && this.req.url?.includes("/live/") && ++offline === 2)
+        void retryReleased.then(answer);
+      else answer();
+
+      return this;
+    });
+
+    onTestFinished(() => {
+      releaseRetry();
+      responseDelay.mockRestore();
+    });
     const { provider, channel, recordings, clockTo } = await scheduling();
     const at = new Date(TEN_PAST - 5 * MINUTE);
     await recordings.schedule({
@@ -5883,7 +5906,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await until(recordings.schedules, () => provider.streamRequests() > asked);
     expect(provider.streamRequests()).toBeGreaterThan(asked);
 
+    // The retry is still answering at its stop: the missed result follows its answer.
     await clockTo(at.getTime() + 11 * MINUTE);
+    releaseRetry();
+    await until(recordings.list, ([each]) => each?.status.kind === "missed");
     expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
   });
 
