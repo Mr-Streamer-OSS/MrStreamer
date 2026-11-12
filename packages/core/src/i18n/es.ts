@@ -2097,8 +2097,8 @@ export const es: Translation = {
   "Save rules": "Guardar reglas",
   Repair: "Reparar",
   "Repair rules": "Reparar reglas",
-  "Some saved rules couldn't be read. Nothing shows until you save these.":
-    "Algunas reglas guardadas no se pudieron leer. No se muestra nada hasta que las guardes.",
+  "Saved rules need repair. Matches shown here are a preview until you save.":
+    "Las reglas guardadas necesitan reparación. Los resultados son una vista previa hasta que guardes.",
   "None of the saved rules could be read.": "No se pudo leer ninguna de las reglas guardadas.",
   "The saved kind of title isn't one this version knows.":
     "Esta versión no conoce el tipo de título guardado.",

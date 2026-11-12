@@ -1948,8 +1948,8 @@ export const en = {
   "Save rules": "Save rules",
   Repair: "Repair",
   "Repair rules": "Repair rules",
-  "Some saved rules couldn't be read. Nothing shows until you save these.":
-    "Some saved rules couldn't be read. Nothing shows until you save these.",
+  "Saved rules need repair. Matches shown here are a preview until you save.":
+    "Saved rules need repair. Matches shown here are a preview until you save.",
   "None of the saved rules could be read.": "None of the saved rules could be read.",
   "The saved kind of title isn't one this version knows.":
     "The saved kind of title isn't one this version knows.",

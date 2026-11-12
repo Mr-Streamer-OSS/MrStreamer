@@ -1995,8 +1995,8 @@ export const nl: Translation = {
   "Save rules": "Regels bewaren",
   Repair: "Herstellen",
   "Repair rules": "Regels herstellen",
-  "Some saved rules couldn't be read. Nothing shows until you save these.":
-    "Sommige bewaarde regels konden niet worden gelezen. Er verschijnt niets tot je deze bewaart.",
+  "Saved rules need repair. Matches shown here are a preview until you save.":
+    "Bewaarde regels moeten worden hersteld. Getoonde titels zijn een voorbeeld tot je bewaart.",
   "None of the saved rules could be read.": "Geen van de bewaarde regels kon worden gelezen.",
   "The saved kind of title isn't one this version knows.":
     "Het bewaarde soort titel kent deze versie niet.",

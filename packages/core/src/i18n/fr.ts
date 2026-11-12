@@ -2105,15 +2105,15 @@ export const fr: Translation = {
   "Save rules": "Enregistrer les règles",
   Repair: "Réparer",
   "Repair rules": "Réparer les règles",
-  "Some saved rules couldn't be read. Nothing shows until you save these.":
-    "Certaines règles enregistrées n'ont pas pu être lues. Rien ne s'affiche tant que vous ne les enregistrez pas.",
+  "Saved rules need repair. Matches shown here are a preview until you save.":
+    "Les règles enregistrées doivent être réparées. Les résultats affichés sont un aperçu jusqu’à l’enregistrement.",
   "None of the saved rules could be read.": "Aucune des règles enregistrées n'a pu être lue.",
   "The saved kind of title isn't one this version knows.":
     "Cette version ne connaît pas le type de titre enregistré.",
   "Some saved rules aren't ones this version knows.":
     "Cette version ne connaît pas certaines règles enregistrées.",
   "No rules were saved.": "Aucune règle n'était enregistrée.",
-  "{rule} was left out.": "{rule} a été omis.",
+  "{rule} was left out.": "La règle {rule} a été omise.",
   "Smart collection": "Collection intelligente",
   Collection: "Collection",
   "Titles you add": "Titres que vous ajoutez",

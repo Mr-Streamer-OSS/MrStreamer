@@ -2255,7 +2255,7 @@ describe("a smart collection in the Collections tab", () => {
     await vi.waitFor(() => expect(document.querySelector("h1")?.textContent).toBe("Short films"));
     expect((await row("Short films")).textContent).toContain("Repair");
     expect(document.body.textContent).toContain(
-      "Some saved rules couldn't be read. Nothing shows until you save these.",
+      "Saved rules need repair. Matches shown here are a preview until you save.",
     );
     expect(document.body.textContent).toContain("Year was left out.");
     expect(document.body.textContent).toContain("Some saved rules aren't ones this version knows.");

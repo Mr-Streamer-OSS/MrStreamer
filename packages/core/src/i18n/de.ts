@@ -2012,8 +2012,8 @@ export const de: Translation = {
   "Save rules": "Regeln speichern",
   Repair: "Reparieren",
   "Repair rules": "Regeln reparieren",
-  "Some saved rules couldn't be read. Nothing shows until you save these.":
-    "Einige gespeicherte Regeln konnten nicht gelesen werden. Nichts wird angezeigt, bis du diese speicherst.",
+  "Saved rules need repair. Matches shown here are a preview until you save.":
+    "Gespeicherte Regeln müssen repariert werden. Angezeigte Treffer sind bis zum Speichern eine Vorschau.",
   "None of the saved rules could be read.": "Keine der gespeicherten Regeln konnte gelesen werden.",
   "The saved kind of title isn't one this version knows.":
     "Die gespeicherte Titelart kennt diese Version nicht.",

@@ -288,7 +288,7 @@ function RepairNotice({ problems }: { problems: readonly WithheldRulesProblem[] 
   return (
     <div className="flex flex-col gap-1.5 pb-1 text-[0.8125rem] leading-4">
       <p className="text-destructive">
-        {t("Some saved rules couldn't be read. Nothing shows until you save these.")}
+        {t("Saved rules need repair. Matches shown here are a preview until you save.")}
       </p>
       {reasons.length > 0 && <p className="text-muted-foreground">{reasons.join(" ")}</p>}
     </div>
