@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Scheduler from "effect/Scheduler";
 import { describe, expect, inject, it, onTestFinished, vi } from "vitest";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { setLanguage } from "@mrstreamer/core/i18n";
@@ -720,7 +721,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect((await household.status()).fetchedAt).toEqual(expect.any(Number));
   });
 
-  it("refuses the lists' status to a window whose viewer's admission has ended", async () => {
+  it("refuses the lists' status to a viewer whose admission has ended", async () => {
     const { runtime } = await onDemandApp();
     const onDemand = await runtime.runPromise(OnDemand);
     const settings = await runtime.runPromise(Settings);
@@ -731,6 +732,48 @@ describe("movies and series", { timeout: 20_000 }, () => {
           owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
           settings,
           current: () => false,
+        }),
+      ),
+    );
+
+    await expect(status).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+  });
+
+  it("refuses the lists' status when admission ends at a scheduler yield", async () => {
+    const { runtime } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+
+    let active = true;
+    let armed = false;
+    const scheduler = new Scheduler.MixedScheduler();
+    scheduler.shouldYield = () => {
+      if (!armed) return false;
+
+      armed = false;
+
+      return true;
+    };
+
+    const status = runtime.runPromise(
+      onDemand.status.pipe(
+        Effect.provideService(Scheduler.Scheduler, scheduler),
+        Effect.provideService(AdmittedSettings, {
+          owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+          settings,
+          current: () => {
+            const was = active;
+
+            // Yield after the first admission decision, then switch before the fiber resumes.
+            if (was) armed = true;
+            queueMicrotask(() => {
+              active = false;
+            });
+
+            return was;
+          },
         }),
       ),
     );

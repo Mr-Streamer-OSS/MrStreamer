@@ -42,6 +42,7 @@ import { Failed } from "@mrstreamer/core/failure";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 import { readJson, readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 import { Subscriptions, type SavedSubscription } from "./subscription.ts";
@@ -736,25 +737,31 @@ export const profileChanged = new Failed({
   error: { kind: "unexpected", detail: PROFILE_CHANGED },
 });
 
+/** Checked again at worker entry because source preparation may outlive the admission. */
+export const admissionCurrent = (admitted: Option.Option<AdmittedSettings["Service"]>) =>
+  admitted._tag === "None" || admitted.value.current();
+
 /** Fails with `profileChanged` once the viewer a request was admitted for is no longer admitted. */
 export const stillAdmitted = Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
-  admitted._tag === "Some" && !admitted.value.current() ? Effect.fail(profileChanged) : Effect.void,
+  admissionCurrent(admitted) ? Effect.void : Effect.fail(profileChanged),
 );
 
+/** Selects captured settings and checks their admission in one synchronous typed decision. */
+export const admittedSettings = (fallback: Settings["Service"]) =>
+  Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) => {
+    if (!admissionCurrent(admitted)) return Effect.fail(profileChanged);
+
+    return Effect.succeed(admitted._tag === "None" ? fallback : admitted.value.settings);
+  });
+
 /**
- * The settings of the viewer a request was admitted for, while that viewer is still the one
- * admitted, or `fallback` outside an admitted request. After that it dies with the refusal's
- * text, as its callers declare no failure; a read that must refuse checks the admission first.
+ * Captured settings, or `fallback` outside an admitted request. Existing infallible callers die
+ * with the refusal text; reads that declare refusal use `admittedSettings` directly.
  */
 export const viewingSettings = (fallback: Settings["Service"]) =>
-  Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
-    admitted._tag === "None"
-      ? Effect.succeed(fallback)
-      : Effect.sync(() => {
-          if (!admitted.value.current()) throw new Error(PROFILE_CHANGED);
-
-          return admitted.value.settings;
-        }),
+  admittedSettings(fallback).pipe(
+    Effect.mapError(() => new Error(PROFILE_CHANGED)),
+    Effect.orDie,
   );
 
 /** Shared catalogue facts may be reused; an admitted viewer's preferences are read only for it. */

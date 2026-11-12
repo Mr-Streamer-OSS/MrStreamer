@@ -97,6 +97,8 @@ import {
   AdmittedSettings,
   profileChanged,
   stillAdmitted,
+  admittedSettings,
+  admissionCurrent,
 } from "./preferences.ts";
 import {
   Subscriptions,
@@ -642,7 +644,7 @@ function make(deps: OnDemandDeps) {
           try: () => {
             // Source facts can finish after a switch. Keep the original admission, and refuse
             // it at the worker entry rather than run it with the new viewer's configuration.
-            if (admitted._tag === "Some" && !admitted.value.current()) throw profileChanged;
+            if (!admissionCurrent(admitted)) throw profileChanged;
 
             return worker.call(method, selected);
           },
@@ -663,7 +665,7 @@ function make(deps: OnDemandDeps) {
         const admitted = yield* Effect.serviceOption(AdmittedSettings);
         const kids = yield* Effect.serviceOption(AdmittedKids);
 
-        if (admitted._tag === "Some" && !admitted.value.current()) return yield* profileChanged;
+        if (!admissionCurrent(admitted)) return yield* profileChanged;
         const currency = ruleCurrency;
 
         const key = JSON.stringify([
@@ -715,9 +717,8 @@ function make(deps: OnDemandDeps) {
       const saved = yield* listed;
 
       if (saved.length === 0) return [];
-      // Nothing is awaited between this and the read: viewingPreferences would die instead.
-      yield* stillAdmitted;
-      const adults = (yield* preferences).adultTitles ?? false;
+      const selected = yield* admittedSettings(settings);
+      const adults = (yield* selected.get).adultTitles ?? false;
       const worked = yield* call("status", { owners: saved.map(ownerOf), adults });
 
       return saved.map((subscription, at) => ({ subscription, worked: worked[at] ?? NOTHING }));
@@ -813,8 +814,8 @@ function make(deps: OnDemandDeps) {
         return { current };
       });
 
-    /** The lists' status as the worker holds it. It refuses no one, so publication reads it. */
-    const listsStatus = Effect.gen(function* () {
+    /** Reads the lists' status, then refuses a viewer whose admission ended during the read. */
+    const status = Effect.gen(function* () {
       const policy = yield* Effect.serviceOption(AdmittedKids);
 
       const found = yield* held.pipe(
@@ -825,6 +826,9 @@ function make(deps: OnDemandDeps) {
           ),
         ),
       );
+
+      // Even a read that counts unavailable lists as not loaded must refuse an ended admission.
+      yield* stillAdmitted;
 
       return {
         lists: found.map(({ subscription, worked }) => statusOf(subscription.id, worked)),
@@ -837,22 +841,18 @@ function make(deps: OnDemandDeps) {
     });
 
     /**
-     * The lists' status for the viewer admitted. Checked once it is read, so an admission that
-     * ended during the read refuses them even where the read counted the lists as not loaded.
-     */
-    const status = Effect.tap(listsStatus, () => stillAdmitted);
-
-    /**
      * Publishes household status; the window re-reads it under fresh viewer admission. `marked`
      * follows lists that mark a title they listed for adults. Acceptance can outlive its viewer.
      */
     const publish = (marked: boolean) =>
-      Effect.flatMap(listsStatus, (current) =>
+      Effect.flatMap(status, (current) =>
         PubSub.publish(updates, marked ? { ...current, markedForAdults: true } : current),
       ).pipe(
         Effect.updateContext((context: Context.Context<never>) =>
           Context.omit(AdmittedSettings, AdmittedKids)(context),
         ),
+        // Household publication has no admission to refuse; keep its infallible contract.
+        Effect.orDie,
       );
 
     const publishStatus = publish(false);
