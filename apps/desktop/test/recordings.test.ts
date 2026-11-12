@@ -1006,7 +1006,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     await new Promise((resolve) => setTimeout(resolve, 2100));
     await recordings.check();
     const [ended] = await recordings.list();
-    expect(ended).toMatchObject({ status: { kind: "partial", cut: "stream" }, unsaved: true });
+    expect(ended).toMatchObject({ status: { kind: "missing" }, unsaved: true });
 
     await rm(manifest, { recursive: true });
     await rename(`${manifest}.saved`, manifest);
@@ -1074,7 +1074,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         ([first]) => first?.status.kind === "partial" && first.unsaved === true,
       );
 
-      expect(ended).toMatchObject({ status: { kind: "partial", cut: "stream" }, unsaved: true });
+      expect(ended).toMatchObject({ status: { kind: "missing" }, unsaved: true });
 
       if (how === "stopped")
         await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
@@ -1635,7 +1635,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         if (failure === "initial save") expect(await recordings.list()).toEqual([]);
         else
           expect(await recordings.list()).toMatchObject([
-            { status: { kind: "partial", cut: "stream" }, unsaved: true },
+            { status: { kind: "missing" }, unsaved: true },
           ]);
       } finally {
         if (failure === "capture cleanup") refuse = false;
@@ -1653,11 +1653,9 @@ describe.skipIf(!hasTools)("recordings", () => {
         expect(heard.every((list) => list.length === 0)).toBe(true);
       } else if (failure === "capture" || failure === "capture marker") {
         expect(await recordings.list()).toMatchObject([
-          { status: { kind: "partial", cut: "stream" }, unsaved: true },
+          { status: { kind: "missing" }, unsaved: true },
         ]);
-        expect(heard.at(-1)).toMatchObject([
-          { status: { kind: "partial", cut: "stream" }, unsaved: true },
-        ]);
+        expect(heard.at(-1)).toMatchObject([{ status: { kind: "missing" }, unsaved: true }]);
       } else expect(heard.at(-1)).toEqual([]);
 
       refuse = false;
@@ -7763,7 +7761,7 @@ describe("recording protection and retention", () => {
         await writing.promise;
         expect(provider.streamRequests()).toBe(0);
         expect((await first.recordings.list()).find((each) => each.id === id)).toMatchObject({
-          status: { kind: "partial", cut: "stream" },
+          status: { kind: "missing" },
           unsaved: true,
         });
       } finally {

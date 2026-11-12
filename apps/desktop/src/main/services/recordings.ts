@@ -906,7 +906,7 @@ function make(deps: RecordingsDeps) {
           if (failedFolders.has(record.id))
             return {
               ...marked,
-              status: { kind: "partial", cut: "stream" },
+              status: { kind: "missing" },
               ended: record.start,
               unsaved: true,
             };
