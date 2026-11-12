@@ -8,6 +8,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
 import { afterEach, expect, it, vi } from "vitest";
+import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
 import { clockTime } from "../../src/renderer/src/lib/format.ts";
@@ -30,8 +31,11 @@ afterEach(() => {
 
 const title = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "night" } as const;
 
-/** Shows a ten-minute movie playing from 5:00, with the preferences main has saved. */
-async function watching(): Promise<HTMLElement> {
+/** Shows a ten-minute movie playing from 5:00, with `saved` as the preferences main has saved. */
+async function watching(saved: Partial<Preferences> = {}): Promise<HTMLElement> {
+  ipc.reset();
+  runs.length = 0;
+  ipc.prefer(saved);
   vi.useFakeTimers();
   const client = new QueryClient();
   cleanups.push(
@@ -84,10 +88,7 @@ const key = (name: string) =>
   });
 
 it("skips by the saved step from Left and Right and from the buttons, which name it", async () => {
-  ipc.reset();
-  runs.length = 0;
-  ipc.prefer({ seekStepSeconds: 30 });
-  await watching();
+  await watching({ seekStepSeconds: 30 });
 
   await key("ArrowRight");
   expect(await landed()).toBe(330);
@@ -101,8 +102,6 @@ it("skips by the saved step from Left and Right and from the buttons, which name
 });
 
 it("skips ten seconds while no step is saved", async () => {
-  ipc.reset();
-  runs.length = 0;
   const container = await watching();
 
   await key("ArrowRight");
@@ -137,8 +136,6 @@ async function goTo(text: string, end = "Enter"): Promise<HTMLInputElement> {
 }
 
 it("goes to a typed time, and keeps one it can't read in the field with an example", async () => {
-  ipc.reset();
-  runs.length = 0;
   await watching();
 
   await goTo("2:30");
@@ -160,8 +157,6 @@ it("goes to a typed time, and keeps one it can't read in the field with an examp
 });
 
 it("sets a sleep timer from its menu, names when it pauses, and pauses there", async () => {
-  ipc.reset();
-  runs.length = 0;
   await watching();
 
   await act(async () => button("Sleep timer").click());
@@ -188,8 +183,6 @@ it("sets a sleep timer from its menu, names when it pauses, and pauses there", a
 });
 
 it("turns a sleep timer for the end off from its menu", async () => {
-  ipc.reset();
-  runs.length = 0;
   await watching();
 
   await act(async () => button("Sleep timer").click());

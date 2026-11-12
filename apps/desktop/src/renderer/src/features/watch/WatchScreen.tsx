@@ -13,8 +13,8 @@
 //   a message's cross closes the message.
 // A local MPEG-TS channel keeps its recent history while it plays, shown on a timeline under the
 // controls: Space or K pauses while the channel goes on arriving, J and L skip the seek step set in
-// Settings (10 seconds unless changed), End
-// goes live, and the slider seeks when let go. Other streams say they can't rewind.
+// Settings (10 seconds unless changed), End goes live, and the slider seeks when let go. Other
+// streams say they can't rewind.
 // A picture that stands still for a few seconds while it should play says "Waiting for data" at
 // the top right until it moves again or the channel reconnects.
 // While a receiver on the network plays the channel, the controls stay: there is no picture to

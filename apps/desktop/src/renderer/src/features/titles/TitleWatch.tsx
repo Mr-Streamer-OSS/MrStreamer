@@ -1,16 +1,16 @@
 // Playing a movie or an episode: the picture fills the window, with the title, a scrubber and the
 // controls along the bottom, fading when idle. Sound opens the file's sound tracks, CC everything
 // about its subtitles, Speed plays it slower or faster and the sleep timer pauses it after some
-// minutes or at its end (SleepMenu.tsx); a series offers its next episode, and at an
-// episode's end counts down to it (see title-player.ts). A downloaded episode does the same with the
-// next episode's copy on this computer, or says why it can't. The time before the scrubber is a
-// button that turns into a field: a typed time, such as 1:02:13, goes there. Back returns to where
-// the title was opened.
+// minutes or at its end (SleepMenu.tsx); a series offers its next episode, and at an episode's end
+// counts down to it (see title-player.ts). A downloaded episode does the same with the next
+// episode's copy on this computer, or says why it can't. The time before the scrubber is a button
+// that turns into a field: a typed time, such as 1:02:13, goes there. Back returns to where the
+// title was opened.
 //   Space or K pauses, Left and Right skip the seek step set in Settings (10 seconds unless
-//   changed), Up and Down change the volume, F is full
-//   screen, M mutes, C turns subtitles on or off, N plays the next episode, also during the
-//   countdown, G and H move subtitles earlier or later, < and > play slower or faster, P shrinks
-//   the window into the mini player and back, O opens the chooser of where it plays. While a menu
+//   changed), Up and Down change the volume, F is full screen, M mutes, C turns subtitles on or
+//   off, N plays the next episode, also during the countdown, G and H move subtitles earlier or
+//   later, < and > play slower or faster, P shrinks the window into the mini player and back, O
+//   opens the chooser of where it plays. While a menu
 //   is open, keys are its own: Escape closes it, then leaves full screen or the mini player, then
 //   goes back.
 // In the mini player the picture fills the small window, with a few controls along its foot.

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // At the end of a downloaded episode, the copy of the very next episode of its series plays after
-// the saved delay, as online: cancellable, held while Settings is open, off when autoplay is off or a sleep timer is set for the end,
-// and at once with Next. It opens only once main kept this copy's progress and main's list, read
+// the saved delay, as online: cancellable, held while Settings is open, off when autoplay is off
+// or a sleep timer is set for the end, and at once with Next. It opens only once main kept this copy's progress and main's list, read
 // again, still has it on this computer: a save main refused keeps this copy, says so and leaves
 // Next to try again. A next episode with no copy, one still downloading and the series' last
 // episode say so instead; a copy queued before series were kept ends as before. None of it asks a
