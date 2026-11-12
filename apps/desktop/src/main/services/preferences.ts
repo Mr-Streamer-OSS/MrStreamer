@@ -726,17 +726,27 @@ export class AdmittedSettings extends Context.Service<
   }
 >()("mrstreamer/AdmittedSettings") {}
 
+const PROFILE_CHANGED = "Viewing profile changed; retry this catalogue read.";
+
+/**
+ * How a catalogue read refuses the viewer it was admitted for once that viewer is no longer the
+ * one admitted. It is that viewer's answer alone: never a failure of the lists it was about.
+ */
+export const profileChanged = new Failed({
+  error: { kind: "unexpected", detail: PROFILE_CHANGED },
+});
+
 /**
  * The settings of the viewer a request was admitted for, while that viewer is still the one
- * admitted, or `fallback` outside an admitted request.
+ * admitted, or `fallback` outside an admitted request. After that it dies with the refusal's
+ * text, as its callers declare no failure; a read that must refuse checks the admission first.
  */
 export const viewingSettings = (fallback: Settings["Service"]) =>
   Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
     admitted._tag === "None"
       ? Effect.succeed(fallback)
       : Effect.sync(() => {
-          if (!admitted.value.current())
-            throw new Error("Viewing profile changed; retry this catalogue read.");
+          if (!admitted.value.current()) throw new Error(PROFILE_CHANGED);
 
           return admitted.value.settings;
         }),
