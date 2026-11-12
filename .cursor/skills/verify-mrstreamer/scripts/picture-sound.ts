@@ -611,14 +611,14 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
       key: "Tab",
       code: "Tab",
       windowsVirtualKeyCode: 9,
-      modifiers: 1,
+      modifiers: 8,
     });
     await d.send("Input.dispatchKeyEvent", {
       type: "keyUp",
       key: "Tab",
       code: "Tab",
       windowsVirtualKeyCode: 9,
-      modifiers: 1,
+      modifiers: 8,
     });
     await d.wait(() =>
       d.exists(
