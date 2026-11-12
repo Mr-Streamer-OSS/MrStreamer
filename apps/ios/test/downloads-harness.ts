@@ -184,6 +184,18 @@ vi.mock("expo-video", () => ({
 const passThrough = globalThis.fetch;
 
 vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(input instanceof Request ? input.url : input);
+
+  // The panels' pictures are on image.example, a name that never resolves. Fail them as fetch
+  // does for such a name, now: waiting on this machine's resolver held picture tasks open past
+  // the tests' waits.
+  if (url.hostname === "image.example")
+    throw new TypeError("fetch failed", {
+      cause: Object.assign(new Error(`getaddrinfo ENOTFOUND ${url.hostname}`), {
+        code: "ENOTFOUND",
+      }),
+    });
+
   const response = await passThrough(input, init);
   const restricted = memory.restricted;
 
