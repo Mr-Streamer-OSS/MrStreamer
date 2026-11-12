@@ -881,6 +881,15 @@ export const es: Translation = {
   "People and franchises need a TMDB key, in Settings.":
     "Las personas y las sagas necesitan una clave de TMDB, en Ajustes.",
   "TMDB didn't answer. Try again.": "TMDB no respondió. Inténtalo de nuevo.",
+  "Part of": "Parte de",
+  "{count} in your subscriptions, newest first":
+    "{count} en tus suscripciones, los más recientes primero",
+  "{count} in your subscriptions, in release order":
+    "{count} en tus suscripciones, por orden de estreno",
+  "None of their titles are in your subscriptions.":
+    "Ninguno de sus títulos está en tus suscripciones.",
+  "None of its films are in your subscriptions.":
+    "Ninguna de sus películas está en tus suscripciones.",
   "TMDB refused the key. Check it in Settings.": "TMDB rechazó la clave. Revísala en Ajustes.",
   "Genres appear as details arrive from TMDB.":
     "Los géneros aparecen a medida que llegan los detalles de TMDB.",

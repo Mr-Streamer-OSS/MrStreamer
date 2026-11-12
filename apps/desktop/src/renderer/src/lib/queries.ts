@@ -21,6 +21,7 @@ import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type {
   CollectionId,
   CollectionSort,
+  RelatedLink,
   RowTab,
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
@@ -374,6 +375,13 @@ export const queries = {
     queryOptions({
       queryKey: ["ondemand", "related", kind, ownedKey(version)],
       queryFn: () => call("ondemand.related", { kind, version: ownedId(version) }),
+      retry: false,
+    }),
+  /** A person's or film franchise's titles in the subscriptions, by TMDB id, from a details link. */
+  linked: (link: RelatedLink) =>
+    queryOptions({
+      queryKey: ["ondemand", "linked", link.kind, link.id],
+      queryFn: () => call("ondemand.linked", { link }),
       retry: false,
     }),
   /** Genres or streaming services as tiles. */
@@ -891,9 +899,10 @@ export function syncOnDemand(client: QueryClient): () => void {
   let fetched: string | undefined;
 
   const stopLists = listen("ondemand.updated", (status) => {
-    // Related titles leave out every title the lists mark for adults, and new lists can mark one
-    // that a row read before them still names. With new lists, each such row goes instead of
-    // showing while it is read again: an open one asks again at once, a closed one as it opens.
+    // Related titles, and a person's or franchise's, leave out every title the lists mark for
+    // adults, and new lists can mark one that a row read before them still names. With new lists,
+    // each such row goes instead of showing while it is read again: an open one asks again at
+    // once, a closed one as it opens.
     // So it does when the update says new lists marked one, as two can share a fetch time.
     // TMDB's metadata marks nothing. The first update can't tell which lists came before it.
     // Lists of titles to browse go only when the update says new lists did mark one: read again
@@ -919,7 +928,7 @@ export function syncOnDemand(client: QueryClient): () => void {
     const dropped = (query: QueryFilters["queryKey"]) => {
       const part = query?.[1];
 
-      return part === "related"
+      return part === "related" || part === "linked"
         ? newLists || marked
         : marked && type.keywords.string.root.allows(part) && TITLE_LISTS.has(part);
     };

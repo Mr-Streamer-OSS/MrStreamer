@@ -21,7 +21,10 @@
 // and shows none as watched or not. The title from the lists heads the sheet at once; the rest
 // follows when the provider answers, and TMDB's details when they arrive. A related title opens its
 // details in place of these, and Back in the sheet's top bar returns through them as they stood
-// (`openRelated` in `app/ui-store.ts`); Close and Escape return to the page.
+// (`openRelated` in `app/ui-store.ts`); Close and Escape return to the page. A cast member, a
+// director or creator and a film's franchise that TMDB gave an id open, in place of these details,
+// the titles the subscriptions list with them (`LinkedTitles`); Back returns to the details with
+// the keyboard on the link. Names without an id are plain text.
 import { Dialog } from "@base-ui/react/dialog";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Circle, CircleDashed, Play, RotateCcw } from "lucide-react";
@@ -31,6 +34,7 @@ import type {
   EpisodeDetails,
   MovieDetails,
   Person,
+  RelatedLink,
   SeriesDetails,
   Title,
   TitleDetails,
@@ -46,6 +50,7 @@ import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
 import { formatDate, formatDecimal, t } from "@mrstreamer/core/i18n";
 import {
   closeDetails,
+  openLinked,
   openSubscription,
   useUi,
   type DetailsPlace,
@@ -95,7 +100,7 @@ import {
   useEpisodeMarks,
   useTitleMarks,
 } from "./EpisodeMarks.tsx";
-import { RelatedTitles } from "./RelatedTitles.tsx";
+import { LinkedTitles, RelatedTitles } from "./RelatedTitles.tsx";
 import { VersionMenu } from "./VersionMenu.tsx";
 import { defined } from "@mrstreamer/core/defined";
 
@@ -108,6 +113,8 @@ interface SheetPlace {
   /** The related title, by `Title.key`, Back returned here from. */
   readonly returnTo: string | null;
   readonly onReturn: (tile: HTMLElement | null) => void;
+  /** Opens a person's or franchise's titles from its link, named `label`, in place of these. */
+  readonly onLink: (link: RelatedLink, label: string) => void;
 }
 
 /** Which version plays, and how the arrow beside Play offers the others. */
@@ -238,14 +245,51 @@ export function DetailsView({
     [],
   );
   const scroller = useRef<HTMLDivElement>(null);
+  // A person's or franchise's titles in place of these details, as Back may also restore them.
+  const linked = useUi((state) => state.linked);
+  // What Back restores is restored once, by the list or the related row that shows first.
+  const [returnTo, setReturnTo] = useState(returned?.related ?? null);
+
+  // Opened, the list starts at its top. Left by Back, the details show as they stood, with the
+  // keyboard on the link, or on the sheet when the link has gone.
+  const linkedBefore = useRef(linked);
+  useEffect(() => {
+    const left = linkedBefore.current;
+    linkedBefore.current = linked;
+    const sheet = scroller.current;
+
+    if (!sheet || left === linked) return;
+
+    if (linked) {
+      sheet.scrollTop = 0;
+
+      return;
+    }
+
+    if (!left) return;
+
+    sheet.scrollTop = left.scroll;
+
+    const link = sheet.querySelector<HTMLElement>(
+      `[data-link="${left.link.kind}:${left.link.id}"]`,
+    );
+
+    (link ?? sheet.closest<HTMLElement>('[role="dialog"]'))?.focus({ preventScroll: true });
+  }, [linked]);
 
   const place: SheetPlace = {
     season,
     onSeason: setSeason,
-    here: (related) => ({ season, scroll: scroller.current?.scrollTop ?? 0, related }),
-    returnTo: returned?.related ?? null,
+    here: (related) => ({
+      season,
+      scroll: scroller.current?.scrollTop ?? 0,
+      related,
+      ...defined({ linked: linked ?? undefined }),
+    }),
+    returnTo,
     onReturn: (tile) => {
       const sheet = scroller.current;
+      setReturnTo(null);
 
       if (!returned || !sheet) return;
       sheet.scrollTop = returned.scroll;
@@ -255,6 +299,7 @@ export function DetailsView({
       tile.focus({ preventScroll: true });
       tile.scrollIntoView({ block: "nearest", inline: "nearest" });
     },
+    onLink: (link, label) => openLinked({ link, label, scroll: scroller.current?.scrollTop ?? 0 }),
   };
 
   return (
@@ -268,7 +313,15 @@ export function DetailsView({
           </button>
         </p>
       )}
-      {details.data && ready ? (
+      {linked ? (
+        <LinkedTitles
+          key={`${linked.link.kind}:${linked.link.id}`}
+          view={linked}
+          here={place.here}
+          returnTo={place.returnTo}
+          onReturn={place.onReturn}
+        />
+      ) : details.data && ready ? (
         <Content
           details={details.data}
           versions={{
@@ -378,7 +431,20 @@ function Content({
           {details.plot}
         </p>
       )}
-      <Credits details={details} />
+      <Credits details={details} onLink={place.onLink} />
+      {details.kind === "movie" && details.franchise && (
+        <LinkButton
+          link={{ kind: "franchise", id: details.franchise.tmdbId }}
+          onLink={place.onLink}
+          label={details.franchise.name}
+          className="mt-4 text-[0.8125rem]"
+        >
+          <span className="text-muted-foreground">{t("Part of")}</span>{" "}
+          <span className="font-medium underline-offset-3 group-hover:underline group-focus-visible:underline">
+            {details.franchise.name}
+          </span>
+        </LinkButton>
+      )}
       <RelatedTitles
         details={details}
         switching={switching}
@@ -445,31 +511,88 @@ function Header({
   );
 }
 
-/** Who is in it, with their photos and parts, and who directed or created it. */
-function Credits({ details }: { details: TitleDetails }) {
+/**
+ * Who is in it, with their photos and parts, and who directed or created it. Each that TMDB gave
+ * an id opens their titles (`onLink`).
+ */
+function Credits({ details, onLink }: { details: TitleDetails; onLink: SheetPlace["onLink"] }) {
   const cast = details.cast.slice(0, 8);
-  const makers = details.directors.slice(0, 2);
+
+  const makers = (
+    details.directorCredits ?? details.directors.map((name) => ({ name, tmdbId: undefined }))
+  ).slice(0, 2);
 
   if (cast.length === 0 && makers.length === 0) return null;
 
   return (
-    <div className="mt-6 flex gap-5 overflow-x-auto pb-1">
+    // Padded so a link's focus ring shows inside the row that scrolls.
+    <div className="-mx-1 mt-5 flex gap-5 overflow-x-auto p-1">
       {cast.map((person) => (
-        <CastMember key={`${person.name}:${person.role ?? ""}`} person={person} />
+        <LinkButton
+          key={`${person.name}:${person.role ?? ""}`}
+          link={person.tmdbId === undefined ? null : { kind: "person", id: person.tmdbId }}
+          onLink={onLink}
+          label={person.name}
+          className="w-[5.5rem] flex-none text-center"
+        >
+          <CastMember person={person} />
+        </LinkButton>
       ))}
       {makers.length > 0 && (
         <div className="w-28 flex-none self-center text-[0.8125rem]">
           <div className="text-muted-foreground">
             {details.kind === "movie" ? t("Directed by") : t("Created by")}
           </div>
-          {makers.map((name) => (
-            <div key={name} className="truncate font-medium">
-              {name}
-            </div>
+          {makers.map(({ name, tmdbId }) => (
+            <LinkButton
+              key={tmdbId ?? name}
+              link={tmdbId === undefined ? null : { kind: "person", id: tmdbId }}
+              onLink={onLink}
+              label={name}
+              className="block max-w-full truncate font-medium"
+            >
+              <span className="underline-offset-3 group-hover:underline group-focus-visible:underline">
+                {name}
+              </span>
+            </LinkButton>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A person's or franchise's link: a button that opens their titles, marked with `data-link` for
+ * Back to give the keyboard to, or the same content as plain text when TMDB gave no id.
+ */
+function LinkButton({
+  link,
+  onLink,
+  label,
+  className,
+  children,
+}: {
+  link: RelatedLink | null;
+  onLink: SheetPlace["onLink"];
+  label: string;
+  className: string;
+  children: ReactNode;
+}) {
+  if (!link) return <div className={className}>{children}</div>;
+
+  return (
+    <button
+      type="button"
+      data-link={`${link.kind}:${link.id}`}
+      onClick={() => onLink(link, label)}
+      className={cn(
+        "group rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-white",
+        className,
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -479,7 +602,7 @@ function CastMember({ person }: { person: Person }) {
   const photo = failed ? null : person.photoUrl;
 
   return (
-    <div className="w-[5.5rem] flex-none text-center">
+    <>
       <div className="mx-auto size-16 overflow-hidden rounded-full bg-white/8 ring-1 ring-white/10">
         {photo ? (
           <img
@@ -497,9 +620,11 @@ function CastMember({ person }: { person: Person }) {
           </span>
         )}
       </div>
-      <div className="mt-2 truncate text-[0.8125rem] font-medium">{person.name}</div>
+      <div className="mt-2 truncate text-[0.8125rem] font-medium underline-offset-3 group-hover:underline group-focus-visible:underline">
+        {person.name}
+      </div>
       {person.role && <div className="truncate text-xs text-muted-foreground">{person.role}</div>}
-    </div>
+    </>
   );
 }
 

@@ -831,6 +831,13 @@ export const nl: Translation = {
   "People and franchises need a TMDB key, in Settings.":
     "Personen en filmreeksen hebben een TMDB-sleutel nodig, in Instellingen.",
   "TMDB didn't answer. Try again.": "TMDB antwoordde niet. Probeer het opnieuw.",
+  "Part of": "Onderdeel van",
+  "{count} in your subscriptions, newest first": "{count} in je abonnementen, nieuwste eerst",
+  "{count} in your subscriptions, in release order":
+    "{count} in je abonnementen, op volgorde van verschijnen",
+  "None of their titles are in your subscriptions.":
+    "Geen van hun titels staat in je abonnementen.",
+  "None of its films are in your subscriptions.": "Geen van de films staat in je abonnementen.",
   "TMDB refused the key. Check it in Settings.":
     "TMDB weigerde de sleutel. Controleer hem in Instellingen.",
   "Genres appear as details arrive from TMDB.":
