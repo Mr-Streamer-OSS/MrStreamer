@@ -28,8 +28,9 @@
 // gap since its file was last written, or, its time over, counts as cut short by the quit. A
 // recording's folder left without its record, as a crash leaves one as its start fails, or a
 // failed start whose folder couldn't be removed, or an older version's crash as it started, goes
-// then. A failed start whose record recordings.json couldn't take out marks its folder instead, so
-// a relaunch, also after a Quit, keeps it listed until cleanup saves, without capturing.
+// then. A failed start whose record recordings.json couldn't take out tries to mark its folder.
+// Once that mark is saved, a relaunch keeps it listed until cleanup saves, without capturing. If
+// both writes fail before exit, a relaunch still treats its saved record as a crash resume.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
