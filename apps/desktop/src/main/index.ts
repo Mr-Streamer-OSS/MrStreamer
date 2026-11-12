@@ -1019,7 +1019,10 @@ async function start(): Promise<void> {
     );
 
   // Household publications trigger a fresh admitted public status, never publish household counts.
-  const publicStatus = <A, B>(changes: Stream.Stream<A>, read: (change: A) => Effect.Effect<B>) =>
+  const publicStatus = <A, B>(
+    changes: Stream.Stream<A>,
+    read: (change: A) => Effect.Effect<B, Failed>,
+  ) =>
     changes.pipe(
       Stream.mapEffect((change) =>
         Effect.gen(function* () {

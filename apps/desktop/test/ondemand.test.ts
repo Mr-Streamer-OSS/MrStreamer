@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Scheduler from "effect/Scheduler";
 import { describe, expect, inject, it, onTestFinished, vi } from "vitest";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { setLanguage } from "@mrstreamer/core/i18n";
@@ -687,6 +688,142 @@ describe("movies and series", { timeout: 20_000 }, () => {
     );
     const snapshot = await runtime.runPromise(onDemand.catalogueSnapshot([id]));
     expect(Effect.runSyncExit(snapshot.current)._tag).toBe("Success");
+  });
+
+  it("refuses a refresh's status to a viewer whose admission ends while it is read, and keeps the lists", async () => {
+    const { runtime, onDemand: household, subscriptionId } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+    let active = true;
+
+    // The viewer switches profile while the refresh reads their preferences for its status.
+    const refresh = runtime.runPromise(
+      onDemand.refresh(subscriptionId).pipe(
+        Effect.provideService(AdmittedSettings, {
+          owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+          settings: {
+            ...settings,
+            get: Effect.tap(
+              settings.get,
+              Effect.sync(() => {
+                active = false;
+              }),
+            ),
+          },
+          current: () => active,
+        }),
+      ),
+    );
+
+    await expect(refresh).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+    expect((await household.status()).fetchedAt).toEqual(expect.any(Number));
+  });
+
+  it("refuses the lists' status to a viewer whose admission has ended", async () => {
+    const { runtime } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+
+    const status = runtime.runPromise(
+      onDemand.status.pipe(
+        Effect.provideService(AdmittedSettings, {
+          owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+          settings,
+          current: () => false,
+        }),
+      ),
+    );
+
+    await expect(status).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+  });
+
+  it("refuses the lists' status when admission ends at a scheduler yield", async () => {
+    const { runtime } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+
+    let active = true;
+    let armed = false;
+    const scheduler = new Scheduler.MixedScheduler();
+    scheduler.shouldYield = () => {
+      if (!armed) return false;
+
+      armed = false;
+
+      return true;
+    };
+
+    const status = runtime.runPromise(
+      onDemand.status.pipe(
+        Effect.provideService(Scheduler.Scheduler, scheduler),
+        Effect.provideService(AdmittedSettings, {
+          owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+          settings,
+          current: () => {
+            const was = active;
+
+            // Yield after the first admission decision, then switch before the fiber resumes.
+            if (was) armed = true;
+            queueMicrotask(() => {
+              active = false;
+            });
+
+            return was;
+          },
+        }),
+      ),
+    );
+
+    await expect(status).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+  });
+
+  it("refuses a freshness read after the viewer's admission ends", async () => {
+    const { runtime, subscriptionId } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+
+    await expect(
+      runtime.runPromise(
+        onDemand.isStale(subscriptionId, "1 hour").pipe(
+          Effect.provideService(AdmittedSettings, {
+            owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+            settings,
+            current: () => false,
+          }),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+  });
+
+  it("keeps a refresh refused for an ended admission off the lists, which the next read still fetches", async () => {
+    const { runtime, onDemand: household, subscriptionId } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+
+    const refresh = runtime.runPromise(
+      onDemand.refresh(subscriptionId).pipe(
+        Effect.provideService(AdmittedSettings, {
+          owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+          settings,
+          current: () => false,
+        }),
+      ),
+    );
+
+    await expect(refresh).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+    const list = await household.collection({ kind: "movie", id: "all", offset: 0, limit: 1 });
+    expect(list.total).toBeGreaterThan(0);
+    expect((await household.status()).failure).toBeNull();
   });
 
   it("finds nothing by a version that names another subscription", async () => {

@@ -91,7 +91,15 @@ import type {
 } from "../ondemand/protocol.ts";
 import { DetailCache, type ProviderDetailKey, type DetailKey } from "../platform/detail-cache.ts";
 import { VerifiedFiles } from "../platform/verified-files.ts";
-import { Settings, viewingPreferences, AdmittedSettings } from "./preferences.ts";
+import {
+  Settings,
+  viewingPreferences,
+  AdmittedSettings,
+  profileChanged,
+  stillAdmitted,
+  admittedSettings,
+  admissionCurrent,
+} from "./preferences.ts";
 import {
   Subscriptions,
   sameSource,
@@ -188,7 +196,7 @@ export interface TitleFile {
 export class OnDemand extends Context.Service<
   OnDemand,
   {
-    readonly status: Effect.Effect<OnDemandStatus>;
+    readonly status: Effect.Effect<OnDemandStatus, Failed>;
     /**
      * Current exact-file identity for subtitle search, or null once the catalogue no longer lists
      * that file as `listingKey`. Reads the loaded lists and the details kept from opening the
@@ -223,7 +231,7 @@ export class OnDemand extends Context.Service<
      * Whether a subscription's lists should be fetched again: missing, or older than `maxAge`.
      * Never for an unmapped playlist, which has Live TV only.
      */
-    isStale(subscriptionId: string, maxAge: Duration.Input): Effect.Effect<boolean>;
+    isStale(subscriptionId: string, maxAge: Duration.Input): Effect.Effect<boolean, Failed>;
     search(
       query: string,
     ): Effect.Effect<
@@ -636,13 +644,7 @@ function make(deps: OnDemandDeps) {
           try: () => {
             // Source facts can finish after a switch. Keep the original admission, and refuse
             // it at the worker entry rather than run it with the new viewer's configuration.
-            if (admitted._tag === "Some" && !admitted.value.current())
-              throw new Failed({
-                error: {
-                  kind: "unexpected",
-                  detail: "Viewing profile changed; retry this catalogue read.",
-                },
-              });
+            if (!admissionCurrent(admitted)) throw profileChanged;
 
             return worker.call(method, selected);
           },
@@ -663,13 +665,7 @@ function make(deps: OnDemandDeps) {
         const admitted = yield* Effect.serviceOption(AdmittedSettings);
         const kids = yield* Effect.serviceOption(AdmittedKids);
 
-        if (admitted._tag === "Some" && !admitted.value.current())
-          return yield* new Failed({
-            error: {
-              kind: "unexpected",
-              detail: "Viewing profile changed; retry this catalogue read.",
-            },
-          });
+        if (!admissionCurrent(admitted)) return yield* profileChanged;
         const currency = ruleCurrency;
 
         const key = JSON.stringify([
@@ -715,13 +711,14 @@ function make(deps: OnDemandDeps) {
 
     /**
      * Each of those with what the worker holds of its lists, telling the worker whether the
-     * viewer shows titles for adults.
+     * viewer shows titles for adults. Refuses a viewer whose admission ended.
      */
     const held = Effect.gen(function* () {
       const saved = yield* listed;
 
       if (saved.length === 0) return [];
-      const adults = (yield* preferences).adultTitles ?? false;
+      const selected = yield* admittedSettings(settings);
+      const adults = (yield* selected.get).adultTitles ?? false;
       const worked = yield* call("status", { owners: saved.map(ownerOf), adults });
 
       return saved.map((subscription, at) => ({ subscription, worked: worked[at] ?? NOTHING }));
@@ -817,6 +814,7 @@ function make(deps: OnDemandDeps) {
         return { current };
       });
 
+    /** Reads the lists' status, then refuses a viewer whose admission ended during the read. */
     const status = Effect.gen(function* () {
       const policy = yield* Effect.serviceOption(AdmittedKids);
 
@@ -828,6 +826,9 @@ function make(deps: OnDemandDeps) {
           ),
         ),
       );
+
+      // Even a read that counts unavailable lists as not loaded must refuse an ended admission.
+      yield* stillAdmitted;
 
       return {
         lists: found.map(({ subscription, worked }) => statusOf(subscription.id, worked)),
@@ -850,6 +851,8 @@ function make(deps: OnDemandDeps) {
         Effect.updateContext((context: Context.Context<never>) =>
           Context.omit(AdmittedSettings, AdmittedKids)(context),
         ),
+        // Household publication has no admission to refuse; keep its infallible contract.
+        Effect.orDie,
       );
 
     const publishStatus = publish(false);
@@ -932,7 +935,9 @@ function make(deps: OnDemandDeps) {
           ),
           Effect.tapError((failed) =>
             Effect.gen(function* () {
-              if (started !== generation || !(yield* stillSaved)) return;
+              // A viewer's ended admission refuses that viewer; the lists didn't fail.
+              if (failed === profileChanged || started !== generation || !(yield* stillSaved))
+                return;
               failures.set(source.id, { error: failed.error, at: Date.now() });
               yield* publishStatus;
             }),
@@ -1776,17 +1781,8 @@ function make(deps: OnDemandDeps) {
 
           // Unmapped playlists retain Live-only behavior.
           if (hasTitles(source)) yield* refreshOf(source, playlist);
-          const admitted = yield* Effect.serviceOption(AdmittedSettings);
 
-          // Acceptance can settle after its viewer's admission ended: the status isn't theirs to read.
-          if (admitted._tag === "Some" && !admitted.value.current())
-            return yield* new Failed({
-              error: {
-                kind: "unexpected",
-                detail: "Viewing profile changed; retry this catalogue read.",
-              },
-            });
-
+          // Acceptance can settle after its viewer's admission ended: status then refuses them.
           return yield* status;
         }),
 
@@ -1804,7 +1800,7 @@ function make(deps: OnDemandDeps) {
             worked.worked.importRevision !== worked.subscription.importRevision ||
             now - fetchedAt > Duration.toMillis(maxAge)
           );
-        }),
+        }).pipe(Effect.tap(() => stillAdmitted)),
 
       rows: (kind: TitleKind, tab: RowTab, like?: OwnedId) =>
         loaded(

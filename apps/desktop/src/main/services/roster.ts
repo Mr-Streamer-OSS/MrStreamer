@@ -104,11 +104,9 @@ function make() {
     const titlesOf = (source: Source) =>
       Effect.gen(function* () {
         if (yield* onDemand.isStale(source.id, LISTS_MAX_AGE)) {
-          yield* onDemand
-            .refresh(source.id)
-            .pipe(warned("[roster] movie and series refresh failed"));
+          yield* onDemand.refresh(source.id);
         }
-      });
+      }).pipe(warned("[roster] movie and series refresh failed"));
 
     const refreshPlaylist = (subscriptionId: string) =>
       Effect.gen(function* () {
