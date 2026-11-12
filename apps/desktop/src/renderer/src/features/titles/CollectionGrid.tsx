@@ -38,6 +38,7 @@ import {
 import { appError, describeError } from "../../lib/errors.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries, useSourceOf } from "../../lib/queries.ts";
+import { useKeptScroll, type KeptSpot } from "../../lib/use-kept-scroll.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { FilterEmpty, TitleFilterBar, type TitleFilterControls } from "./TitleFilters.tsx";
 
@@ -129,6 +130,7 @@ export function CollectionGrid({
   sortControl,
   hideCount,
   action,
+  kept,
 }: {
   kind: TitleKind;
   id: CollectionId;
@@ -138,8 +140,15 @@ export function CollectionGrid({
   hideCount?: boolean;
   /** Beside the filters' count, such as All's Save as collection. */
   action?: ReactNode;
+  /** Where the grid stood when the viewer last left it; see `Grid`. */
+  kept?: KeptSpot;
 } & Partial<TitleFilterControls>) {
   const listed = useCollection(kind, id, sort, filters);
+  const listKey = `${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`;
+  const [mounted, setMounted] = useState<string | null>(null);
+
+  if (listed.total !== null && listed.total > 0 && mounted !== listKey) setMounted(listKey);
+  const hasGrid = mounted === listKey;
 
   // Each poster is the version the grid lists, as the 4K tab's are their 4K versions.
   const open = (title: Title) =>
@@ -163,26 +172,33 @@ export function CollectionGrid({
           action={action}
         />
       )}
-      {listed.error ? (
-        <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>
-      ) : listed.total === 0 ? (
-        filters && Object.keys(filters).length > 0 ? (
+      {listed.total === 0 &&
+        !listed.error &&
+        (filters && Object.keys(filters).length > 0 ? (
           <FilterEmpty filters={filters} />
         ) : (
           <p className="text-[0.9375rem] text-muted-foreground">Nothing here yet.</p>
-        )
+        ))}
+      {listed.error ? (
+        <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>
       ) : (
-        <Grid
-          key={`${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`}
-          total={listed.total ?? 0}
-          itemAt={listed.titleAt}
-          keyOf={titleKey}
-          onVisible={listed.load}
-          settled={listed.settled}
-          active={active}
-          onOpen={open}
-          tile={(title, grid) => <GridPoster title={title} caption={describe(title)} grid={grid} />}
-        />
+        hasGrid && (
+          <Grid
+            key={listKey}
+            total={listed.total ?? 0}
+            reset={listed.total === null}
+            itemAt={listed.titleAt}
+            keyOf={titleKey}
+            onVisible={listed.load}
+            settled={listed.settled}
+            active={active}
+            onOpen={open}
+            {...(kept ? { kept } : {})}
+            tile={(title, grid) => (
+              <GridPoster title={title} caption={describe(title)} grid={grid} />
+            )}
+          />
+        )
       )}
     </>
   );
@@ -209,22 +225,28 @@ export function TitleGrid({
   active,
   caption = describe,
   asked = false,
+  ready = true,
   takeFocus = false,
   onFocusTaken,
+  kept,
 }: {
   titles: readonly Title[];
+  /** The query has answered, even if its result is empty. */
+  ready?: boolean;
   active: boolean;
   caption?: (title: Title) => string;
   /** Filtered results open the matching version even when it is the usual primary version. */
   asked?: boolean;
   takeFocus?: boolean;
   onFocusTaken?: () => void;
+  kept?: KeptSpot;
 }) {
   const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title), asked });
 
   return (
     <Grid
       total={titles.length}
+      ready={ready}
       itemAt={(index) => titles[index]}
       keyOf={titleKey}
       onVisible={nothing}
@@ -232,6 +254,7 @@ export function TitleGrid({
       onOpen={open}
       takeFocus={takeFocus}
       {...(onFocusTaken ? { onFocusTaken } : {})}
+      {...(kept ? { kept } : {})}
       tile={(title, grid) => <GridPoster title={title} caption={caption(title)} grid={grid} />}
     />
   );
@@ -301,6 +324,10 @@ function controlOf(scroller: HTMLElement, index: number, part: number): HTMLElem
  * keeps the focus and the Tab stop. `takeFocus` asks the selected tile to take the focus once it
  * is drawn, unless the focus went to another control first; `onFocusTaken` says it did. `settled`
  * is false while a page of the list is still being read, as a refresh reads them one at a time.
+ * `reset` clears selection and scroll together while privacy data is unread, without losing
+ * the mounted grid's focus handoff.
+ * `kept` brings the selection and the scroll back as the grid stood when it went, the selection
+ * by its key, and keeps them again as it goes.
  */
 export function Grid<T>({
   total,
@@ -312,7 +339,10 @@ export function Grid<T>({
   tile,
   takeFocus = false,
   onFocusTaken,
+  reset = false,
+  ready = true,
   settled = true,
+  kept,
 }: {
   total: number;
   /** The item at a position, or undefined while its page loads. */
@@ -326,7 +356,11 @@ export function Grid<T>({
   tile: (item: T, tile: GridTile) => ReactNode;
   takeFocus?: boolean;
   onFocusTaken?: () => void;
+  reset?: boolean;
+  /** The query has answered, even if its result is empty. */
+  ready?: boolean;
   settled?: boolean;
+  kept?: KeptSpot;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
@@ -348,21 +382,37 @@ export function Grid<T>({
   const rowHeight = tileWidth / POSTER_ASPECT_RATIO + POSTER_CAPTION_HEIGHT_REM * rem + gap;
   const rows = Math.ceil(total / columns);
 
-  const [chosen, setChosen] = useState<Chosen>({ key: null, index: 0 });
-  const found = locate(chosen, total, itemAt, keyOf);
+  const [chosen, setChosen] = useState<Chosen>(() => ({
+    key: kept?.from?.key ?? null,
+    index: kept?.from?.index ?? 0,
+  }));
+
+  const selection = reset ? { key: null, index: 0 } : chosen;
+  const found = locate(selection, total, itemAt, keyOf);
+
   // A title the loaded pages lack keeps its key while a page is still being read: a refresh
-  // answers them one at a time, and the title can be in none of them for a moment. Meanwhile it
+  // answers them one at a time, and a restored position can need a page not yet requested. Meanwhile it
   // shows no ring, takes no focus and opens nothing. Once every page answered, a title still
   // missing counts as gone, and what now stands at its position takes its place. One that moved
   // past the pages loaded so far isn't looked for beyond them.
-  const pending = found === null && !settled;
-  const selected = found ?? Math.min(chosen.index, Math.max(total - 1, 0));
+  const pending =
+    found === null && (!settled || (selection.index < total && !itemAt(selection.index)));
+
+  const selected = found ?? Math.min(selection.index, Math.max(total - 1, 0));
   const selectedItem = itemAt(selected);
-  const selectedKey = pending || !selectedItem ? chosen.key : keyOf(selectedItem);
+  const selectedKey = pending || !selectedItem ? selection.key : keyOf(selectedItem);
 
   // Kept where it was found, so the next render needn't look for it again.
   if (selected !== chosen.index || selectedKey !== chosen.key)
     setChosen({ key: selectedKey, index: selected });
+  const at = useRef<Chosen>(chosen);
+  at.current = { key: selectedKey, index: selected };
+  useKeptScroll(
+    box,
+    kept && { from: kept.from?.top ?? null, keep: (top) => kept.keep({ ...at.current, top }) },
+    width > 0 && ready && !reset,
+    reset,
+  );
   const selectedRow = Math.floor(selected / columns);
 
   // The rows in view and their overscan, without the selected row drawn beside them.

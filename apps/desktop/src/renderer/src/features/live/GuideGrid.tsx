@@ -28,7 +28,7 @@
 // is in, nothing. The details read the programme's description with `guide.programme`.
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import { Bell, History, Play, RotateCcw } from "lucide-react";
+import { Bell, ChevronLeft, ChevronRight, History, Play, RotateCcw } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -40,6 +40,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type ReactNode,
   type Ref,
 } from "react";
 import type { GuideSlot, Programme } from "@mrstreamer/contracts/guide";
@@ -58,8 +59,11 @@ import { queries } from "../../lib/queries.ts";
 import { reminderAt, useReminders } from "../../lib/reminders.ts";
 import { useOutput } from "../../player/output.ts";
 import { archiveHolds } from "@mrstreamer/core/catchup";
+import type { GuideDensity } from "@mrstreamer/contracts/preferences";
+import { useKeptScroll, type Kept } from "../../lib/use-kept-scroll.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
+import type { ChannelSpot, GuideSpot } from "../../app/ui-store.ts";
 import { SchedulePanel } from "../recordings/SchedulePanel.tsx";
 import {
   basisOfProgramme,
@@ -81,18 +85,13 @@ import {
   nextCell,
   PAGE_MS,
   PAGE_ROWS,
+  guideScale,
   pagesFor,
   timeline,
   type Cell,
   type GridAction,
   type Span,
 } from "./guide-grid.ts";
-
-/** An hour's width: 196 px at the 14 px rem the design was drawn at. */
-const HOUR_REM = 14;
-
-/** The channels' column. */
-const COLUMN_REM = 14;
 
 /** A channel's row, 48 px at 14 px. */
 const ROW_REM = 48 / 14;
@@ -139,7 +138,9 @@ const NO_GUIDE: RowGuide = { pages: [], covered: "", programmes: [], known: [] }
 
 /**
  * One list's channels by time. Give each list, and each search of it, its own grid by key: the
- * cursor and the scroll position belong to the list they were made in.
+ * cursor and the scroll position belong to the list they were made in. `restore` brings back the
+ * cursor, the moment at the left edge and how far down the grid was, as it stood when it went,
+ * and keeps them again as it goes. Without it, the grid opens on the playing channel at now.
  */
 export function GuideGrid({
   channels,
@@ -148,6 +149,8 @@ export function GuideGrid({
   onWatch,
   onPlayArchive,
   onKeys,
+  restore,
+  density,
   ref,
 }: {
   channels: readonly LiveChannel[];
@@ -161,6 +164,9 @@ export function GuideGrid({
   onPlayArchive: (channel: LiveChannel, programme: Programme) => void;
   /** The grid took the keys from the lists: the focus went into it, or a programme was picked. */
   onKeys: () => void;
+  restore?: Kept<GuideSpot>;
+  /** How many hours show across, as the preferences keep it. */
+  density: GuideDensity;
   ref?: Ref<GridKeys>;
 }) {
   const rem = useRem();
@@ -201,8 +207,6 @@ export function GuideGrid({
   const visible = usePresentationVisible();
   const minute = Math.floor(now / MINUTE_MS) * MINUTE_MS;
   const scroller = useRef<HTMLDivElement>(null);
-  const msPx = (HOUR_REM * rem) / HOUR_MS;
-  const columnPx = COLUMN_REM * rem;
   const headPx = HEAD_REM * rem;
   // Whole pixels, its line included: a row measures as estimated, so one scrolling in moves no
   // other, and the thousands of rows aren't laid out again.
@@ -220,10 +224,18 @@ export function GuideGrid({
 
     return () => observer.disconnect();
   }, []);
+  const { hourPx, columnPx } = guideScale(width, rem, density);
+  const msPx = hourPx / HOUR_MS;
 
   // The cursor starts on the playing channel at now, and keeps to its channel when the list
   // changes under it.
   const [cursor, setCursor] = useState<Cursor>(() => {
+    if (restore?.from) {
+      const { index, channel, at } = restore.from;
+
+      return { index, channel, at, asked: 0 };
+    }
+
     const index = Math.max(
       channels.findIndex((channel) => ownedKey(channel) === playingKey),
       0,
@@ -289,7 +301,22 @@ export function GuideGrid({
   // drawn around it.
   const geometry = useRef({ origin, end, msPx, columnPx, minute, rem });
   geometry.current = { origin, end, msPx, columnPx, minute, rem };
-  const leftAt = useRef<number | null>(null);
+  const leftAt = useRef<number | null>(restore?.from?.left ?? null);
+  const place = useRef<ChannelSpot & { at: number }>(cursor);
+  place.current = {
+    index,
+    channel: channels[index] ? ownedId(channels[index]) : cursor.channel,
+    at: cursor.at,
+  };
+  useKeptScroll(
+    scroller,
+    restore && {
+      from: restore.from?.top ?? null,
+      keep: (top) =>
+        restore.keep({ ...place.current, left: leftAt.current ?? geometry.current.minute, top }),
+    },
+    channels.length > 0,
+  );
   const [drawn, setDrawn] = useState<Span>({ start: 0, stop: 0 });
   const [day, setDay] = useState(0);
   // The titles of programmes that began left of the view move into it, as far as leaves room for
@@ -548,8 +575,9 @@ export function GuideGrid({
     [],
   );
 
-  // The grid opens on the playing channel, once its channels are in.
+  // The grid opens on the playing channel, once its channels are in, unless it was kept.
   useEffect(() => {
+    if (restore?.from) return;
     let initial = index;
 
     if (channels.length && cursor.channel === null && cursor.asked === 0) {
@@ -671,6 +699,17 @@ export function GuideGrid({
             msPx={msPx}
             columnPx={columnPx}
             onNow={() => scrollTo(nowAt())}
+            onDay={(days) => {
+              // Local calendar arithmetic preserves wall time across DST. Date advances a
+              // missing spring time through the gap and chooses the earlier repeated time.
+              const at = leftAt.current ?? minute;
+              const date = new Date(at);
+              const start = date.getTime();
+              date.setDate(date.getDate() + days);
+              scrollTo(at + (date.getTime() - start));
+            }}
+            earlier={drawn.start > origin}
+            later={drawn.stop < end}
           />
           {/* Under the rows: programmes show it through, the channels and details cover it. */}
           {minute >= origin && minute < end && (
@@ -754,7 +793,12 @@ function shiftAt(grid: HTMLElement, scrolled: number, room: number) {
   }
 }
 
-/** The day at the left edge, Now, and the half hours along the top, with the time at the line. */
+/**
+ * The day at the left edge, then a day earlier, Now and a day later as one control, and the half
+ * hours along the top, with the time at the line. A day earlier or later is the same time on that
+ * day; neither goes where the timeline does not reach. Short of room, the day leaves the screen
+ * first, still read out to assistive technology.
+ */
 function Head({
   origin,
   drawn,
@@ -763,6 +807,9 @@ function Head({
   msPx,
   columnPx,
   onNow,
+  onDay,
+  earlier,
+  later,
 }: {
   origin: number;
   drawn: Span;
@@ -771,6 +818,9 @@ function Head({
   msPx: number;
   columnPx: number;
   onNow: () => void;
+  onDay: (days: -1 | 1) => void;
+  earlier: boolean;
+  later: boolean;
 }) {
   const ticks: number[] = [];
 
@@ -788,17 +838,23 @@ function Head({
       style={{ height: `${HEAD_REM}rem` }}
     >
       <div
-        className="sticky left-0 z-10 flex flex-none items-center gap-2 bg-black pl-3 whitespace-nowrap"
+        className="@container sticky left-0 z-10 flex flex-none items-center gap-2 bg-black pl-3 whitespace-nowrap"
         style={{ width: columnPx }}
       >
-        {day > 0 && formatDate(day, "weekdayDay")}
-        <button
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={onNow}
-          className="flex h-[1.375rem] items-center rounded-full bg-white/10 px-2.5 text-white hover:bg-white/16"
-        >
-          {t("Now")}
-        </button>
+        {day > 0 && (
+          <span className="sr-only min-w-0 truncate @[13rem]:not-sr-only">
+            {formatDate(day, "weekdayDay")}
+          </span>
+        )}
+        <div className="flex h-[1.375rem] flex-none items-center rounded-full bg-white/10 text-white">
+          <HeadButton label={t("Day before")} disabled={!earlier} onClick={() => onDay(-1)}>
+            <ChevronLeft />
+          </HeadButton>
+          <HeadButton onClick={onNow}>{t("Now")}</HeadButton>
+          <HeadButton label={t("Day after")} disabled={!later} onClick={() => onDay(1)}>
+            <ChevronRight />
+          </HeadButton>
+        </div>
       </div>
       <div className="relative flex-1 overflow-clip">
         {ticks.map((at) => (
@@ -825,6 +881,32 @@ function Head({
         )}
       </div>
     </div>
+  );
+}
+
+/** A part of the day control along the top, which leaves the focus where it was when clicked. */
+function HeadButton({
+  label,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      className="flex h-full min-w-[1.375rem] flex-none items-center justify-center rounded-full px-1 outline-none hover:bg-white/16 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:hover:bg-transparent [&_svg]:size-3.5"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1042,6 +1124,7 @@ const GridRow = memo(function GridRow({
           cell={cursor}
           minute={minute}
           width={details}
+          indent={columnPx}
           actions={actions ?? ["live"]}
           remind={remind}
           onAction={(action) => onAction(channel, cursor, action)}
@@ -1061,6 +1144,7 @@ function Details({
   cell,
   minute,
   width,
+  indent,
   actions,
   remind,
   onAction,
@@ -1070,6 +1154,8 @@ function Details({
   minute: number;
   /** The grid's width in view: the details stay in place while it scrolls across. */
   width: number;
+  /** The channels' column, which the details start beside. */
+  indent: number;
   actions: readonly GridAction[];
   /** It is still to come: Remind me follows what it plays. */
   remind: boolean;
@@ -1101,7 +1187,7 @@ function Details({
       role="region"
       aria-label={slot?.title ?? channel.title}
       className="sticky left-0 z-10 rounded-b-xl bg-[#141414] pt-3.5 pr-4 pb-4"
-      style={{ width, paddingLeft: `${COLUMN_REM + 2.5}rem` }}
+      style={{ width, paddingLeft: `calc(${indent}px + 2.5rem)` }}
     >
       <div className="truncate text-lg font-semibold tracking-tight">
         {slot?.title ?? t("No programme information")}
