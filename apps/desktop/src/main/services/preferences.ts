@@ -736,6 +736,11 @@ export const profileChanged = new Failed({
   error: { kind: "unexpected", detail: PROFILE_CHANGED },
 });
 
+/** Fails with `profileChanged` once the viewer a request was admitted for is no longer admitted. */
+export const stillAdmitted = Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
+  admitted._tag === "Some" && !admitted.value.current() ? Effect.fail(profileChanged) : Effect.void,
+);
+
 /**
  * The settings of the viewer a request was admitted for, while that viewer is still the one
  * admitted, or `fallback` outside an admitted request. After that it dies with the refusal's

@@ -91,7 +91,13 @@ import type {
 } from "../ondemand/protocol.ts";
 import { DetailCache, type ProviderDetailKey, type DetailKey } from "../platform/detail-cache.ts";
 import { VerifiedFiles } from "../platform/verified-files.ts";
-import { Settings, viewingPreferences, AdmittedSettings, profileChanged } from "./preferences.ts";
+import {
+  Settings,
+  viewingPreferences,
+  AdmittedSettings,
+  profileChanged,
+  stillAdmitted,
+} from "./preferences.ts";
 import {
   Subscriptions,
   sameSource,
@@ -709,10 +715,8 @@ function make(deps: OnDemandDeps) {
       const saved = yield* listed;
 
       if (saved.length === 0) return [];
-      const admitted = yield* Effect.serviceOption(AdmittedSettings);
-
       // Nothing is awaited between this and the read: viewingPreferences would die instead.
-      if (admitted._tag === "Some" && !admitted.value.current()) return yield* profileChanged;
+      yield* stillAdmitted;
       const adults = (yield* preferences).adultTitles ?? false;
       const worked = yield* call("status", { owners: saved.map(ownerOf), adults });
 
@@ -836,14 +840,7 @@ function make(deps: OnDemandDeps) {
      * The lists' status for the viewer admitted. Checked once it is read, so an admission that
      * ended during the read refuses them even where the read counted the lists as not loaded.
      */
-    const status = Effect.gen(function* () {
-      const admitted = yield* Effect.serviceOption(AdmittedSettings);
-      const answer = yield* listsStatus;
-
-      if (admitted._tag === "Some" && !admitted.value.current()) return yield* profileChanged;
-
-      return answer;
-    });
+    const status = Effect.tap(listsStatus, () => stillAdmitted);
 
     /**
      * Publishes household status; the window re-reads it under fresh viewer admission. `marked`
