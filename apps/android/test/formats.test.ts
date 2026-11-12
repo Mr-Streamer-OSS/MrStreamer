@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { startFormats } from "./formats-server.ts";
@@ -198,6 +199,21 @@ test("public series episodes and archives serve silent provenance bytes and reta
     ).status,
   ).toBe(404);
 }, 30000);
+
+test("a request right after this process stalls past the keep-alive idle window reaches the fixture", async () => {
+  // Hosted shard 3 (#885) resumed from the poll phase after a response body, then blocked this
+  // thread, fixture included, for 6 s. Node 24.22's fetch wrote the next request on the idle
+  // kept-alive connection in the check phase, before the fixture's expired idle timer closed
+  // it in the timers phase, and read ECONNRESET.
+  const channels = `${fixture.url}/player_api.php?username=fixture&password=fixture-pass&action=get_live_streams`;
+  await (await fetch(channels)).arrayBuffer();
+  // Resume from an I/O callback, as after the hosted body, then block as its toEqual did.
+  await stat(out);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6000);
+  const response = await fetch(channels);
+  expect(response.status).toBe(200);
+  await response.arrayBuffer();
+}, 20000);
 
 test("request diagnostics redact credentials even when the route ends after the password", async () => {
   const first = fixture.diagnostics.length;
