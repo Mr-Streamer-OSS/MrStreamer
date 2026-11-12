@@ -122,6 +122,8 @@ Mr. Streamer sends what you watch to a TV on your network: with AirPlay on macOS
 
 For Live TV, open **More > Play on**. Movies and episodes have the TV button beside the volume. **O** opens the chooser from either player. On Windows, pick a Cast device from the list. On macOS, **AirPlay** in Play on opens Apple's list; a title's TV button and **O** open it directly. A TV may ask for a code the first time. What you watch plays on here until the TV answers, and **This computer** cancels.
 
+Google Cast isn't offered on macOS and Linux yet: it waits for a test with a real Cast device on those systems.
+
 While the TV plays:
 
 - The controls in Mr. Streamer work the TV: pause, skipping, the scrubber, the next episode, channel up and down, and the volume where the TV lets an app set it. They show what the TV last confirmed, so a pause from the TV's own remote shows too, for a channel as for a movie. After a skip the scrubber stays where you put it, with a ring where the TV still is, until the TV catches up.
