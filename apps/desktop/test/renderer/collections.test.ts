@@ -2063,16 +2063,12 @@ describe("a smart collection in the Collections tab", () => {
       view.unmount();
     };
 
+    const unwatched = { kind: "movie", filters: { watched: "unwatched" } } as const;
+    // A viewing event reads again the collections a Watched rule picks, as the column shows them.
+    ipc.always("collections.list", [{ id: "s0", name: "Short films", total: 2, rules: unwatched }]);
     await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
     await poster("Dune Road, Movie, 2021");
-    ipc.always("collections.list", [
-      {
-        id: "s0",
-        name: "Short films",
-        total: 0,
-        rules: { kind: "movie", filters: { watched: "unwatched" } },
-      },
-    ]);
+    ipc.always("collections.list", [{ id: "s0", name: "Short films", total: 0, rules: unwatched }]);
     ipc.always("collections.page", { total: 0, members: [] });
     const beforeWrong = ipc.argsOf("collections.page").length;
     await act(async () =>
@@ -2086,6 +2082,52 @@ describe("a smart collection in the Collections tab", () => {
     await act(async () => ipc.emit("profiles.viewingChanged", { owner, sequence: 1 }));
     await vi.waitFor(() => expect(document.querySelector("[data-index] button")).toBeNull());
     expect((await row("Short films")).textContent).toContain("0");
+  });
+
+  it("keeps runtime-only saved matches without reading them again on this owner's viewing event", async () => {
+    const owner = { id: "sam", revision: 2 };
+    selectProfileOwner(owner);
+    smartMain();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = queryView(client);
+    const stop = syncViewing(client);
+    unmount = () => {
+      stop();
+      view.unmount();
+    };
+
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
+    await poster("Dune Road, Movie, 2021");
+    expect((await row("Short films")).textContent).toBe("Short filmsSmart collection2");
+    const before = ipc.argsOf("collections.page").length;
+    await act(async () => ipc.emit("profiles.viewingChanged", { owner, sequence: 1 }));
+    expect(ipc.argsOf("collections.page")).toHaveLength(before);
+    await poster("Dune Road, Movie, 2021");
+  });
+
+  it("drops an obsolete initial column read after this owner's viewing event", async () => {
+    const owner = { id: "sam", revision: 2 };
+    selectProfileOwner(owner);
+    smartMain();
+    const old = ipc.hold("collections.list");
+    const unwatched = { kind: "movie", filters: { watched: "unwatched" } } as const;
+    const summary = { id: "s0", name: "Short films", rules: unwatched };
+    ipc.always("collections.list", [{ ...summary, total: 0 }]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = queryView(client);
+    const stop = syncViewing(client);
+    unmount = () => {
+      stop();
+      view.unmount();
+    };
+
+    await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
+    await vi.waitFor(() => expect(ipc.argsOf("collections.list")).toHaveLength(1));
+    await act(async () => ipc.emit("profiles.viewingChanged", { owner, sequence: 1 }));
+    await act(async () => old.resolve([{ ...summary, total: 2 }]));
+    await vi.waitFor(async () =>
+      expect((await row("Short films")).textContent).toBe("Short filmsSmart collection0"),
+    );
   });
 
   it("keeps the matches shown when reading them again fails, and says when they are from", async () => {

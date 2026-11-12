@@ -662,15 +662,21 @@ it("applies a typed year range only once it is confirmed", async () => {
   expect(ipc.methods()).not.toContain("ondemand.details");
 });
 
-it("cancels an obsolete watched-filter read on a viewing event without a catalogue event", async () => {
+it("reads only Watched-filtered grids again on a viewing event, cancelling an obsolete first read", async () => {
   const page = await mount();
   const stop = syncViewing(page.client);
 
   try {
+    await page.until(() => expect(page.container.textContent).toContain("10"));
+    const unfiltered = ipc.argsOf("ondemand.collection").length;
+    await act(async () => ipc.emit("viewing.changed", { sequence: 1 }));
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(ipc.argsOf("ondemand.collection")).toHaveLength(unfiltered);
+
     const held = ipc.hold("ondemand.collection");
     await page.click("Unwatched", "Watched");
     ipc.always("ondemand.collection", { name: "All", titles: [], total: 3 });
-    await act(async () => ipc.emit("viewing.changed", { sequence: 1 }));
+    await act(async () => ipc.emit("viewing.changed", { sequence: 2 }));
     await page.until(() => expect(page.container.textContent).toContain("3 of 3"));
     await act(async () => held.resolve({ name: "All", titles: [], total: 99 }));
     expect(page.container.textContent).toContain("3 of 3");
