@@ -16,7 +16,12 @@ export type Opened =
   | { readonly ok: false; readonly failure: StreamFailure };
 
 /** Video codecs whose streams start on a keyframe; see ../playback/clean-start.ts. */
-export const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set(["h264", "hevc", "hevc-10bit"]);
+export const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set([
+  "h264",
+  "h264-interlaced",
+  "hevc",
+  "hevc-10bit",
+]);
 
 /** How much of a stream the proxy reads, at most, before deciding how to deliver it. */
 export const INSPECT_LIMIT = { bytes: 2 * 1024 * 1024, ms: 2500 };
@@ -74,19 +79,19 @@ export async function inspectStart(
   let latest: Inspection | null = null;
   let pending: Promise<ReadResult> | null = null;
 
-  const facts = (): PlaybackDiagnostic => {
-    const unresolved = latest?.open.flat() ?? [];
-    // Inspection's conservative codec guesses must never be reported as observed codecs.
-    const guessed = unresolved.length > 0 ? ("unknown" as const) : undefined;
+  const needsInspection = (candidates: readonly Codec[]) => {
+    const decoded = candidates.filter((codec) => decoders.has(codec)).length;
 
-    return {
-      ...defined({
-        diagnostic_video_codec: guessed,
-        diagnostic_audio_codec: guessed,
-        diagnostic_reason:
-          !latest || unresolved.length > 0 ? ("inspection_undetermined" as const) : undefined,
-      }),
-    };
+    return decoded !== 0 && decoded !== candidates.length;
+  };
+
+  const facts = (): PlaybackDiagnostic => {
+    const unresolved = latest?.open.filter(needsInspection) ?? [];
+
+    return defined({
+      diagnostic_reason:
+        !latest || unresolved.length > 0 ? ("inspection_undetermined" as const) : undefined,
+    });
   };
 
   const deadline = Date.now() + INSPECT_LIMIT.ms;
@@ -110,11 +115,7 @@ export async function inspectStart(
     size += result.value.length;
     latest = inspector.push(result.value) ?? latest;
 
-    const settled = latest?.open.every((candidates) => {
-      const decoded = candidates.filter((codec) => decoders.has(codec)).length;
-
-      return decoded === 0 || decoded === candidates.length;
-    });
+    const settled = latest?.open.every((candidates) => !needsInspection(candidates));
 
     if (latest && settled)
       return { layout: latest.layout, diagnostic: facts(), head, pending: null };

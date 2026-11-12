@@ -4,6 +4,9 @@ import {
   type RecordingExtent,
   type RecordingFile,
 } from "../src/main/playback/file-source.ts";
+import { openHlsTsInput } from "../src/main/playback/hls-ts-input.ts";
+import { createInspector } from "../src/main/playback/inspect.ts";
+import { inspectStart } from "../src/main/playback/live-start.ts";
 import { spawnSync } from "node:child_process";
 import {
   appendFile,
@@ -643,6 +646,84 @@ describe("playback", () => {
       expect(
         received.filter((stream) => stream.type === "subtitle").map((stream) => stream.id),
       ).toEqual([0x103, 0x300]);
+      await playback.dispose();
+    });
+
+    it("deinterlaces an interlaced H.264 channel, keeping its frame rate and its sound as sent", async () => {
+      const { provider, playback } = await connectedPlayback({ ffmpeg: true });
+
+      const session = await playback.open(channelNamed(provider, "TEST | H.264 interlaced"), LINUX);
+      const received = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+
+      // ffmpeg's interlace detector compares each picture's lines with its neighbours': combed
+      // pictures read as top or bottom field first, as all 75 of the fixture's do.
+      const scan = (body: Buffer) => {
+        const run = spawnSync(
+          FFMPEG,
+          ["-hide_banner", "-i", "pipe:0", "-an", "-vf", "idet", "-f", "null", "-"],
+          { input: body, encoding: "utf8" },
+        );
+
+        // It reports once for a graph ffmpeg sets up and drops, then for the stream.
+        const [, tff, bff, progressive] =
+          [
+            ...run.stderr.matchAll(
+              /Multi frame detection: TFF: *(\d+) BFF: *(\d+) Progressive: *(\d+)/g,
+            ),
+          ].at(-1) ?? [];
+
+        return { combed: Number(tff) + Number(bff), progressive: Number(progressive) };
+      };
+
+      expect(scan(fixture("h264-interlaced.mpegts")).combed).toBe(75);
+      expect(scan(received)).toEqual({ combed: 0, progressive: 75 });
+
+      const probe = spawnSync(
+        FFPROBE,
+        [
+          ...["-v", "error", "-show_entries", "stream=codec_name,avg_frame_rate"],
+          ...["-of", "json", "-i", "pipe:0"],
+        ],
+        { input: received, encoding: "utf8" },
+      );
+
+      expect(JSON.parse(probe.stdout).streams).toEqual([
+        { codec_name: "h264", avg_frame_rate: "25/1" },
+        { codec_name: "aac", avg_frame_rate: "0/0" },
+      ]);
+
+      const audioPackets = (input: Buffer) => {
+        const run = spawnSync(
+          FFPROBE,
+          [
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_packets",
+            "-show_data_hash",
+            "sha256",
+            "-show_entries",
+            "packet=data_hash",
+            "-of",
+            "csv=p=0",
+            "pipe:0",
+          ],
+          { input, encoding: "utf8" },
+        );
+
+        expect(run.status, run.stderr).toBe(0);
+
+        return run.stdout
+          .trim()
+          .split("\n")
+          .filter((line) => line.startsWith("SHA256:"))
+          .map((line) => line.split(",")[0]);
+      };
+
+      const sourcePackets = audioPackets(fixture("h264-interlaced.mpegts"));
+      expect(sourcePackets.length).toBeGreaterThan(0);
+      expect(audioPackets(received)).toEqual(sourcePackets);
       await playback.dispose();
     });
 
@@ -3289,5 +3370,175 @@ describe("pane transitions and observations", () => {
     if (held.kind === "held") held.held.release();
     expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 0 });
     expect(provider.streamRequests()).toBe(0);
+  });
+});
+
+/** A mid-GOP join with an SPS arriving after 900 KB of non-header video payload. */
+function lateSequenceHeader(header = true) {
+  const source = fixture("h264-interlaced.mpegts");
+  const prefix: Buffer[] = [];
+  let video: Buffer | undefined;
+
+  for (let at = 0; at < source.length; at += 188) {
+    const packet = source.subarray(at, at + 188);
+    const pid = ((packet[1]! & 31) << 8) | packet[2]!;
+
+    if (pid === 256) {
+      video = packet;
+      break;
+    }
+
+    prefix.push(packet);
+  }
+
+  if (!video) throw new Error("Fixture has no video PES");
+  const filler = Buffer.from(video);
+  const offset = 4 + (((filler[3]! >> 4) & 3) === 3 ? 1 + filler[4]! : 0);
+  // Keep the first PES header, but no sequence header or accidental start codes.
+  const first = Buffer.from(filler);
+  first.fill(0x55, offset + 9 + first[offset + 8]!);
+  filler[1] = filler[1]! & ~64;
+  filler.fill(0x55, offset);
+
+  const audio: Buffer[] = [];
+
+  for (let at = 0; at < source.length; at += 188) {
+    const packet = source.subarray(at, at + 188);
+
+    if ((((packet[1]! & 31) << 8) | packet[2]!) === 257) audio.push(packet);
+  }
+
+  return Buffer.concat([
+    ...prefix,
+    ...audio,
+    first,
+    ...Array.from({ length: 5100 }, () => filler),
+    ...(header ? [source] : []),
+  ]);
+}
+
+it("inspects a mid-GOP join in bounded time and finds a late sequence header", () => {
+  for (const header of [false, true]) {
+    const input = lateSequenceHeader(header);
+    const inspector = createInspector();
+    const began = performance.now();
+    let found;
+
+    for (let at = 0; at < input.length; at += 1316)
+      found = inspector.push(input.subarray(at, at + 1316)) ?? found;
+    expect(found?.layout.video?.codec).toBe(header ? "h264-interlaced" : "h264");
+    expect(performance.now() - began).toBeLessThan(1000);
+  }
+});
+
+it.each([0, 1, 2])(
+  "keeps a truncated sequence header unresolved with %i delimiter zeros before the packet boundary",
+  (zeros) => {
+    const source = fixture("h264-aac.mpegts");
+    const prefix: Buffer[] = [];
+    let video: Buffer | undefined;
+
+    for (let at = 0; at < source.length; at += 188) {
+      const packet = source.subarray(at, at + 188);
+
+      if ((((packet[1]! & 31) << 8) | packet[2]!) === 256) {
+        video = packet;
+        break;
+      }
+
+      prefix.push(packet);
+    }
+
+    if (!video) throw new Error("Fixture has no video PES");
+    const first = Buffer.from(video);
+    const offset = 4 + (((first[3]! >> 4) & 3) === 3 ? 1 + first[4]! : 0);
+    first.fill(0x55, offset + 9 + first[offset + 8]!);
+    // This SPS stops immediately before frame_mbs_only_flag.
+    first.set(
+      [0, 0, 1, 0x67, 0x42, 0, 0x0a, 0xfb, ...Array.from({ length: zeros }, () => 0)],
+      180 - zeros,
+    );
+    const next = Buffer.from(first);
+    next[1] = next[1]! & ~64;
+    next.fill(0x55, offset);
+    next.set([...Array.from({ length: 2 - zeros }, () => 0), 1, 0x68, 0xc0], offset);
+    const inspector = createInspector();
+    const truncated = inspector.push(Buffer.concat([...prefix, first, next, next]));
+
+    expect(truncated?.layout.video?.codec).toBe("h264");
+    expect(truncated?.open).toContainEqual(["h264", "h264-interlaced"]);
+    expect(inspector.push(source)).toMatchObject({
+      layout: { video: { codec: "h264" } },
+      open: [],
+    });
+  },
+);
+
+it("keeps the H.264 layout without claiming its unresolved field treatment", async () => {
+  const input = lateSequenceHeader(false);
+
+  const start = await inspectStart(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(input);
+        controller.close();
+      },
+    }).getReader(),
+    new Set(["h264", "aac"]),
+  );
+
+  expect(start.layout?.video?.codec).toBe("h264");
+  expect(start.diagnostic.diagnostic_reason).toBe("inspection_undetermined");
+});
+
+it("accepts converted HLS whose first segment has no H.264 sequence header", async () => {
+  const input = lateSequenceHeader(false);
+
+  const reader = await openHlsTsInput(
+    "https://fixture.test/list.m3u8",
+    async (address) =>
+      new Response(
+        address.endsWith("m3u8")
+          ? "#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment.ts\n#EXT-X-ENDLIST\n"
+          : input,
+      ),
+    new AbortController().signal,
+    false,
+    null,
+  );
+
+  try {
+    expect(reader.firstLayout.video?.codec).toBe("h264");
+    expect(reader.prefix.length).toBeGreaterThan(0);
+  } finally {
+    await reader.close();
+  }
+});
+
+it("still refuses converted HLS with an unresolved HEVC sequence header", async () => {
+  const input = Buffer.from(lateSequenceHeader(false));
+  // Name the stripped picture as HEVC in the PMT, leaving its sequence header absent.
+  const entry = input.indexOf(Buffer.from([0x1b, 0xe1, 0, 0xf0, 0]));
+  expect(entry).toBeGreaterThanOrEqual(0);
+  input[entry] = 0x24;
+
+  await expect(
+    openHlsTsInput(
+      "https://fixture.test/list.m3u8",
+      async (address) =>
+        new Response(
+          address.endsWith("m3u8")
+            ? "#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment.ts\n#EXT-X-ENDLIST\n"
+            : input,
+        ),
+      new AbortController().signal,
+      false,
+      null,
+    ),
+  ).rejects.toMatchObject({
+    failure: {
+      kind: "unsupported",
+      diagnostic: { diagnostic_reason: "inspection_undetermined" },
+    },
   });
 });

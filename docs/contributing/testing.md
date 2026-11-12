@@ -138,15 +138,26 @@ ffmpeg -f lavfi -i smptebars=size=128x72:rate=25 -f lavfi -i sine=frequency=440:
   <codecs> -f mpegts <name>.mpegts
 ```
 
-| Clip                                | Codecs                                                                                                                                                                           |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `h264-aac`                          | `-c:v libx264 -preset medium -crf 30 -pix_fmt yuv420p -g 25 -c:a aac -b:a 32k -ac 2`                                                                                             |
-| `h264-mp2`, `-mp3`, `-ac3`, `-eac3` | The same video with `-c:a mp2`, `libmp3lame`, `ac3` or `eac3`                                                                                                                    |
-| `h264-ac3-dvb`                      | As `h264-ac3`, plus `-mpegts_flags system_b` for DVB signalling                                                                                                                  |
-| `hevc-aac`, `hevc10-aac`            | `-c:v libx265 -preset medium -crf 30`, the second with `-pix_fmt yuv420p10le -profile:v main10`                                                                                  |
-| `mpeg2-mp2`                         | `-c:v mpeg2video -q:v 10 -c:a mp2 -b:a 64k`                                                                                                                                      |
-| `h264-open-gop-joined`              | Four seconds of `testsrc2` with `-x264-params keyint=25:min-keyint=25:open-gop=1:bframes=3:scenecut=0`, cut 45% in on a 188-byte boundary, like joining a broadcast mid-sequence |
-| `h264-damaged`                      | `h264-aac` with the payload of two video packets a third of the way in overwritten, like lost packets                                                                            |
+The moving-bar interlaced clip uses this complete command instead of the bars above. It combines 50 source pictures per second into 25 field-paired frames:
+
+```sh
+ffmpeg -f lavfi -i "color=gray:size=128x72:rate=50,geq=lum='if(between(X,mod(N*8,128),mod(N*8,128)+23)*between(Y,8,63),235,128)':cb=128:cr=128" \
+  -f lavfi -i sine=frequency=440:sample_rate=48000 -t 3 \
+  -vf tinterlace=mode=interleave_top,setfield=tff -c:v libx264 -preset medium -crf 18 \
+  -pix_fmt yuv420p -flags +ildct+ilme -x264-params tff=1 -c:a aac -b:a 32k \
+  -f mpegts apps/desktop/test/fixtures/h264-interlaced.mpegts
+```
+
+| Clip                                | Codecs                                                                                                                                                                                                                        |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `h264-aac`                          | `-c:v libx264 -preset medium -crf 30 -pix_fmt yuv420p -g 25 -c:a aac -b:a 32k -ac 2`                                                                                                                                          |
+| `h264-mp2`, `-mp3`, `-ac3`, `-eac3` | The same video with `-c:a mp2`, `libmp3lame`, `ac3` or `eac3`                                                                                                                                                                 |
+| `h264-ac3-dvb`                      | As `h264-ac3`, plus `-mpegts_flags system_b` for DVB signalling                                                                                                                                                               |
+| `hevc-aac`, `hevc10-aac`            | `-c:v libx265 -preset medium -crf 30`, the second with `-pix_fmt yuv420p10le -profile:v main10`                                                                                                                               |
+| `mpeg2-mp2`                         | `-c:v mpeg2video -q:v 10 -c:a mp2 -b:a 64k`                                                                                                                                                                                   |
+| `h264-open-gop-joined`              | Four seconds of `testsrc2` with `-x264-params keyint=25:min-keyint=25:open-gop=1:bframes=3:scenecut=0`, cut 45% in on a 188-byte boundary, like joining a broadcast mid-sequence                                              |
+| `h264-interlaced`                   | A white 24 × 56 bar crossing a gray picture 8 pixels per source picture at 50 pictures a second, `-vf tinterlace=mode=interleave_top,setfield=tff` and `-flags +ildct+ilme -x264-params tff=1`: 25 interlaced frames a second |
+| `h264-damaged`                      | `h264-aac` with the payload of two video packets a third of the way in overwritten, like lost packets                                                                                                                         |
 
 Four title clips stand in for movies and episodes, with the same test picture and tone:
 

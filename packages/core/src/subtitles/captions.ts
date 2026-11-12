@@ -2,6 +2,7 @@
 // SEI messages holds two bytes a field per frame. Channels 1 and 2 share field one, 3 and 4 field
 // two. Captions build up in memory and show as pop-on (a whole caption at once), roll-up (lines
 // scrolling up) or paint-on (letters as they arrive).
+import { unescape } from "../bitstream.ts";
 import type { SubtitleChange } from "./screen.ts";
 
 /**
@@ -126,19 +127,6 @@ function trimZeros(nal: Uint8Array): Uint8Array {
   while (end > 0 && nal[end - 1] === 0) end--;
 
   return nal.subarray(0, end);
-}
-
-/** Removes the emulation prevention bytes: 00 00 03 becomes 00 00. */
-function unescape(data: Uint8Array): Uint8Array {
-  const out = new Uint8Array(data.length);
-  let length = 0;
-
-  for (let index = 0; index < data.length; index++) {
-    if (index >= 2 && data[index] === 3 && data[index - 1] === 0 && data[index - 2] === 0) continue;
-    out[length++] = data[index]!;
-  }
-
-  return out.subarray(0, length);
 }
 
 const ROWS = 15;

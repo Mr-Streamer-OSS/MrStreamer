@@ -17,17 +17,20 @@ An M3U playlist lists most channels as HLS, addresses ending in `.m3u8`. Those p
 
 Most channels play directly. For the rest, Mr. Streamer converts only what the player can't handle, on your computer, while you watch:
 
-| The channel sends                                                  | What happens                                                                  |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| H.264 video with AAC or MP3 sound                                  | Plays directly                                                                |
-| Sound in MP2, AC-3 (Dolby Digital) or E-AC-3                       | The sound is converted to stereo AAC; the picture stays as it is              |
-| HEVC (H.265) video on macOS                                        | Plays directly, including 10-bit and 4K                                       |
-| HEVC video on Windows or Linux without a hardware decoder          | The picture is converted to H.264; 4K is reduced to 1080p                     |
-| MPEG-2 video                                                       | The picture is converted to H.264 and deinterlaced                            |
-| A picture the player can't decode because the broadcast is damaged | Mr. Streamer retries once with the picture re-encoded, which hides the damage |
-| Several sound tracks                                               | The one in the language you picked last plays, else the channel's first       |
-| DVB subtitles                                                      | Drawn over the picture                                                        |
-| Teletext subtitles and closed captions                             | Shown under the picture                                                       |
+| The channel sends                                                                        | What happens                                                                                                |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| H.264 video with AAC or MP3 sound                                                        | Plays directly                                                                                              |
+| Sound in MP2, AC-3 (Dolby Digital) or E-AC-3                                             | The sound is converted to stereo AAC; the picture stays as it is                                            |
+| HEVC (H.265) video on macOS                                                              | Plays directly, including 10-bit and 4K                                                                     |
+| HEVC video on Windows or Linux without a hardware decoder                                | The picture is converted to H.264; 4K is reduced to 1080p                                                   |
+| MPEG-2 video                                                                             | The picture is converted to H.264 and deinterlaced                                                          |
+| H.264 MPEG-TS channels whose early sequence header allows field pictures (0.0.24 onward) | In the app window, the picture is converted and interlaced frames are deinterlaced at the source frame rate |
+| A picture the player can't decode because the broadcast is damaged                       | Mr. Streamer retries once with the picture re-encoded, which hides the damage                               |
+| Several sound tracks                                                                     | The one in the language you picked last plays, else the channel's first                                     |
+| DVB subtitles                                                                            | Drawn over the picture                                                                                      |
+| Teletext subtitles and closed captions                                                   | Shown under the picture                                                                                     |
+
+H.264 field detection reads up to 1 MiB of video payload, within the first 2 MiB or 2.5 seconds of stream inspection. If no complete sequence header arrives, the app keeps its existing conversion decisions. A frame-only sequence avoids picture conversion; sound that needs converting still converts. Field-capable sequences can include progressive pictures, which are also re-encoded. The qualified sample preserves 25 frames per second; 50 fields per second output is not qualified.
 
 Converted channels take a moment longer to start, about a second, and use more of your computer's processor, especially when the picture is converted.
 
@@ -148,9 +151,9 @@ _What doesn't work yet, or works differently._
 - Surround sound that needs converting plays as stereo.
 - After you skip in a movie or episode, the subtitle already on screen at that moment can't always be had: Mr. Streamer reads only a little of the file for it, and only while the picture can spare the connection. That works for MKV files when the subtitle began shortly before, and for MP4 files with text subtitles; a line that began long before, a slow connection, and other kinds of files leave it out. While no line shows, "Subtitles unavailable" shows at the top right, the movie plays on, and the subtitles are back from the next line. The same happens when the subtitles stop arriving altogether.
 - Closed captions come from the CEA-608 data most broadcasts carry. A channel or file that sends captions only in the newer CEA-708 form shows none.
-- Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
+- Converting HEVC, Xvid or field-capable H.264 uses much more of your computer's processor than playing it as it is. Each multiview picture converts separately; native CPU, GPU and power costs are unmeasured.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
-- Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
+- Before 0.0.24, interlaced channels that play directly aren't deinterlaced. On AirPlay and Cast, H.264 pictures are sent as received; receiver deinterlacing is unproven. Interlaced HLS channels that play directly, and interlaced movies, episodes and recordings played as titles, aren't deinterlaced; fast motion can show fine horizontal lines.
 - Sound delay only holds sound back; it can't play sound before the picture.
 - After the first sound delay or leveling, sound takes Mr. Streamer's own route until you restart it, also once you reset them. That route can add a small delay; leveling adds a little more while enabled.
 - On a TV, a movie or episode plays at normal speed with the stream's own picture and sound, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.

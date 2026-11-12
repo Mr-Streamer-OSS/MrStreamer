@@ -1,3 +1,4 @@
+import { H264_CODECS, RECEIVER_DECODERS } from "@mrstreamer/contracts/playback";
 import type { TrackChoice } from "@mrstreamer/contracts/preferences";
 import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import {
@@ -129,7 +130,7 @@ import {
 } from "../playback/hls-ts-input.ts";
 import { paced, pacedEpochs } from "../playback/paced.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
-import type { Inspection, StreamLayout } from "../playback/inspect.ts";
+import { type Inspection, type StreamLayout } from "../playback/inspect.ts";
 import { CAPTION_PID, createCaptionCopy } from "../playback/caption-stream.ts";
 import {
   hlsAddresses,
@@ -1472,7 +1473,7 @@ function make(deps: PlaybackDeps) {
 
           const plan = planConversion(
             layout,
-            receiver ? new Set<Codec>(["h264", "aac"]) : session.decoders,
+            receiver ? new Set(RECEIVER_DECODERS) : session.decoders,
             { repair: !receiver, audio: chosen?.pid ?? null },
           );
 
@@ -1701,7 +1702,7 @@ function make(deps: PlaybackDeps) {
 
           const plan = planConversion(
             layout,
-            session.receiver ? new Set<Codec>(["h264", "aac"]) : session.decoders,
+            session.receiver ? new Set(RECEIVER_DECODERS) : session.decoders,
             { repair: session.repair, audio: chosen?.pid ?? null },
           );
 
@@ -5812,7 +5813,7 @@ function recordingTracks(
   const has = (table: Inspection, key: string) => keysOf(table).has(key);
 
   const shows = (point: RecordingAccess) =>
-    point.layout.layout.video?.pid === picture && point.layout.layout.video.codec === "h264";
+    point.layout.layout.video?.pid === picture && H264_CODECS.has(point.layout.layout.video.codec);
 
   // The probe's tracks, as the first table that names each PID has it. A run of the whole file
   // finds one at its probe id only when the file's first table has it.

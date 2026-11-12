@@ -171,7 +171,7 @@ describe("Cast adapter", () => {
 
     expect(connection.receiver).toEqual(receiver.receiver);
     expect(connection.localAddress).toBe("127.0.0.1");
-    expect(connection.decoders).toEqual(["h264", "aac"]);
+    expect(connection.decoders).toEqual(["h264", "h264-interlaced", "aac"]);
     expect(connection.volume).toBe(true);
 
     expect(receiver.requests("LAUNCH")).toMatchObject([{ appId: "CC1AD845" }]);

@@ -1,3 +1,4 @@
+import { RECEIVER_DECODERS } from "@mrstreamer/contracts/playback";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
 // One connected Cast receiver: the channel to it, the media app started on it, and the load that
@@ -645,10 +646,9 @@ export async function openSession(
   const connection: Connection = {
     receiver: endpoint.receiver,
     localAddress,
-    // The first profile: H.264 with AAC, the pair Cast receivers are taken to decode. No
-    // receiver has played it from this app yet, and what a given TV adds (HEVC, AC-3, E-AC-3)
-    // is unread, so those convert until hardware proves otherwise.
-    decoders: ["h264", "aac"],
+    // The first profile. No Cast receiver has played it from this app yet, and what a given TV
+    // adds (HEVC, AC-3, E-AC-3) is unread, so those convert until hardware proves otherwise.
+    decoders: RECEIVER_DECODERS,
     volume: true,
 
     async load(media: ReceiverMedia, loading: AbortSignal) {

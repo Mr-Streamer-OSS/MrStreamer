@@ -9,6 +9,7 @@
 // frames; the window of LEADING_WINDOW frames covers that. After it, packets pass unchanged.
 // Other tracks are never touched.
 import type { Codec } from "@mrstreamer/contracts/playback";
+import { bitReader } from "@mrstreamer/core/bitstream";
 
 const PACKET = 188;
 const PTS_WRAP = 2 ** 33;
@@ -212,37 +213,11 @@ function isKeyframe(codec: Codec, pes: Uint8Array): boolean | null {
 
 /** slice_type from the start of an H.264 slice header: two Exp-Golomb numbers in. */
 function sliceType(bits: Uint8Array): number | null {
-  let position = 0;
+  const header = bitReader(bits);
+  header.ue();
+  const type = header.ue();
 
-  const read = (): number | null => {
-    let zeros = 0;
-
-    while (bit(position) === 0) {
-      zeros++;
-      position++;
-
-      if (zeros > 31 || position >= bits.length * 8) return null;
-    }
-
-    position++;
-    let value = 0;
-
-    for (let n = 0; n < zeros; n++) {
-      const next = bit(position++);
-
-      if (next === null) return null;
-      value = value * 2 + next;
-    }
-
-    return 2 ** zeros - 1 + value;
-  };
-
-  const bit = (index: number): number | null =>
-    index >= bits.length * 8 ? null : (bits[index >> 3]! >> (7 - (index & 7))) & 1;
-
-  if (read() === null) return null;
-
-  return read();
+  return header.overrun ? null : type;
 }
 
 function concat(parts: readonly Uint8Array[]): Uint8Array {

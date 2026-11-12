@@ -3,6 +3,7 @@
 // session asks this in place of its provider, so ffprobe, ffmpeg and the subtitle readers behind
 // the loopback proxy work unchanged, and the request's address is never read: one session reads
 // one exact path, which never leaves the main process.
+import { H264_CODECS } from "@mrstreamer/contracts/playback";
 import { createReadStream } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -427,7 +428,8 @@ export function indexRecording(path: string, source: RecordingFile): RecordingFi
             tables = { from: at, ready: false };
           }
 
-          const inspected = inspector.push(packet);
+          // Indexing needs the declared codec family, not field/bit-depth refinement.
+          const inspected = tables?.ready ? null : inspector.push(packet);
 
           if (inspected) {
             // A new table can carry the program on, as when a provider adds a sound track. Its
@@ -513,7 +515,14 @@ export function indexRecording(path: string, source: RecordingFile): RecordingFi
           // How ffmpeg places a wrapped clock is not established; points stop there.
           if (unwrapped !== pts) refused = true;
 
-          if (before === null || !layout || refused || video?.codec !== "h264" || pid !== video.pid)
+          if (
+            before === null ||
+            !layout ||
+            refused ||
+            !video ||
+            !H264_CODECS.has(video.codec) ||
+            pid !== video.pid
+          )
             continue;
           const flags = pes[7]! >> 6;
 

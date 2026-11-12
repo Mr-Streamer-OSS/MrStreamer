@@ -1,8 +1,9 @@
 // Reads the start of an MPEG-TS stream to learn which tracks it carries, before any byte reaches
 // the player. The program tables name each track's format, language and, for teletext and DVB
-// subtitles, their pages; for MPEG audio, HEVC and AAC the first frame header adds what the tables
-// leave open: MP2 or MP3, 8 or 10-bit, the channel layout.
-import type { Codec } from "@mrstreamer/contracts/playback";
+// subtitles, their pages; for MPEG audio, H.264, HEVC and AAC the first frame header adds what the
+// tables leave open: MP2 or MP3, H.264 field capability, HEVC bit depth, the channel layout.
+import { CODECS, H264_CODECS, type Codec } from "@mrstreamer/contracts/playback";
+import { bitReader, unescape } from "@mrstreamer/core/bitstream";
 
 const PACKET = 188;
 const SYNC = 0x47;
@@ -41,11 +42,12 @@ export interface StreamLayout {
 }
 
 /** A track whose codec needs a look at its first frame. */
-type Pending = "mpeg-audio" | "hevc" | "aac";
+type Pending = "mpeg-audio" | "h264" | "hevc" | "aac";
 
 /** The codecs a pending track can turn out to be. */
 const CANDIDATES: Record<Pending, readonly Codec[]> = {
   "mpeg-audio": ["mp2", "mp3"],
+  h264: CODECS.filter((codec) => H264_CODECS.has(codec)),
   hevc: ["hevc", "hevc-10bit"],
   aac: ["aac", "aac-pce"],
 };
@@ -61,7 +63,7 @@ export interface Inspection {
 /**
  * Feed chunks from the start of a stream. Once the program table has arrived, `push` returns the
  * tracks, and `open` lists the ones whose first frame has not shown its exact codec yet; the
- * layout assumes the variant that needs the most help for those. Null means no table yet, and
+ * layout assumes `fallback`'s variant for those. Null means no table yet, and
  * `notTransportStream` tells when the data is something else, such as a raw radio stream.
  */
 export function createInspector() {
@@ -73,6 +75,7 @@ export function createInspector() {
   let table: ProgramTable | null = null;
   /** Payload collected from the first PES packet of each pending track. */
   const payloads = new Map<number, Uint8Array>();
+  const videos = new Map<number, ReturnType<typeof videoInspector>>();
 
   function inspection(): Inspection | null {
     if (!table || pmtPid === null) return null;
@@ -122,19 +125,35 @@ export function createInspector() {
       const track = table.tracks.find((entry) => entry.pid === pid);
 
       if (!track?.pending) return;
-      const collected = payloads.get(pid);
+      let codec: Codec | null;
+      let exhausted: boolean;
 
-      if (!collected && !start) return;
-      const joined = collected ? concat(collected, payload) : payload;
-      payloads.set(pid, joined);
-      const codec = examine(track.pending, pesData(joined));
+      if (track.pending === "h264" || track.pending === "hevc") {
+        let scanner = videos.get(pid);
 
-      if (codec) {
-        track.codec = codec;
+        if (!scanner) {
+          if (!start) return;
+          scanner = videoInspector(track.pending);
+          videos.set(pid, scanner);
+        }
+
+        codec = scanner.push(payload, start);
+        exhausted = scanner.bytes >= 1024 * 1024;
+      } else {
+        const collected = payloads.get(pid);
+
+        if (!collected && !start) return;
+        const joined = collected ? concat(collected, payload) : payload;
+        payloads.set(pid, joined);
+        codec = examine(track.pending, pesData(joined));
+        exhausted = joined.length > 64 * 1024;
+      }
+
+      if (codec || exhausted) {
+        track.codec = codec ?? fallback(track.pending);
         track.pending = null;
-      } else if (joined.length > (track.kind === "video" ? 1024 : 64) * 1024) {
-        track.codec = fallback(track.pending);
-        track.pending = null;
+        payloads.delete(pid);
+        videos.delete(pid);
       }
     }
   }
@@ -174,6 +193,72 @@ export function createInspector() {
     /** True once enough data has passed to be sure it is not MPEG-TS, such as a radio stream. */
     get notTransportStream(): boolean {
       return !aligned && unaligned > 32 * 1024;
+    },
+  };
+}
+
+/** Scan each elementary byte once, retaining only a bounded sequence header and split PES header. */
+function videoInspector(kind: "h264" | "hevc") {
+  let bytes = 0;
+  let zeros = 0;
+  let header = false;
+  let nal: number[] = [];
+  let pes: number[] | null = null;
+
+  return {
+    get bytes() {
+      return bytes;
+    },
+    push(payload: Uint8Array, start: boolean): Codec | null {
+      if (start) pes = [];
+
+      for (const byte of payload) {
+        if (++bytes > 1024 * 1024) break;
+
+        if (pes) {
+          pes.push(byte);
+
+          if (pes.length >= 9 && pes.length >= 9 + pes[8]!) pes = null;
+          continue;
+        }
+
+        if (byte === 1 && zeros >= 2) {
+          const codec = nal.length ? examine(kind, Uint8Array.from([0, 0, 1, ...nal])) : null;
+
+          if (codec) return codec;
+          header = true;
+          nal = [];
+          zeros = 0;
+          continue;
+        }
+
+        // Hold zeros until a nonzero byte distinguishes payload from the next start code.
+        // Otherwise a truncated SPS can consume delimiter zeros as missing header bits.
+        if (byte === 0) {
+          zeros++;
+          continue;
+        }
+
+        if (nal.length > 0)
+          while (zeros > 0 && nal.length < 1024) {
+            nal.push(0);
+            zeros--;
+          }
+
+        zeros = 0;
+
+        if (header) {
+          header = false;
+          const target = kind === "h264" ? (byte & 31) === 7 : ((byte >> 1) & 63) === 33;
+
+          if (target) nal.push(byte);
+        } else if (nal.length > 0 && nal.length < 1024) nal.push(byte);
+      }
+
+      if (nal.length === 0) return null;
+
+      // A 1 KB cap bounds malformed scaling lists; a later SPS can still settle the track.
+      return examine(kind, Uint8Array.from([0, 0, 1, ...nal]));
     },
   };
 }
@@ -361,7 +446,7 @@ function classify(
     case 0x02:
       return { kind: "video", codec: "mpeg2", pending: null };
     case 0x1b:
-      return { kind: "video", codec: "h264", pending: null };
+      return { kind: "video", codec: "unknown", pending: "h264" };
     case 0x24:
       return { kind: "video", codec: "unknown", pending: "hevc" };
     case 0x10:
@@ -454,6 +539,16 @@ function examine(pending: Pending, data: Uint8Array): Codec | null {
       }
 
       return null;
+    case "h264":
+      for (const nal of nalUnits(data)) {
+        if ((nal[0]! & 0x1f) === 7) {
+          const fields = allowsFields(nal);
+
+          if (fields !== null) return fields ? "h264-interlaced" : "h264";
+        }
+      }
+
+      return null;
     case "hevc":
       for (const nal of nalUnits(data)) {
         if (((nal[0]! >> 1) & 0x3f) === 33 && nal.length > 3) {
@@ -467,16 +562,83 @@ function examine(pending: Pending, data: Uint8Array): Codec | null {
   }
 }
 
-/** When a track's first frame never shows up, assume the variant that needs the most help. */
+/**
+ * When a track's first frame never shows up, assume the variant that needs the most help. H.264 is
+ * the exception: taken for progressive, an interlaced picture plays as it always did, combed;
+ * taken for interlaced, a progressive one would be re-encoded for nothing.
+ */
 function fallback(pending: Pending): Codec {
   switch (pending) {
     case "mpeg-audio":
       return "mp2";
+    case "h264":
+      return "h264";
     case "aac":
       return "aac";
     case "hevc":
       return "hevc-10bit";
   }
+}
+
+/** H.264 profiles whose sequence parameter set carries chroma format, bit depths and scaling lists. */
+const HIGH_PROFILES = new Set([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]);
+
+/**
+ * Whether an H.264 sequence parameter set allows field pictures, its frame_mbs_only_flag 0, read
+ * as section 7.3.2.1.1 of the specification lays it out. Null when the NAL unit is cut short.
+ */
+function allowsFields(nal: Uint8Array): boolean | null {
+  const sps = bitReader(unescape(nal.subarray(1)));
+  const profile = sps.bits(8);
+  // Constraint flags and level, then seq_parameter_set_id.
+  sps.bits(16);
+  sps.ue();
+
+  if (HIGH_PROFILES.has(profile)) {
+    const chroma = sps.ue();
+
+    if (chroma === 3) sps.bits(1);
+    // Luma and chroma bit depths, and the lossless flag.
+    sps.ue();
+    sps.ue();
+    sps.bits(1);
+
+    if (sps.bits(1)) {
+      for (let list = 0; list < (chroma === 3 ? 12 : 8) && !sps.overrun; list++) {
+        if (!sps.bits(1)) continue;
+        let last = 8;
+        let next = 8;
+
+        for (let entry = 0; entry < (list < 6 ? 16 : 64) && next !== 0; entry++) {
+          next = (last + sps.se() + 256) % 256;
+          last = next === 0 ? last : next;
+        }
+      }
+    }
+  }
+
+  // log2_max_frame_num_minus4, then the picture order count type and what it brings.
+  sps.ue();
+  const order = sps.ue();
+
+  if (order === 0) sps.ue();
+
+  if (order === 1) {
+    sps.bits(1);
+    sps.se();
+    sps.se();
+
+    for (let cycle = sps.ue(); cycle > 0 && !sps.overrun; cycle--) sps.se();
+  }
+
+  // max_num_ref_frames, gaps allowed, width and height in macroblocks.
+  sps.ue();
+  sps.bits(1);
+  sps.ue();
+  sps.ue();
+  const frameOnly = sps.bits(1);
+
+  return sps.overrun ? null : frameOnly === 0;
 }
 
 /** NAL units in Annex B data, each starting at its header byte. */
