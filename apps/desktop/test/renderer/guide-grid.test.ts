@@ -1071,12 +1071,12 @@ describe("reminders in the guide grid", () => {
 
 describe("the guide's widths", () => {
   it("gives the channels' column at most a third of a narrow grid, down to its least", () => {
-    // At a 16 px rem: 224 px in a wide grid, a third of 600, and 8.5 rem in a very narrow one.
+    // At a 16 px rem: 224 px in a wide grid, a third of 600, and 9 rem in a very narrow one.
     expect(guideScale(1600, 16, "standard").columnPx).toBe(224);
     expect(guideScale(600, 16, "standard").columnPx).toBe(200);
-    expect(guideScale(300, 16, "standard").columnPx).toBe(136);
-    // Larger text widens the least: 8.5 rem at 24 px.
-    expect(guideScale(300, 24, "standard").columnPx).toBe(204);
+    expect(guideScale(300, 16, "standard").columnPx).toBe(144);
+    // Larger text widens the least: 9 rem at 24 px.
+    expect(guideScale(300, 24, "standard").columnPx).toBe(216);
   });
 
   it("shows more hours across at a denser setting", () => {

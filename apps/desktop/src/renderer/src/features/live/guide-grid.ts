@@ -38,9 +38,12 @@ export const GUIDE_DENSITIES: readonly GuideDensity[] = ["compact", "standard", 
 /** An hour's width in rem at each density: standard is 196 px at the 14 px rem it was drawn at. */
 const HOUR_REMS: Readonly<Record<GuideDensity, number>> = { compact: 9, standard: 14, roomy: 20 };
 
-/** The channels' column, at most, and at least: a number, a logo and the start of a name. */
+/**
+ * The channels' column, at most, and at least: a number, a logo and the start of a name, and room
+ * along the top for the day before, Now and the day after in every language.
+ */
 const COLUMN_REM = 14;
-const COLUMN_LEAST_REM = 8.5;
+const COLUMN_LEAST_REM = 9;
 
 /**
  * The guide's widths, in px, for a grid `width` px wide with text at `rem` px: an hour as the

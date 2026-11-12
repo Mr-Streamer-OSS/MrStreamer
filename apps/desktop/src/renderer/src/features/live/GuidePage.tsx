@@ -4,7 +4,8 @@ import { useSearchUsage } from "../../app/analytics.ts";
 // current stream, muted, on top. A click on a channel opens Watch; Back returns here unchanged.
 //   Guide beside Watch, or G, shows the same channels as a grid by time instead, and List, G or
 // Escape goes back: see ./GuideGrid.tsx for its keys, which take the place of the list's. Which of
-// the two shows is a preference, kept across restarts. A search shows one row per channel it
+// the two shows is a preference, kept across restarts, and so is how many hours the grid shows
+// across, from the magnifiers in the title row. A search shows one row per channel it
 // found in the grid, its copies folded into the one Enter plays in the list.
 //   Up and Down move the selection; PageUp, PageDown, Home and End jump. Enter watches. Right opens
 //   the rest of the day and Left closes it; Left again moves to the lists and Right comes back.
@@ -38,7 +39,7 @@ import { useSearchUsage } from "../../app/analytics.ts";
 //   The lists hold every saved subscription's channels. One that can't be reached keeps the
 // channels it loaded, and a line under the title says so, with Retry.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarSearch, Play, Volume2, VolumeX, X } from "lucide-react";
+import { CalendarSearch, Play, Volume2, VolumeX, X, ZoomIn, ZoomOut } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -51,7 +52,7 @@ import {
 import { EMPTY_LIVE_FILTERS } from "@mrstreamer/contracts/live-browse";
 import { automaticSearchCopy } from "@mrstreamer/core/catalogue/search";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { Preferences } from "@mrstreamer/contracts/preferences";
+import type { GuideDensity, Preferences } from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
@@ -94,6 +95,7 @@ import { rowPlays, searchChannelRows } from "./search-rows.ts";
 import { BrowseFilters } from "./BrowseFilters.tsx";
 import { ChannelTable } from "./ChannelTable.tsx";
 import { GuideGrid, type GridKeys } from "./GuideGrid.tsx";
+import { GUIDE_DENSITIES } from "./guide-grid.ts";
 import { closeGuideSearch, openGuideSearch, GuideSearch, useGuideSearch } from "./GuideSearch.tsx";
 import { ListPicker, listKey } from "./ListPicker.tsx";
 import {
@@ -937,6 +939,7 @@ export function GuidePage({ active }: { active: boolean }) {
                       )}
                       <div className="ml-auto flex flex-none items-center gap-2">
                         {playingKey === null && viewSwitch}
+                        {liveView === "grid" && <Hours density={density} onDensity={setDensity} />}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1079,7 +1082,6 @@ export function GuidePage({ active }: { active: boolean }) {
                       }}
                       onKeys={() => setFocus("channels")}
                       density={density}
-                      onDensity={setDensity}
                       restore={{
                         from: place.guide?.surface === search.query ? place.guide : null,
                         keep: (spot) =>
@@ -1412,6 +1414,47 @@ function NowStrip({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * More or fewer hours across the grid: a step toward compact or toward roomy. Each stops at its
+ * end. A click leaves the keys where they were, with the grid.
+ */
+function Hours({
+  density,
+  onDensity,
+}: {
+  density: GuideDensity;
+  onDensity: (density: GuideDensity) => void;
+}) {
+  const step = GUIDE_DENSITIES.indexOf(density);
+  const more = GUIDE_DENSITIES[step - 1];
+  const fewer = GUIDE_DENSITIES[step + 1];
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t("More hours")}
+        title={t("More hours")}
+        disabled={!more}
+        onClick={() => more && onDensity(more)}
+      >
+        <ZoomOut />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t("Fewer hours")}
+        title={t("Fewer hours")}
+        disabled={!fewer}
+        onClick={() => fewer && onDensity(fewer)}
+      >
+        <ZoomIn />
+      </Button>
+    </>
   );
 }
 

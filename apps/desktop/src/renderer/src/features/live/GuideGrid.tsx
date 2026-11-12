@@ -28,16 +28,7 @@
 // is in, nothing. The details read the programme's description with `guide.programme`.
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import {
-  Bell,
-  ChevronLeft,
-  ChevronRight,
-  History,
-  Play,
-  RotateCcw,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { Bell, ChevronLeft, ChevronRight, History, Play, RotateCcw } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -94,7 +85,6 @@ import {
   nextCell,
   PAGE_MS,
   PAGE_ROWS,
-  GUIDE_DENSITIES,
   guideScale,
   pagesFor,
   timeline,
@@ -161,7 +151,6 @@ export function GuideGrid({
   onKeys,
   restore,
   density,
-  onDensity,
   ref,
 }: {
   channels: readonly LiveChannel[];
@@ -176,9 +165,8 @@ export function GuideGrid({
   /** The grid took the keys from the lists: the focus went into it, or a programme was picked. */
   onKeys: () => void;
   restore?: Kept<GuideSpot>;
-  /** How many hours show across, and a way to change it, as the preferences keep it. */
+  /** How many hours show across, as the preferences keep it. */
   density: GuideDensity;
-  onDensity: (density: GuideDensity) => void;
   ref?: Ref<GridKeys>;
 }) {
   const rem = useRem();
@@ -713,8 +701,6 @@ export function GuideGrid({
             onDay={(days) => scrollTo((leftAt.current ?? minute) + days * DAY_MS)}
             earlier={drawn.start > origin}
             later={drawn.stop < end}
-            density={density}
-            onDensity={onDensity}
           />
           {/* Under the rows: programmes show it through, the channels and details cover it. */}
           {minute >= origin && minute < end && (
@@ -799,9 +785,9 @@ function shiftAt(grid: HTMLElement, scrolled: number, room: number) {
 }
 
 /**
- * The day at the left edge, a day earlier, Now and a day later, more or fewer hours across, and
- * the half hours along the top, with the time at the line. A day earlier or later is the same
- * time on that day; each goes where the timeline does not reach.
+ * The day at the left edge, then a day earlier, Now and a day later as one control, and the half
+ * hours along the top, with the time at the line. A day earlier or later is the same time on that
+ * day; neither goes where the timeline does not reach. Short of room, the day gives way first.
  */
 function Head({
   origin,
@@ -814,8 +800,6 @@ function Head({
   onDay,
   earlier,
   later,
-  density,
-  onDensity,
 }: {
   origin: number;
   drawn: Span;
@@ -827,12 +811,7 @@ function Head({
   onDay: (days: -1 | 1) => void;
   earlier: boolean;
   later: boolean;
-  density: GuideDensity;
-  onDensity: (density: GuideDensity) => void;
 }) {
-  const step = GUIDE_DENSITIES.indexOf(density);
-  const denser = GUIDE_DENSITIES[step - 1];
-  const roomier = GUIDE_DENSITIES[step + 1];
   const ticks: number[] = [];
 
   for (
@@ -849,31 +828,23 @@ function Head({
       style={{ height: `${HEAD_REM}rem` }}
     >
       <div
-        className="sticky left-0 z-10 flex flex-none items-center gap-2 bg-black pl-3 whitespace-nowrap"
+        className="@container sticky left-0 z-10 flex flex-none items-center gap-2 bg-black pl-3 whitespace-nowrap"
         style={{ width: columnPx }}
       >
-        {day > 0 && formatDate(day, "weekdayDay")}
-        <HeadButton label={t("Day before")} disabled={!earlier} onClick={() => onDay(-1)}>
-          <ChevronLeft />
-        </HeadButton>
-        <HeadButton onClick={onNow}>{t("Now")}</HeadButton>
-        <HeadButton label={t("Day after")} disabled={!later} onClick={() => onDay(1)}>
-          <ChevronRight />
-        </HeadButton>
-        <HeadButton
-          label={t("More hours")}
-          disabled={!denser}
-          onClick={() => denser && onDensity(denser)}
-        >
-          <ZoomOut />
-        </HeadButton>
-        <HeadButton
-          label={t("Fewer hours")}
-          disabled={!roomier}
-          onClick={() => roomier && onDensity(roomier)}
-        >
-          <ZoomIn />
-        </HeadButton>
+        {day > 0 && (
+          <span className="hidden min-w-0 truncate @[13rem]:block">
+            {formatDate(day, "weekdayDay")}
+          </span>
+        )}
+        <div className="flex h-[1.375rem] flex-none items-center rounded-full bg-white/10 text-white">
+          <HeadButton label={t("Day before")} disabled={!earlier} onClick={() => onDay(-1)}>
+            <ChevronLeft />
+          </HeadButton>
+          <HeadButton onClick={onNow}>{t("Now")}</HeadButton>
+          <HeadButton label={t("Day after")} disabled={!later} onClick={() => onDay(1)}>
+            <ChevronRight />
+          </HeadButton>
+        </div>
       </div>
       <div className="relative flex-1 overflow-clip">
         {ticks.map((at) => (
@@ -903,7 +874,7 @@ function Head({
   );
 }
 
-/** A control along the top that leaves the focus where it was when clicked. */
+/** A part of the day control along the top, which leaves the focus where it was when clicked. */
 function HeadButton({
   label,
   disabled = false,
@@ -922,7 +893,7 @@ function HeadButton({
       disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className="flex h-[1.375rem] flex-none items-center rounded-full bg-white/10 px-2.5 text-white hover:bg-white/16 disabled:opacity-40 [&_svg]:size-3.5"
+      className="flex h-full min-w-[1.375rem] flex-none items-center justify-center rounded-full px-1 outline-none hover:bg-white/16 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:hover:bg-transparent [&_svg]:size-3.5"
     >
       {children}
     </button>
