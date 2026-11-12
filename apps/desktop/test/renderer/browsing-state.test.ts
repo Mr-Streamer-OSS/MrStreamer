@@ -308,3 +308,44 @@ describe("Recordings", () => {
     expect(field().value).toBe("");
   });
 });
+
+it("restores Recordings only after its independently arriving sections are ready", async () => {
+  setBrowsing("recordings", (place) => ({ ...place, top: 700 }));
+  const recordings = ipc.hold("recordings.list", () => true);
+  const rules = ipc.hold("recordings.rules", () => true);
+  let extent = 50;
+  let position = 0;
+  const descriptors = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
+  Object.defineProperties(HTMLElement.prototype, {
+    scrollTop: {
+      configurable: true,
+      get: () => position,
+      set: (value: number) => {
+        position = Math.min(value, extent);
+      },
+    },
+    scrollHeight: { configurable: true, get: () => extent + 100 },
+    clientHeight: { configurable: true, get: () => 100 },
+  });
+
+  try {
+    const page = await shown(() => createElement(RecordingsPage));
+    await act(async () => recordings.resolve([]));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    extent = 1000;
+    await act(async () => rules.resolve([]));
+    await until(() => expect(page.container.textContent).toContain("Nothing recorded yet"));
+    expect(position).toBe(700);
+    await page.leave();
+    expect(useUi.getState().browsing.recordings.top).toBe(700);
+  } finally {
+    unmount();
+
+    for (const property of ["scrollTop", "scrollHeight", "clientHeight"]) {
+      const descriptor = descriptors[property];
+
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, property, descriptor);
+      else Reflect.deleteProperty(HTMLElement.prototype, property);
+    }
+  }
+});

@@ -315,6 +315,7 @@ export function GuideGrid({
       keep: (top) =>
         restore.keep({ ...place.current, left: leftAt.current ?? geometry.current.minute, top }),
     },
+    channels.length > 0,
   );
   const [drawn, setDrawn] = useState<Span>({ start: 0, stop: 0 });
   const [day, setDay] = useState(0);

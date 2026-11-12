@@ -769,31 +769,32 @@ describe("the guide grid", () => {
     await ready(() => expect(page.selected()).toBe(now));
   });
 
-  it.each([new Date(2026, 2, 28, 12), new Date(2026, 9, 24, 12)])(
-    "steps by a local calendar day across DST from %s",
-    async (date) => {
-      const original = Date.now();
-      vi.setSystemTime(date);
+  it.each([
+    [2, 28, 82800000],
+    [9, 24, 90000000],
+  ])("steps by a local calendar day across DST from %s", async (month, day, elapsed) => {
+    const previousZone = process.env["TZ"];
+    process.env["TZ"] = "Europe/Brussels";
+    const original = Date.now();
+    vi.setSystemTime(new Date(2026, month, day, 12));
 
-      try {
-        const page = await gridPage(THREE);
-        await ready(() => expect(page.grid()).not.toBeNull());
-        await page.leave();
-        const before = useUi.getState().browsing.live.guide!.left;
-        await page.enter();
-        await ready(() => expect(labelled("Day after")).toBeDefined());
-        await act(async () => labelled("Day after")!.click());
-        await page.leave();
-        const expected = new Date(before);
-        expected.setDate(expected.getDate() + 1);
-        expect(useUi.getState().browsing.live.guide!.left).toBe(
-          before + (expected.getTime() - new Date(before).getTime()),
-        );
-      } finally {
-        vi.setSystemTime(original);
-      }
-    },
-  );
+    try {
+      const page = await gridPage(THREE);
+      await ready(() => expect(page.grid()).not.toBeNull());
+      await page.leave();
+      const before = useUi.getState().browsing.live.guide!.left;
+      await page.enter();
+      await ready(() => expect(labelled("Day after")).toBeDefined());
+      await act(async () => labelled("Day after")!.click());
+      await page.leave();
+      expect(useUi.getState().browsing.live.guide!.left - before).toBe(elapsed);
+    } finally {
+      vi.setSystemTime(original);
+
+      if (previousZone === undefined) delete process.env["TZ"];
+      else process.env["TZ"] = previousZone;
+    }
+  });
 
   it("shows both view and density save failures", async () => {
     const page = await gridPage(THREE);
@@ -1146,4 +1147,19 @@ describe("the guide's widths", () => {
     expect(guideScale(1600, 16, "standard").hourPx).toBe(224);
     expect(guideScale(1600, 16, "roomy").hourPx).toBe(320);
   });
+});
+
+it("keeps a previous Live selection when a cold return is left before its list answers", async () => {
+  const page = await gridPage(THREE);
+  await ready(() => expect(page.rows()).toContain("Two"));
+  await page.leave();
+  const selected = useUi.getState().browsing.live.selected;
+  expect(selected?.channel?.id).toBe("1");
+  page.client.removeQueries({ queryKey: browseChannels(null).queryKey });
+  const held = ipc.hold("library.browse", () => true);
+  await page.enter();
+  await ready(() => expect(page.rows()).toEqual([]));
+  await page.leave();
+  expect(useUi.getState().browsing.live.selected).toEqual(selected);
+  await act(async () => held.resolve(browseResult(THREE)));
 });

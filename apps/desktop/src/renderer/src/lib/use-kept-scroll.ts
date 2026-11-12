@@ -11,17 +11,19 @@ export type KeptSpot = Kept<Spot>;
 
 const TAKEN = ["wheel", "pointerdown", "touchstart"] as const;
 
-/** Restores an offset as content arrives. Viewer input wins, including global navigation keys.
+/** Restores an offset once the caller has its content and measured geometry. Viewer input wins, including global navigation keys.
  * Until restoration finishes, leaving preserves the requested offset rather than an empty list's zero.
  */
 export function useKeptScroll(
   ref: RefObject<HTMLElement | null>,
   kept: Kept<number> | undefined,
+  ready: boolean,
 ): void {
   const top = useRef(kept?.from ?? 0);
   const latest = useRef(kept);
   latest.current = kept;
   const restoring = useRef(false);
+  const complete = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     const element = ref.current;
@@ -30,14 +32,11 @@ export function useKeptScroll(
     if (!element || target <= 0) return;
     restoring.current = true;
     let applied = element.scrollTop;
-    const resized = new ResizeObserver(() => apply());
-    const changed = new MutationObserver(() => apply());
 
     function finish() {
       restoring.current = false;
       top.current = element!.scrollTop;
-      resized.disconnect();
-      changed.disconnect();
+      complete.current = null;
 
       for (const type of TAKEN) element!.removeEventListener(type, finish);
       window.removeEventListener("keydown", finish, true);
@@ -52,16 +51,13 @@ export function useKeptScroll(
       element!.scrollTop = target;
       applied = element!.scrollTop;
 
-      // A measured overflowing list has its extent even if the saved offset is now beyond it.
-      if (Math.abs(applied - target) < 1 || element!.scrollHeight > element!.clientHeight) finish();
+      finish();
     }
 
     for (const type of TAKEN) element.addEventListener(type, finish, { passive: true });
     window.addEventListener("keydown", finish, true);
     element.addEventListener("scroll", moved, { passive: true });
-    resized.observe(element);
-    changed.observe(element, { childList: true, subtree: true, attributes: true });
-    apply();
+    complete.current = apply;
 
     return () => {
       const pending = restoring.current;
@@ -70,6 +66,11 @@ export function useKeptScroll(
       if (pending) top.current = target;
     };
   }, [ref]);
+
+  // The caller owns content and layout readiness; overflow can be only a partial result.
+  useLayoutEffect(() => {
+    if (ready) complete.current?.();
+  }, [ready]);
 
   useEffect(() => {
     const element = ref.current;

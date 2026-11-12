@@ -126,10 +126,14 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   const scroller = useRef<HTMLDivElement>(null);
   const [kept] = useState(() => useUi.getState().browsing.downloads.top);
   const keep = useMemo(() => browsingNow("downloads"), []);
-  useKeptScroll(scroller, {
-    from: kept,
-    keep: (top) => keep(() => ({ top })),
-  });
+  useKeptScroll(
+    scroller,
+    {
+      from: kept,
+      keep: (top) => keep(() => ({ top })),
+    },
+    !list.isPending,
+  );
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const chosen = items.filter((item) => selected.has(item.id));

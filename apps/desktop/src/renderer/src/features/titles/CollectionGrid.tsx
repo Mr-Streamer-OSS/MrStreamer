@@ -144,6 +144,11 @@ export function CollectionGrid({
   kept?: KeptSpot;
 } & Partial<TitleFilterControls>) {
   const listed = useCollection(kind, id, sort, filters);
+  const listKey = `${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`;
+  const [mounted, setMounted] = useState<string | null>(null);
+
+  if (listed.total !== null && listed.total > 0 && mounted !== listKey) setMounted(listKey);
+  const hasGrid = mounted === listKey;
 
   // Each poster is the version the grid lists, as the 4K tab's are their 4K versions.
   const open = (title: Title) =>
@@ -167,27 +172,33 @@ export function CollectionGrid({
           action={action}
         />
       )}
-      {listed.error ? (
-        <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>
-      ) : listed.total === null ? null : listed.total === 0 ? (
-        filters && Object.keys(filters).length > 0 ? (
+      {listed.total === 0 &&
+        !listed.error &&
+        (filters && Object.keys(filters).length > 0 ? (
           <FilterEmpty filters={filters} />
         ) : (
           <p className="text-[0.9375rem] text-muted-foreground">Nothing here yet.</p>
-        )
+        ))}
+      {listed.error ? (
+        <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>
       ) : (
-        <Grid
-          key={`${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`}
-          total={listed.total}
-          itemAt={listed.titleAt}
-          keyOf={titleKey}
-          onVisible={listed.load}
-          settled={listed.settled}
-          active={active}
-          onOpen={open}
-          {...(kept ? { kept } : {})}
-          tile={(title, grid) => <GridPoster title={title} caption={describe(title)} grid={grid} />}
-        />
+        (hasGrid || (listed.total !== null && listed.total > 0)) && (
+          <Grid
+            key={listKey}
+            total={listed.total ?? 0}
+            reset={listed.total === null}
+            itemAt={listed.titleAt}
+            keyOf={titleKey}
+            onVisible={listed.load}
+            settled={listed.settled}
+            active={active}
+            onOpen={open}
+            {...(kept ? { kept } : {})}
+            tile={(title, grid) => (
+              <GridPoster title={title} caption={describe(title)} grid={grid} />
+            )}
+          />
+        )
       )}
     </>
   );
@@ -309,6 +320,7 @@ function controlOf(scroller: HTMLElement, index: number, part: number): HTMLElem
  * keeps the focus and the Tab stop. `takeFocus` asks the selected tile to take the focus once it
  * is drawn, unless the focus went to another control first; `onFocusTaken` says it did. `settled`
  * is false while a page of the list is still being read, as a refresh reads them one at a time.
+ * `reset` safely clears selection while unread privacy data is withheld, without losing focus handoff.
  * `kept` brings the selection and the scroll back as the grid stood when it went, the selection
  * by its key, and keeps them again as it goes.
  */
@@ -322,6 +334,7 @@ export function Grid<T>({
   tile,
   takeFocus = false,
   onFocusTaken,
+  reset = false,
   settled = true,
   kept,
 }: {
@@ -337,6 +350,7 @@ export function Grid<T>({
   tile: (item: T, tile: GridTile) => ReactNode;
   takeFocus?: boolean;
   onFocusTaken?: () => void;
+  reset?: boolean;
   settled?: boolean;
   kept?: KeptSpot;
 }) {
@@ -365,16 +379,22 @@ export function Grid<T>({
     index: kept?.from?.index ?? 0,
   }));
 
-  const found = locate(chosen, total, itemAt, keyOf);
+  // A privacy invalidation withholds the old list and explicitly resets selection, while
+  // the mounted grid retains the focus handoff for an open details sheet.
+  const selection = reset ? { key: null, index: 0 } : chosen;
+  const found = locate(selection, total, itemAt, keyOf);
+
   // A title the loaded pages lack keeps its key while a page is still being read: a refresh
   // answers them one at a time, and a restored position can need a page not yet requested. Meanwhile it
   // shows no ring, takes no focus and opens nothing. Once every page answered, a title still
   // missing counts as gone, and what now stands at its position takes its place. One that moved
   // past the pages loaded so far isn't looked for beyond them.
-  const pending = found === null && (!settled || (chosen.index < total && !itemAt(chosen.index)));
-  const selected = found ?? Math.min(chosen.index, Math.max(total - 1, 0));
+  const pending =
+    found === null && (!settled || (selection.index < total && !itemAt(selection.index)));
+
+  const selected = found ?? Math.min(selection.index, Math.max(total - 1, 0));
   const selectedItem = itemAt(selected);
-  const selectedKey = pending || !selectedItem ? chosen.key : keyOf(selectedItem);
+  const selectedKey = pending || !selectedItem ? selection.key : keyOf(selectedItem);
 
   // Kept where it was found, so the next render needn't look for it again.
   if (selected !== chosen.index || selectedKey !== chosen.key)
@@ -384,6 +404,7 @@ export function Grid<T>({
   useKeptScroll(
     box,
     kept && { from: kept.from?.top ?? null, keep: (top) => kept.keep({ ...at.current, top }) },
+    width > 0 && !reset,
   );
   const selectedRow = Math.floor(selected / columns);
 

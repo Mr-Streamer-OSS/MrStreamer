@@ -360,7 +360,9 @@ export function GuidePage({ active }: { active: boolean }) {
     selected:
       listed !== undefined && selectedRow
         ? { index: selected, channel: ownedId(selectedRow) }
-        : null,
+        : listed === undefined
+          ? place.selected
+          : null,
   };
 
   const leaving = useRef(leavingNow);

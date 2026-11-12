@@ -206,6 +206,7 @@ export function ChannelTable({
       from: restore.from?.top ?? null,
       keep: (top) => restore.keep({ key: null, index: 0, top }),
     },
+    channels.length > 0,
   );
   const asked = useRef(searchFocus);
   const focusedRow = useRef<HTMLElement | null>(null);

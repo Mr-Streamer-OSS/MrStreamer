@@ -7,9 +7,13 @@ const GAP_REM = 1;
 /**
  * How many tiles fit across the rows of Home, Movies and Series, which each show one line. The
  * returned ref goes on the element that holds the rows inside 2.5rem of padding on each side;
- * `fit(tileRem)` is how many tiles at least that wide fit across, never fewer than one.
+ * `measured` says its width is available; `fit(tileRem)` is how many tiles at least that wide fit across, never fewer than one.
  */
-export function useFit(): [ref: RefCallback<HTMLDivElement>, fit: (tileRem: number) => number] {
+export function useFit(): [
+  ref: RefCallback<HTMLDivElement>,
+  fit: (tileRem: number) => number,
+  measured: boolean,
+] {
   const rem = useRem();
   const [width, setWidth] = useState(0);
 
@@ -26,5 +30,9 @@ export function useFit(): [ref: RefCallback<HTMLDivElement>, fit: (tileRem: numb
   const gap = GAP_REM * rem;
   const inner = Math.max(0, width - 5 * rem);
 
-  return [ref, (tileRem) => Math.max(1, Math.floor((inner + gap) / (tileRem * rem + gap)))];
+  return [
+    ref,
+    (tileRem) => Math.max(1, Math.floor((inner + gap) / (tileRem * rem + gap))),
+    width > 0,
+  ];
 }

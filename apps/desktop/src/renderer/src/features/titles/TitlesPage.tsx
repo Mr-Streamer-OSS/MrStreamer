@@ -532,7 +532,7 @@ function Rows({
   const continuing = useContinueWatching();
   const play = useResume();
   const removal = useRemoveFromContinue();
-  const [fitted, fit] = useFit();
+  const [fitted, fit, measured] = useFit();
   const scroller = useRef<HTMLDivElement | null>(null);
 
   const box = useCallback(
@@ -544,19 +544,20 @@ function Rows({
     [fitted],
   );
 
-  useKeptScroll(
-    scroller,
-    kept && {
-      from: kept.from?.top ?? null,
-      keep: (top) => kept.keep({ key: null, index: 0, top }),
-    },
-  );
   const stills = fit(STILL_REM);
   const posters = fit(POSTER_REM);
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
   // Titles like the one watched last, by the version that was watched.
   const like = mine[0]?.version ?? null;
   const rows = useQuery(queries.rows(kind, tab, tab === "for-you" ? like : null));
+  useKeptScroll(
+    scroller,
+    kept && {
+      from: kept.from?.top ?? null,
+      keep: (top) => kept.keep({ key: null, index: 0, top }),
+    },
+    !rows.isPending && measured,
+  );
 
   if (rows.error) {
     return <p className="px-10 text-sm text-destructive">{describeError(appError(rows.error))}</p>;
@@ -705,14 +706,16 @@ function Tiles({
   kept: KeptSpot;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const tiles = useQuery(queries.tiles(kind, of));
   useKeptScroll(
     scroller,
     kept && {
       from: kept.from?.top ?? null,
       keep: (top) => kept.keep({ key: null, index: 0, top }),
     },
+    !tiles.isPending,
   );
-  const tiles = useQuery(queries.tiles(kind, of));
+
   const status = useQuery(queries.onDemandStatus());
   const metadata = status.data?.metadata;
 
