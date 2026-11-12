@@ -55,7 +55,7 @@ import { analyticsTransport } from "./analytics/transport.ts";
 import { subscriptionHandlers } from "./handlers/subscriptions.ts";
 import { libraryHandlers } from "./handlers/library.ts";
 import { guideHandlers } from "./handlers/guide.ts";
-import { titleHandlers } from "./handlers/titles.ts";
+import { followHandlers, titleHandlers } from "./handlers/titles.ts";
 import { playbackHandlers, publishCopyChange } from "./handlers/playback.ts";
 import { subtitleHandlers } from "./handlers/subtitles.ts";
 import { outputHandlers } from "./handlers/output.ts";
@@ -117,6 +117,7 @@ import { DEFAULT_SCHEDULE, Updates, type UpdatesConfig } from "./services/update
 import { Watchlist } from "./services/watchlist.ts";
 import { CustomLists } from "./services/custom-lists.ts";
 import { Collections } from "./services/collections.ts";
+import { SeriesFollows } from "./services/series-follows.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
@@ -698,6 +699,7 @@ async function start(): Promise<void> {
     watchlist,
     customLists,
     collections,
+    follows,
     diagnostics,
     licences,
     downloads,
@@ -722,6 +724,7 @@ async function start(): Promise<void> {
       watchlist: Watchlist,
       customLists: CustomLists,
       collections: Collections,
+      follows: SeriesFollows,
       diagnostics: Diagnostics,
       licences: Licences,
       downloads: Downloads,
@@ -1106,6 +1109,9 @@ async function start(): Promise<void> {
             if (change.kind === "collections" || change.kind === "erased")
               emit(mainWindow.webContents, "collections.changed", { owner });
 
+            if (change.kind === "follows" || change.kind === "erased")
+              emit(mainWindow.webContents, "follows.changed", { owner });
+
             if (change.kind === "lists" || change.kind === "erased") {
               emit(mainWindow.webContents, "profiles.listsChanged", { owner });
 
@@ -1363,6 +1369,7 @@ async function start(): Promise<void> {
       ...libraryHandlers({ library, subscriptions, roster, settings }),
       ...guideHandlers({ guide, library }),
       ...titleHandlers({ onDemand, watchlist, viewing, subscriptions, roster }),
+      ...followHandlers({ follows }),
       ...playbackHandlers({
         playback,
         coordination,
@@ -1514,6 +1521,7 @@ async function start(): Promise<void> {
             subscriptions,
             roster,
           }),
+          ...followHandlers({ follows: scoped.follows }),
           ...viewingHandlers({ viewing: scoped.viewing, settings: scoped.settings }),
           ...customListHandlers({ customLists: scoped.lists }),
           ...collectionsHandlers({ collections: scoped.collections, current: admission.current }),

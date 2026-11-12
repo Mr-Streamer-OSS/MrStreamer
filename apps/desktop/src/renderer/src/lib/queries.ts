@@ -903,8 +903,16 @@ export function syncOnDemand(client: QueryClient): () => void {
     fetched = now;
     const marked = status.markedForAdults === true;
 
-    // Privacy follows the query client even while collection surfaces are closed.
-    if (marked) forget(client, { queryKey: ["collections"] });
+    // Privacy follows the query client even while collections and follow surfaces are closed.
+    if (marked) {
+      forget(client, { queryKey: ["collections"] });
+      forget(client, { queryKey: ["follows"] });
+    } else {
+      const owner = profileOwner();
+      void client.cancelQueries({ queryKey: ["follows"] }).then(() => {
+        if (currentProfile(owner)) void client.invalidateQueries({ queryKey: ["follows"] });
+      });
+    }
 
     if (newLists || marked) invalidateDetailsCatalogue();
 

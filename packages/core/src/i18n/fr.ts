@@ -2116,4 +2116,23 @@ export const fr: Translation = {
     one: "{count} chaîne de secours",
     other: "{count} chaînes de secours",
   },
+  Follow: "Suivre",
+  Following: "Suivi",
+  "New episodes": "Nouveaux épisodes",
+  "Mark seen": "Marquer comme vus",
+  "Couldn't follow.": "Impossible de suivre.",
+  "Couldn't stop following.": "Impossible d'arrêter de suivre.",
+  "Couldn't mark seen.": "Impossible de marquer comme vus.",
+  "Couldn't read whether you follow this series.":
+    "Impossible de savoir si vous suivez cette série.",
+  "Couldn't check for new episodes. The next refresh tries again.":
+    "Impossible de vérifier les nouveaux épisodes. La prochaine actualisation réessaiera.",
+  "New episodes couldn't be read.": "Impossible de lire les nouveaux épisodes.",
+  "Mark new episodes of {name} seen": "Marquer les nouveaux épisodes de {name} comme vus",
+  "Stop following {name}": "Ne plus suivre {name}",
+  "{count} new episodes": {
+    one: "{count} nouvel épisode",
+    many: "{count} de nouveaux épisodes",
+    other: "{count} nouveaux épisodes",
+  },
 };

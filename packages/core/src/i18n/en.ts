@@ -1959,4 +1959,18 @@ export const en = {
     one: "{count} fallback channel",
     other: "{count} fallback channels",
   },
+  Follow: "Follow",
+  Following: "Following",
+  "New episodes": "New episodes",
+  "Mark seen": "Mark seen",
+  "Couldn't follow.": "Couldn't follow.",
+  "Couldn't stop following.": "Couldn't stop following.",
+  "Couldn't mark seen.": "Couldn't mark seen.",
+  "Couldn't read whether you follow this series.": "Couldn't read whether you follow this series.",
+  "Couldn't check for new episodes. The next refresh tries again.":
+    "Couldn't check for new episodes. The next refresh tries again.",
+  "New episodes couldn't be read.": "New episodes couldn't be read.",
+  "Mark new episodes of {name} seen": "Mark new episodes of {name} seen",
+  "Stop following {name}": "Stop following {name}",
+  "{count} new episodes": { one: "{count} new episode", other: "{count} new episodes" },
 } as const satisfies Readonly<Record<string, string | Plural>>;

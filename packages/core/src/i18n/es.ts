@@ -2108,4 +2108,22 @@ export const es: Translation = {
     one: "{count} canal de respaldo",
     other: "{count} canales de respaldo",
   },
+  Follow: "Seguir",
+  Following: "Siguiendo",
+  "New episodes": "Episodios nuevos",
+  "Mark seen": "Marcar como vistos",
+  "Couldn't follow.": "No se pudo seguir.",
+  "Couldn't stop following.": "No se pudo dejar de seguir.",
+  "Couldn't mark seen.": "No se pudo marcar como vistos.",
+  "Couldn't read whether you follow this series.": "No se pudo saber si sigues esta serie.",
+  "Couldn't check for new episodes. The next refresh tries again.":
+    "No se pudieron comprobar los episodios nuevos. La próxima actualización lo intentará de nuevo.",
+  "New episodes couldn't be read.": "No se pudieron leer los episodios nuevos.",
+  "Mark new episodes of {name} seen": "Marcar como vistos los episodios nuevos de {name}",
+  "Stop following {name}": "Dejar de seguir {name}",
+  "{count} new episodes": {
+    one: "{count} episodio nuevo",
+    many: "{count} de episodios nuevos",
+    other: "{count} episodios nuevos",
+  },
 };

@@ -4,7 +4,8 @@
 // without asking. Save puts the movie or the whole series on the watchlist and takes it off again;
 // it goes by the title in the lists, so it works before the details arrive. Beside it, the
 // collections menu puts the version that plays in the viewer's collections and takes it out (see
-// features/collections/TitleCollections.tsx). A title with several versions plays the one picked
+// features/collections/TitleCollections.tsx). A series Follow keeps new episodes on Details and
+// Home (FollowSeries.tsx). A title with several versions plays the one picked
 // with the arrow beside Play, else the one it was opened on, as from the 4K tab, else the one that
 // suits best; the sheet shows that version, so a series lists its episodes. The versions can be of
 // several subscriptions: the menu then names each one's, and Resume goes by how far the version
@@ -85,6 +86,7 @@ import { SeriesDownload } from "../downloads/SeriesDownload.tsx";
 import { transferred, useDownloadOf } from "../../lib/downloads.ts";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 import { TitleCollections } from "../collections/TitleCollections.tsx";
+import { FollowSeries } from "./FollowSeries.tsx";
 import {
   EpisodeMenu,
   filmScope,
@@ -283,8 +285,11 @@ export function DetailsView({
         />
       ) : title ? (
         <Header title={title} backdropUrl={title.backdropUrl} facts={factsOf(title)}>
-          <div className="mt-6">
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <SaveButton state={saving} />
+            {title.kind === "series" && (
+              <FollowSeries title={title} pending={!listed.isSuccess} version={playing} />
+            )}
             <SaveError state={saving} />
           </div>
           <p className="mt-6 text-[0.9375rem] text-muted-foreground">
@@ -675,6 +680,10 @@ function SeriesActions({
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
 
+  const follow = (
+    <FollowSeries title={versions.title} pending={versions.pending} version={versions.playing} />
+  );
+
   const download = (
     <SeriesDownload
       key={ownedKey(versions.playing)}
@@ -699,6 +708,7 @@ function SeriesActions({
             pending={versions.pending}
             version={versions.playing}
           />
+          {follow}
         </div>
         <SaveError state={saving} />
         {error && (
@@ -727,6 +737,7 @@ function SeriesActions({
             pending={versions.pending}
             version={versions.playing}
           />
+          {follow}
         </div>
         <SaveError state={saving} />
         <p className="mt-6 text-[0.9375rem] text-muted-foreground">{t("No episodes yet.")}</p>
@@ -758,6 +769,7 @@ function SeriesActions({
       onRemove={listed ? () => removal.mutate(details.title) : null}
       removeError={removal.error}
       download={download}
+      follow={follow}
     />
   );
 }
@@ -774,6 +786,7 @@ function Actions({
   onRemove,
   removeError,
   download,
+  follow,
   markControl,
   notice,
 }: {
@@ -793,6 +806,8 @@ function Actions({
   removeError: Error | null;
   /** The selected movie or series download action, beside Play and Watchlist. */
   download?: ReactNode;
+  /** A series' Follow, after Save and the collections menu. */
+  follow?: ReactNode;
   /** Marks the title watched or unwatched, after the collections menu. */
   markControl?: ReactNode;
   /** Lines under the actions about what they did, as a mark's with Undo. */
@@ -848,6 +863,7 @@ function Actions({
         {download}
         <SaveButton state={saving} />
         <TitleCollections title={title} pending={versions.pending} version={playing} />
+        {follow}
         {markControl}
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>

@@ -6,10 +6,11 @@ import { ArkErrors } from "arktype";
 import { workerResults } from "../ondemand/protocol.ts";
 import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
-// details come from the provider and TMDB when a title opens, never before, TMDB's episodes when
-// their season opens, and playback asks here which file to stream. A title's details don't wait
-// for TMDB: what it says joins them once it arrives, and `detailsChanged` says so.
-// A title, version or episode a call names says which subscription lists it, and one of a
+// details come from the provider and TMDB when a title opens, and for a followed series after a
+// refresh changed its list entry (`listedEpisodes`, see series-follows.ts), never otherwise,
+// TMDB's episodes when their season opens, and playback asks here which file to stream. A title's
+// details don't wait for TMDB: what it says joins them once it arrives, and `detailsChanged`
+// says so. A title, version or episode a call names says which subscription lists it, and one of a
 // subscription that isn't saved finds nothing. The lists are those of every saved subscription
 // that has movies and series, shown as one catalogue: an unmapped playlist adds none.
 // Each subscription's lists are fetched, kept and reported on their own, so one that can't be
@@ -56,7 +57,7 @@ import {
 } from "@mrstreamer/core/metadata/tmdb";
 import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
-import { titleName } from "@mrstreamer/core/ondemand/names";
+import { episodeName, titleName } from "@mrstreamer/core/ondemand/names";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { qualityHint } from "@mrstreamer/core/ondemand/filters";
 import type { FilterOptions, TitleFilters } from "@mrstreamer/contracts/title-filters";
@@ -243,6 +244,15 @@ export class OnDemand extends Context.Service<
      * provider's, with TMDB's details.
      */
     season(series: OwnedId, season: number): Effect.Effect<readonly EpisodeDetails[], Failed>;
+    /**
+     * A listed series version's episodes as its provider lists them for the current lists, in
+     * their order, before display grouping merges files. Shared with details, so the provider is
+     * asked at most once per accepted refresh. Never details kept from earlier lists: when the
+     * provider can't answer, it fails.
+     */
+    listedEpisodes(
+      series: OwnedId,
+    ): Effect.Effect<readonly Pick<Episode, "id" | "season" | "number" | "title">[], Failed>;
     /** Titles by any of their versions, from the lists alone. */
     titles(kind: TitleKind, versions: readonly OwnedId[]): Effect.Effect<readonly Title[], Failed>;
     /** Trusted loaded catalogue currency; current is synchronous, including inside a transaction. */
@@ -1848,6 +1858,16 @@ function make(deps: OnDemandDeps) {
             })),
           };
         }),
+
+      listedEpisodes: (series: OwnedId) =>
+        Effect.map(detailsOf("series", series, false), ({ raw }) =>
+          raw.episodes.map((episode) => ({
+            id: episode.id,
+            season: episode.season,
+            number: episode.number,
+            title: episode.number > 0 ? episodeName(episode.name, episode.number) : episode.name,
+          })),
+        ),
 
       season: (series: OwnedId, number: number) =>
         Effect.gen(function* () {

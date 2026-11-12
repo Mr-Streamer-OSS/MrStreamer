@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import type { HandlersFor } from "../ipc.ts";
 import type { OnDemand } from "../services/ondemand.ts";
 import type { Watchlist } from "../services/watchlist.ts";
+import type { SeriesFollows } from "../services/series-follows.ts";
 import type { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import type { Subscriptions } from "../services/subscription.ts";
 import type { Roster } from "../services/roster.ts";
@@ -52,5 +53,19 @@ export function titleHandlers({
     "watchlist.saved": ({ kind, version }) => watchlist.saved(kind, version),
     "watchlist.save": ({ kind, version }) => watchlist.save(kind, version),
     "watchlist.remove": ({ entry }) => Effect.as(watchlist.remove(entry), null),
+  };
+}
+
+/** Following series and their new episodes, in the admitted viewer's profile. */
+export function followHandlers({
+  follows,
+}: {
+  readonly follows: SeriesFollows["Service"];
+}): HandlersFor<"follows"> {
+  return {
+    "follows.state": ({ series }) => follows.state(series),
+    "follows.set": ({ series, following }) => follows.follow(series, following),
+    "follows.seen": ({ series, episodes }) => Effect.as(follows.seen(series, episodes), null),
+    "follows.alerts": () => follows.alerts,
   };
 }

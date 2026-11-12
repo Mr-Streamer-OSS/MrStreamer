@@ -2020,4 +2020,19 @@ export const de: Translation = {
   "{channel} didn't play. {fallback} from {subscription} plays instead.":
     "{channel} lief nicht. {fallback} von {subscription} läuft stattdessen.",
   "{count} fallback channels": { one: "{count} Ersatzsender", other: "{count} Ersatzsender" },
+  Follow: "Folgen",
+  Following: "Gefolgt",
+  "New episodes": "Neue Folgen",
+  "Mark seen": "Als gesehen markieren",
+  "Couldn't follow.": "Folgen fehlgeschlagen.",
+  "Couldn't stop following.": "Nicht mehr folgen fehlgeschlagen.",
+  "Couldn't mark seen.": "Als gesehen markieren fehlgeschlagen.",
+  "Couldn't read whether you follow this series.":
+    "Ob du dieser Serie folgst, konnte nicht gelesen werden.",
+  "Couldn't check for new episodes. The next refresh tries again.":
+    "Neue Folgen konnten nicht geprüft werden. Die nächste Aktualisierung versucht es erneut.",
+  "New episodes couldn't be read.": "Neue Folgen konnten nicht gelesen werden.",
+  "Mark new episodes of {name} seen": "Neue Folgen von {name} als gesehen markieren",
+  "Stop following {name}": "{name} nicht mehr folgen",
+  "{count} new episodes": { one: "{count} neue Folge", other: "{count} neue Folgen" },
 };

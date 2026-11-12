@@ -212,6 +212,43 @@ export interface EpisodeDetails extends Episode {
   readonly directors: readonly string[];
 }
 
+/** An episode of a followed series that a refresh listed since the viewer last saw what's new. */
+export interface NewEpisode {
+  /** The file that plays it, in the followed version's subscription. */
+  readonly id: string;
+  readonly season: number;
+  readonly number: number;
+  /** The episode's own name, as its details show it without TMDB. */
+  readonly title: string;
+  /** When a refresh found it: epoch milliseconds. */
+  readonly foundAt: number;
+}
+
+/**
+ * A series the viewer follows, in the active profile: the exact version they followed, by its
+ * provider's id in its subscription, so a provider's new name keeps it. Another version of the
+ * title is another follow.
+ */
+export interface SeriesFollow {
+  /** The followed version. */
+  readonly series: OwnedId;
+  /** As the lists name it now, else as they named it last. */
+  readonly name: string;
+  readonly year: number | null;
+  /** Epoch milliseconds. */
+  readonly followedAt: number;
+  /** The title the lists have for this version now; null while its provider lists it no more. */
+  readonly title: Title | null;
+  /** Listed since it was followed or last seen, in season and number order. */
+  readonly newEpisodes: readonly NewEpisode[];
+  /**
+   * When its episodes were last read, at following or after a refresh changed its list entry,
+   * and whether that read failed. A failed read keeps what was known and is tried again on the
+   * next refresh.
+   */
+  readonly lastCheck: { readonly at: number; readonly failed: boolean };
+}
+
 /** When a subscription's movie and series lists were last fetched, and how big they are. */
 export interface TitleListsStatus {
   /** The subscription whose lists these are. */

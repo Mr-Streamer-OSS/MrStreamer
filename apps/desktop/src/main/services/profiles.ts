@@ -5,6 +5,7 @@ import { OnDemand } from "./ondemand.ts";
 import { Watchlist } from "./watchlist.ts";
 import { CustomLists } from "./custom-lists.ts";
 import { Collections } from "./collections.ts";
+import { SeriesFollows } from "./series-follows.ts";
 import { type } from "arktype";
 import {
   KidsProfilePolicySchema,
@@ -44,6 +45,7 @@ import { profileDirectory, profileStorage } from "../platform/profile-store.ts";
 import { WatchlistStore, watchlistStoreLayer } from "../platform/watchlist-store.ts";
 import { CustomListStore, customListStoreLayer } from "../platform/custom-lists-store.ts";
 import { CollectionsStore, collectionsStoreLayer } from "../platform/collections-store.ts";
+import { SeriesFollowsStore, seriesFollowsStoreLayer } from "../platform/series-follows-store.ts";
 import {
   Settings,
   AdmittedSettings,
@@ -82,6 +84,7 @@ export function personalStoresLayer({
     watchlistStoreLayer,
     customListStoreLayer,
     collectionsStoreLayer,
+    seriesFollowsStoreLayer,
   ).pipe(Layer.provide(database ?? databaseLayer(profileDirectory(dataDir, profileId))));
 }
 
@@ -101,7 +104,7 @@ type ProfileUpdate =
   | { readonly kind: "active"; readonly active: ActiveProfile }
   | { readonly kind: "viewing"; readonly owner: ActiveProfile | null; readonly sequence: number }
   | {
-      readonly kind: "watchlist" | "lists" | "collections" | "erased";
+      readonly kind: "watchlist" | "lists" | "collections" | "follows" | "erased";
       readonly owner: ActiveProfile | null;
     };
 
@@ -112,6 +115,8 @@ type PersonalServices =
   | CustomListStore
   | CollectionsStore
   | Collections
+  | SeriesFollowsStore
+  | SeriesFollows
   | Settings
   | ViewingRecord
   | Watchlist
@@ -126,6 +131,7 @@ export interface ProfileAdmission {
     readonly watchlist: Watchlist["Service"];
     readonly lists: CustomLists["Service"];
     readonly collections: Collections["Service"];
+    readonly follows: SeriesFollows["Service"];
     readonly settings: Settings["Service"];
   };
   /** A retained admission never resolves the active owner again, even when run much later. */
@@ -331,6 +337,7 @@ export function makeProfiles({
           Watchlist.layer,
           CustomLists.layer,
           Collections.layer,
+          SeriesFollows.layer,
         ).pipe(Layer.provideMerge(personal), Layer.provide(Layer.succeedContext(shared)));
 
         const runtime = id === DEFAULT_PROFILE_ID ? null : ManagedRuntime.make(features);
@@ -388,6 +395,7 @@ export function makeProfiles({
         const viewing = Context.get(context, ViewingRecord);
         const watchlist = Context.get(context, Watchlist);
         const lists = Context.get(context, CustomLists);
+        const follows = Context.get(context, SeriesFollows);
 
         const watches = [
           Stream.runForEach(
@@ -402,6 +410,13 @@ export function makeProfiles({
           Stream.runForEach(
             lists.profileChanges ?? Stream.map(lists.changes, () => null),
             (owner) => PubSub.publish(events, { kind: "lists", owner }),
+          ),
+          // Background reconciliation has no request admission; this handle owns its store.
+          Stream.runForEach(follows.profileChanges, (owner) =>
+            PubSub.publish(events, {
+              kind: "follows",
+              owner: owner ?? (active.id === id ? { ...active } : null),
+            }),
           ),
         ];
 
@@ -518,6 +533,7 @@ export function makeProfiles({
               watchlist: Context.get(handle.context, Watchlist),
               lists: Context.get(handle.context, CustomLists),
               collections: Context.get(handle.context, Collections),
+              follows: Context.get(handle.context, SeriesFollows),
               settings: Context.get(handle.context, Settings),
             },
           } satisfies ProfileAdmission;
