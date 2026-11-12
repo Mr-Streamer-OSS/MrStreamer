@@ -1577,6 +1577,83 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await leftBehind(dataDir)).toEqual([]);
   });
 
+  it.each(["initial save", "capture", "capture cleanup"] as const)(
+    "only lists a failed start that reached inventory (%s)",
+    async (failure) => {
+      const { dataDir, channel, recordings, runtime, provider, quit } = await connected({
+        streams: (_source, out) => out.end(Buffer.alloc(64 * 1024, 0x20)),
+      });
+
+      const heard = await collect(runtime, recordings.changes);
+      const manifest = join(dataDir, "recordings", "recordings.json");
+      const original = fs.rename;
+      const writing = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let refuse = true;
+      let stalled = false;
+
+      const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        if (refuse && to === manifest) {
+          const inventory = JSON.parse(await fs.readFile(from, "utf8"));
+
+          if (inventory.recordings.length === 0) {
+            if (!stalled) {
+              stalled = true;
+              writing.resolve();
+              await release.promise;
+
+              if (!refuse) return original(from, to);
+            }
+          } else if (failure !== "initial save") return original(from, to);
+
+          throw new Error("inventory replacement refused");
+        }
+
+        return original(from, to);
+      });
+
+      onTestFinished(async () => {
+        release.resolve();
+        adapter.mockRestore();
+        await quit();
+      });
+      const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+      starting.catch(() => {});
+      await writing.promise;
+
+      try {
+        if (failure === "initial save") expect(await recordings.list()).toEqual([]);
+        else
+          expect(await recordings.list()).toMatchObject([
+            { status: { kind: "partial", cut: "stream" }, unsaved: true },
+          ]);
+      } finally {
+        if (failure === "capture cleanup") refuse = false;
+        release.resolve();
+      }
+
+      await expect(starting).rejects.toMatchObject({
+        error: { kind: failure === "initial save" ? "unexpected" : "stream" },
+      });
+
+      if (failure === "initial save") {
+        expect(existsSync(manifest)).toBe(false);
+        expect(provider.streamRequests()).toBe(0);
+        expect(await recordings.list()).toEqual([]);
+        expect(heard.every((list) => list.length === 0)).toBe(true);
+      } else if (failure === "capture") {
+        expect(heard.at(-1)).toMatchObject([
+          { status: { kind: "partial", cut: "stream" }, unsaved: true },
+        ]);
+      } else expect(heard.at(-1)).toEqual([]);
+
+      refuse = false;
+      await recordings.check();
+      expect(await recordings.list()).toEqual([]);
+      expect(heard.at(-1)).toEqual([]);
+    },
+  );
+
   it("takes a failed start's record out of recordings.json once storage works, unasked", async () => {
     // The stream answers once recordings.json can't be written, with no MPEG-TS program.
     const asked = Promise.withResolvers<Writable>();
@@ -7643,8 +7720,8 @@ describe("recording protection and retention", () => {
 
       onTestFinished(() => marker.mockRestore());
       const original = fs.rename;
-      const writing = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
+      let writing = Promise.withResolvers<void>();
+      let release = Promise.withResolvers<void>();
       let refuse = true;
       let stalled = false;
 
@@ -7672,7 +7749,10 @@ describe("recording protection and retention", () => {
       try {
         await writing.promise;
         expect(provider.streamRequests()).toBe(0);
-        expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+        expect((await first.recordings.list()).find((each) => each.id === id)).toMatchObject({
+          status: { kind: "partial", cut: "stream" },
+          unsaved: true,
+        });
       } finally {
         release.resolve();
         await checking;
@@ -7684,9 +7764,38 @@ describe("recording protection and retention", () => {
       expect(await first.recordings.live()).toMatchObject({ recording: false });
       expect(await first.recordings.holdStarts(true)).toBe(true);
       await first.recordings.holdStarts(false);
-      // The next check writes it out, and its folder goes.
+      const heard = await collect(first.runtime, first.recordings.changes);
+
+      for (const action of [first.recordings.stop, first.recordings.remove]) {
+        writing = Promise.withResolvers<void>();
+        release = Promise.withResolvers<void>();
+        stalled = false;
+        const acting = action(id);
+
+        const settled = acting.then(
+          () => "succeeded",
+          () => "failed",
+        );
+
+        try {
+          expect(await Promise.race([writing.promise.then(() => "writing"), settled])).toBe(
+            "writing",
+          );
+          expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+        } finally {
+          release.resolve();
+        }
+
+        await expect(acting).rejects.toMatchObject({
+          error: { detail: "Recordings could not be saved." },
+        });
+        expect(heard.at(-1)?.find((each) => each.id === id)).toMatchObject({ unsaved: true });
+      }
+
+      // A viewer retry writes it out, and its folder goes.
       refuse = false;
-      await first.recordings.check();
+      await first.recordings.remove(id);
+      expect(heard.at(-1)?.some((each) => each.id === id)).toBe(false);
       expect((await first.recordings.list()).map((each) => each.id)).not.toContain(id);
       expect(
         await until(

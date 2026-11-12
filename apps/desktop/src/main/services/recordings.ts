@@ -22,14 +22,14 @@
 // mark from when it was first chosen: nothing records into one without it, as a mount point's own
 // empty folder while its drive is away, and a recording there waits until its own is back. A record is
 // written once its connection is held, before its folder is made, and listed once capture has the
-// stream's program table on disk; it is written again with how it ended, only after its provider
+// stream's program table on disk, except failed-start cleanup rows; its end is written after its provider
 // request ended and its file closed: the list never claims more than the file holds. A record still
 // recording as the app starts is one the app didn't see end, as after a crash: it goes on, from a
 // gap since its file was last written, or, its time over, counts as cut short by the quit. A
 // recording's folder left without its record, as a crash leaves one as its start fails, or a
 // failed start whose folder couldn't be removed, or an older version's crash as it started, goes
 // then. A failed start whose record recordings.json couldn't take out marks its folder instead, so
-// a relaunch, also after a Quit, drops that record rather than going on with it.
+// a relaunch, also after a Quit, keeps it listed until cleanup saves, without capturing.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
@@ -488,6 +488,8 @@ function make(deps: RecordingsDeps) {
      * until they capture; a start that doesn't takes its own out again.
      */
     const beginning = new Map<string, StoredRecording>();
+    /** Starts included in a committed inventory, even if their capture hasn't opened yet. */
+    const savedStarts = new Set<string>();
     const active = new Map<string, Active>();
 
     /**
@@ -581,8 +583,8 @@ function make(deps: RecordingsDeps) {
     const unseen = new Map<string, StoredRecording>();
 
     /**
-     * Reads `record`, which the app didn't see end, as of `now`: a failed start stays listed as it
-     * was until a write takes it out (see failedFolders);
+     * Reads `record`, which the app didn't see end, as of `now`: a failed start stays listed as
+     * ended until a write takes it out (see failedFolders);
      * its time over, it was cut short by the quit, with what its file holds; else it goes on,
      * missing the time since its file was last written, or since it paused. While its chosen folder
      * isn't there, nor are its marks and file: it is read again once that folder is (see unseen).
@@ -726,13 +728,15 @@ function make(deps: RecordingsDeps) {
       Effect.tryPromise({
         try: async () => {
           // One not read yet (see unseen) is kept as it was, its gap not guessed.
+          const starts = [...beginning.values()];
+
           const kept = [
             ...[...records.values()].flatMap((record) =>
               record.id === without
                 ? []
                 : [isLive(record) ? (unseen.get(record.id) ?? record) : record],
             ),
-            ...beginning.values(),
+            ...starts,
           ];
 
           await writeRecordings(
@@ -741,6 +745,8 @@ function make(deps: RecordingsDeps) {
               protection.has(record.id) ? { ...record, protected: true as const } : record,
             ),
           );
+
+          for (const { id } of starts) if (beginning.has(id)) savedStarts.add(id);
           // Failed starts it no longer lists lose their records and marked folders.
           const listed = new Set(kept.map(({ id }) => id));
 
@@ -790,46 +796,53 @@ function make(deps: RecordingsDeps) {
      * to remove; one that can't be marked is removed all the same.
      */
     const dropStart = (record: StoredRecording) =>
-      Effect.suspend(() => {
-        const folder = folderOf(record);
-        beginning.delete(record.id);
-        // Before the check it wakes can write, so that write removes the folder too.
-        failedFolders.set(record.id, record);
+      writing(
+        Effect.suspend(() => {
+          beginning.delete(record.id);
 
-        return save.pipe(
-          Effect.as(true),
-          Effect.catch(() =>
-            Effect.andThen(
-              Effect.sync(() => (unsaved.recordings = true)),
-              Effect.as(wake, false),
+          // A queued write may have kept this beginning before its own save failed. Decide under
+          // the write permit, so only starts inventory may hold become visible cleanup records.
+          if (savedStarts.delete(record.id)) failedFolders.set(record.id, record);
+
+          return saveInventory.pipe(
+            Effect.as(true),
+            Effect.catch(() =>
+              Effect.andThen(
+                Effect.sync(() => (unsaved.recordings = true)),
+                Effect.as(wake, false),
+              ),
             ),
-          ),
-          Effect.flatMap((out) =>
-            Effect.promise(async () => {
-              // Never made anew where its parent went, or in another folder in its place, as on a
-              // drive away.
-              const marked =
-                !out &&
-                (await isThere(placeOf(record), record.mark)) &&
-                (await mkdir(folder)
-                  .catch((cause: NodeJS.ErrnoException) => {
-                    if (cause.code !== "EEXIST") throw cause;
-                  })
-                  .then(() => (record.folder ? writeFile(join(folder, OURS), root) : undefined))
-                  .then(() => writeFile(join(folder, FAILED), ""))
-                  .then(
-                    () => true,
-                    () => false,
-                  ));
+          );
+        }),
+      ).pipe(
+        Effect.flatMap((out) =>
+          Effect.promise(async () => {
+            const folder = folderOf(record);
 
-              // Still listed as far as this knows: else a save took it out as it was marked.
-              if (marked && failedFolders.has(record.id)) return;
-              failedFolders.delete(record.id);
-              await rm(folder, { recursive: true, force: true }).catch(() => {});
-            }),
-          ),
-        );
-      });
+            // Never made anew where its parent went, or in another folder in its place, as on a
+            // drive away.
+            const marked =
+              !out &&
+              (await isThere(placeOf(record), record.mark)) &&
+              (await mkdir(folder)
+                .catch((cause: NodeJS.ErrnoException) => {
+                  if (cause.code !== "EEXIST") throw cause;
+                })
+                .then(() => (record.folder ? writeFile(join(folder, OURS), root) : undefined))
+                .then(() => writeFile(join(folder, FAILED), ""))
+                .then(
+                  () => true,
+                  () => false,
+                ));
+
+            // Still listed as far as this knows: else a save took it out as it was marked.
+            if (marked && failedFolders.has(record.id)) return;
+            failedFolders.delete(record.id);
+            await rm(folder, { recursive: true, force: true }).catch(() => {});
+          }),
+        ),
+        Effect.ensuring(Effect.suspend(() => publish)),
+      );
 
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
@@ -889,6 +902,14 @@ function make(deps: RecordingsDeps) {
             ...(protection.has(record.id) && { protected: true }),
             ...(retentionFailures.has(record.id) && { retentionFailed: true }),
           };
+
+          if (failedFolders.has(record.id))
+            return {
+              ...marked,
+              status: { kind: "partial", cut: "stream" },
+              ended: record.start,
+              unsaved: true,
+            };
 
           const capturing = active.get(record.id);
 
@@ -1405,6 +1426,7 @@ function make(deps: RecordingsDeps) {
 
         records.set(id, started);
         beginning.delete(id);
+        savedStarts.delete(id);
         active.set(id, live);
         remeasure(started);
         settle();
@@ -3419,6 +3441,7 @@ function make(deps: RecordingsDeps) {
       start,
       stop: (id: string) =>
         Effect.gen(function* () {
+          if (failedFolders.has(id)) return yield* save.pipe(Effect.ensuring(publish));
           stopping.add(id);
           // A start going on with it ends first: it ends as stopped, or never begins. A failed
           // write of how it ended is written below, with the rest.
@@ -3501,6 +3524,8 @@ function make(deps: RecordingsDeps) {
         retaining(
           Effect.gen(function* () {
             yield* usable;
+
+            if (failedFolders.has(id)) return yield* save.pipe(Effect.ensuring(publish));
             const record = records.get(id);
 
             if (!record) return;
