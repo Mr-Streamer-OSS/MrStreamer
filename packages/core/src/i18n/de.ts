@@ -986,8 +986,12 @@ export const de: Translation = {
   "Subtitle timing could not be saved": "Untertitel-Timing konnte nicht gespeichert werden",
   "Subtitle offset {seconds} s": "Untertitelversatz {seconds} s",
   "Speed plays here only": "Geschwindigkeit gilt nur hier",
+  "Back 10 seconds": "10 Sekunden zurück",
+  "Forward 10 seconds": "10 Sekunden vor",
   "Back {seconds} seconds": "{seconds} Sekunden zurück",
   "Forward {seconds} seconds": "{seconds} Sekunden vor",
+  "Sleep timer couldn't pause playback. Try pausing again.":
+    "Der Sleep-Timer konnte die Wiedergabe nicht anhalten. Versuche es erneut.",
   "Sleep timer paused playback": "Der Sleep-Timer hat die Wiedergabe angehalten",
   "Sleep timer": "Sleep-Timer",
   "Pauses at {time}": "Pausiert um {time}",

@@ -50,8 +50,9 @@ import {
 // A sleep timer pauses what plays: after a number of minutes on the clock, or at the end of the
 // title, where the next episode then doesn't start. It belongs to the player, not to one title: it
 // carries on through the next episode, another title opened here and a pause, and ends when it
-// fires, the viewer cancels it or the player closes (leaving it, Live TV taking the picture, a
-// receiver stopped, another profile). It stops only this playback, never a download or recording.
+// fires, the viewer cancels it or the player closes (leaving it, Live TV taking the picture,
+// another profile). Back from a receiver view keeps it; a receiver stop that returns paused here
+// keeps it too. It stops only this playback, never a download or recording.
 //
 // A recording plays as a copy too, also while it records. Its session says what is verified of it
 // (`playback.copyState`), read as it opens and again each time main says it changed
@@ -576,7 +577,7 @@ let countdownHeld = false;
 /** Pauses at the sleep timer's minutes. */
 let sleepTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** The sleep timer's minutes ran out while a run was on its way: it starts paused. */
+/** Expiry intent for a pending local run or receiver load, consumed when it can pause. */
 let sleepOnStart = false;
 
 /** One ended episode's policy read and saved delay. Cancellation discards this identity. */
@@ -1245,6 +1246,7 @@ async function recover(
   const delay = RECONNECT_DELAYS_MS[reconnects];
 
   if (problem.kind !== "network" || delay === undefined) {
+    sleepOnStart = false;
     store.setState({ phase: { kind: "failed", problem } });
 
     return;
@@ -1360,6 +1362,7 @@ async function openOnReceiver(
     });
   } catch (cause) {
     if (mine !== generation) return;
+    sleepOnStart = false;
     store.setState({ phase: { kind: "failed", problem: receiverProblem(cause) } });
 
     return;
@@ -1367,7 +1370,7 @@ async function openOnReceiver(
 
   // One that played to its end stays there, open on this receiver for Play again.
   if (store.getState().phase.kind === "ended") return;
-  await loadOnReceiver(from, paused);
+  await loadOnReceiver(from, receiver?.paused ?? paused);
 }
 
 /** Has the receiver play the open title from `start` seconds with the chosen tracks. */
@@ -1413,12 +1416,15 @@ async function loadOnReceiver(start: number, paused = false): Promise<void> {
 
     receiver.load = media.generation;
     receiver.subtitle = subtitle?.id ?? null;
+
+    if (sleepOnStart) void pauseReceiverForSleep(paused);
     // What the receiver said of it before this answer arrived.
     const said = outputs.media();
 
     if (said?.generation === media.generation) follow(said);
   } catch (cause) {
     if (mine !== generation) return;
+    sleepOnStart = false;
     store.setState({ phase: { kind: "failed", problem: receiverProblem(cause) } });
   }
 }
@@ -1562,7 +1568,7 @@ function moveToReceiver(media: RemoteMedia | null): void {
     return void openOnReceiver(++generation, now, at, { audioId, subtitle }, paused);
   }
 
-  const paused = pausedByViewer();
+  const paused = sleepOnStart || pausedByViewer();
   save();
   const mine = ++generation;
   stopCountdown();
@@ -1633,6 +1639,7 @@ async function moveHere(): Promise<void> {
     store.setState({ duration: opened.duration, audio: opened.audio, subtitles: opened.subtitles });
   } catch (cause) {
     if (mine !== generation) return;
+    sleepOnStart = false;
     const error = appError(cause);
     store.setState({
       phase: {
@@ -1835,6 +1842,22 @@ function endSleep(): void {
   if (store.getState().sleep) store.setState({ sleep: null });
 }
 
+/** Completes an expired timer once the receiver has identified the load to pause. */
+async function pauseReceiverForSleep(alreadyPaused: boolean): Promise<void> {
+  if (receiver?.load == null) return;
+  const mine = generation;
+  sleepOnStart = false;
+
+  try {
+    if (!alreadyPaused)
+      await call("output.command", { generation: receiver.load, command: "pause" });
+
+    if (mine === generation) flash(t("Sleep timer paused playback"));
+  } catch {
+    if (mine === generation) flash(t("Sleep timer couldn't pause playback. Try pausing again."));
+  }
+}
+
 /**
  * The sleep timer's minutes ran out: the countdown to the next episode stops, and what plays
  * pauses, here or on the receiver. A run on its way here starts paused.
@@ -1848,7 +1871,12 @@ function sleep(): void {
   if (phase.kind === "paused" || phase.kind === "ended" || phase.kind === "failed") return;
 
   if (receiver) {
-    if (receiver.load !== null) command({ command: "pause" });
+    receiver.paused = true;
+    sleepOnStart = true;
+
+    if (receiver.load !== null) void pauseReceiverForSleep(false);
+
+    return;
   } else if (phase.kind === "playing") {
     video.pause();
   } else {
@@ -1879,6 +1907,7 @@ export const titlePlayer = {
 
     if (!claim.take()) return;
     closeTitle(retry);
+    sleepOnStart = false;
     playOwner = profileOwner();
 
     if (now.kind === "copy") now = { ...now, owner: playOwner };
@@ -1998,6 +2027,7 @@ export const titlePlayer = {
       });
     } catch (cause) {
       if (mine !== generation) return;
+      sleepOnStart = false;
       const error = appError(cause);
       observation.failure(playbackFailure(error), appDiagnostic(error));
       store.setState({

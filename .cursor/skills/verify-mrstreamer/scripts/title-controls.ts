@@ -92,7 +92,7 @@ export async function titleControlsScenario(d: Driver): Promise<void> {
 
   // The time before the scrubber takes 0:05.
   await wake();
-  await d.click("Open Go to time", query('[data-view=title] button[aria-label="Go to time"]'));
+  await d.click("Open Go to time", query('[data-view=title] button[aria-label^="Go to time "]'));
   await d.wait(() => d.evaluate<boolean>(`document.activeElement?.matches('${GO_TO}') ?? false`));
   await d.send("Input.insertText", { text: "0:05" });
   await d.capture("go-to-time-field");

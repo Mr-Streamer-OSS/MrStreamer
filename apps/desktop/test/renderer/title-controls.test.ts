@@ -120,7 +120,9 @@ function button(label: string): HTMLButtonElement {
 
 /** Types `text` into the field the time before the scrubber opens, and presses `end`. */
 async function goTo(text: string, end = "Enter"): Promise<HTMLInputElement> {
-  await act(async () => button("Go to time").click());
+  await act(async () =>
+    document.querySelector<HTMLButtonElement>('button[aria-label^="Go to time"]')!.click(),
+  );
   const field = document.querySelector<HTMLInputElement>('input[aria-label="Go to time"]')!;
   expect(document.activeElement).toBe(field);
 
@@ -194,4 +196,9 @@ it("turns a sleep timer for the end off from its menu", async () => {
   await act(async () => document.querySelectorAll<HTMLButtonElement>("[data-item]")[0]!.click());
   expect(titlePlayer.state().sleep).toBeNull();
   expect(button("Sleep timer").getAttribute("aria-pressed")).toBe("false");
+});
+
+it("names the current position in the Go to time button", async () => {
+  await watching();
+  expect(button("Go to time 5:00").textContent).toBe("5:00");
 });

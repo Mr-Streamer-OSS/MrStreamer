@@ -604,8 +604,7 @@ function GoToTime({
       <Tooltip label={label}>
         <button
           ref={button}
-          aria-label={label}
-          aria-description={clock(shown)}
+          aria-label={`${label} ${clock(shown)}`}
           onClick={() => {
             setText(clock(shown));
             onOpen(true);

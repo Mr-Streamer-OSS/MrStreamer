@@ -52,7 +52,7 @@ Before continuing, Mr. Streamer saves the current episode's progress and checks 
 
 _The same player, with no request to your provider._
 
-A copy plays in the same player as everything else: the timeline, the skips, the sleep timer, speed, sound tracks, the file's own subtitles and their timing and look all work. The line under the title says **Offline**. Subtitles you downloaded online for that exact version before it finished downloading come with the copy, with your timing; searching for new ones needs the version from your subscription. A copy plays on this computer only, not on a TV.
+A copy plays in the same player as everything else: the timeline, the skips, speed, sound tracks, the file's own subtitles and their timing and look all work. From 0.0.24 the skips use your seek step, the time before the timeline takes an exact time, and the sleep timer can pause the copy. The line under the title says **Offline**. Subtitles you downloaded online for that exact version before it finished downloading come with the copy, with your timing; searching for new ones needs the version from your subscription. A copy plays on this computer only, not on a TV.
 
 From 0.0.24, how far you got in each copy belongs to the Default viewing profile. Existing positions carry over, including after removing a subscription or restarting the app. Transfer and artwork updates leave that position alone. It is separate from your progress in the same title online.
 

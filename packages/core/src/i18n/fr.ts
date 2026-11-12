@@ -1042,8 +1042,12 @@ export const fr: Translation = {
     "Impossible d'enregistrer la synchronisation des sous-titres",
   "Subtitle offset {seconds} s": "Décalage des sous-titres {seconds} s",
   "Speed plays here only": "La vitesse ne s'applique qu'ici",
+  "Back 10 seconds": "Reculer de 10 secondes",
+  "Forward 10 seconds": "Avancer de 10 secondes",
   "Back {seconds} seconds": "Reculer de {seconds} secondes",
   "Forward {seconds} seconds": "Avancer de {seconds} secondes",
+  "Sleep timer couldn't pause playback. Try pausing again.":
+    "La minuterie n’a pas pu mettre la lecture en pause. Essayez à nouveau.",
   "Sleep timer paused playback": "La minuterie de mise en veille a mis la lecture en pause",
   "Sleep timer": "Minuterie de mise en veille",
   "Pauses at {time}": "Pause à {time}",

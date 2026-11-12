@@ -196,15 +196,15 @@ _The timeline, skips and the controls along the bottom._
 
 The picture fills the window below the top bar, with the title, a timeline and the controls along the bottom; they fade while you watch and come back when you move the pointer.
 
-- Drag the timeline, or skip back and forward by the seek step, 10 seconds unless you change it in **Settings > Playback**. A skip into what's already loaded is instant; further away, the picture takes a second to catch up. The time before the timeline takes a time to [go to](playback.md#movies-and-episodes), such as 1:02:13.
-- **Sleep timer**, after **Speed**, pauses the title after some minutes or at its end, as [What plays](playback.md#movies-and-episodes) describes.
+- Drag the timeline, or skip back and forward by 10 seconds. From 0.0.24 the skips use the seek step in **Settings > Playback**, 10 seconds unless you change it. A skip into what's already loaded is instant; further away, the picture takes a second to catch up. From 0.0.24 the time before the timeline takes a time to [go to](playback.md#movies-and-episodes), such as 1:02:13.
+- From 0.0.24 **Sleep timer**, after **Speed**, pauses the title after some minutes or at its end, as [What plays](playback.md#movies-and-episodes) describes.
 - **Sound** lists the sound tracks the file carries, and **CC** its subtitles. CC opens a panel with everything about subtitles: the tracks, their timing and look, and [online search](playback.md#online-subtitles). C turns the last ones you picked on and off, and a paused title stays paused while it changes. Your choice of language is remembered, and the next title or channel that has it starts with it, as **Audio in** and **Subtitles** under Settings > Playback and Settings > Subtitles describe. When the file has no sound in that language, its own default plays.
 - **Speed**, beside them, plays from 0.5× to 2×. Voices keep their pitch. The speed lasts for the title, and carries on when **Next episode** plays the one after.
 - **Timing**, in CC, moves subtitles earlier or later in tenths of a second, for this title only. **Look** sets their size, a box or a shadow behind the text, low or higher up, and stays for every title and channel. Subtitles drawn as pictures, as on Blu-rays and DVDs, take only size and position.
 - Menus follow the arrow keys. Escape or a click outside closes them without pausing or skipping.
 - **Mini player**, beside full screen, or P, shrinks the window into a small picture in a corner of the screen, on top of other windows. The title plays on where it was, with its subtitles, and the keys work as before. Drag the top of the picture to move it, and its corner to resize it. Escape, a double click or the arrows button puts the window back where it was, full screen included; the cross leaves the title. The countdown to the next episode carries on in it, and the next episode plays there. On a Mac the window and its Dock icon disappear for a moment each time it shrinks or grows back. Linux under Wayland can't keep a window on top, so there the mini player isn't offered.
 - **Next episode**, or N, plays the next one at once.
-- The keyboard's media keys and the system's own controls, Now Playing on a Mac and the media overlay on Windows, show the episode's name, its series and "S1 E3", or the film's name, with TMDB's picture. They play, pause, skip by the seek step, move along the timeline, and play the next episode when there is one.
+- The keyboard's media keys and the system's own controls, Now Playing on a Mac and the media overlay on Windows, show the episode's name, its series and "S1 E3", or the film's name, with TMDB's picture. They play, pause, skip, move along the timeline, and play the next episode when there is one. From 0.0.24 title skips use the seek step when the system supplies no offset.
 - **Back**, or Escape, returns to the details or the page you came from.
 
 How far you got is saved as you go: every minute, and whenever you pause, skip, change tracks, finish or leave. It's kept with the subscription you watched in, like favourites.
@@ -231,18 +231,18 @@ Home's **Continue watching** row shows what you were watching: movies you starte
 
 _The keys while watching._
 
-| Key         | While watching                        |
-| ----------- | ------------------------------------- |
-| Space, K    | Pause and play                        |
-| Left, Right | Back or forward by the seek step      |
-| Up, Down    | Volume                                |
-| N           | Next episode, also during a countdown |
-| C           | Subtitles on and off                  |
-| G, H        | Subtitles 0.1 s earlier or later      |
-| <, >        | Slower or faster                      |
-| F, M        | Full screen, mute                     |
-| P           | Mini player, and back                 |
-| Escape      | Close a menu, leave full screen, back |
+| Key         | While watching                                            |
+| ----------- | --------------------------------------------------------- |
+| Space, K    | Pause and play                                            |
+| Left, Right | Back or forward 10 seconds; from 0.0.24, by the seek step |
+| Up, Down    | Volume                                                    |
+| N           | Next episode, also during a countdown                     |
+| C           | Subtitles on and off                                      |
+| G, H        | Subtitles 0.1 s earlier or later                          |
+| <, >        | Slower or faster                                          |
+| F, M        | Full screen, mute                                         |
+| P           | Mini player, and back                                     |
+| Escape      | Close a menu, leave full screen, back                     |
 
 ## One connection
 

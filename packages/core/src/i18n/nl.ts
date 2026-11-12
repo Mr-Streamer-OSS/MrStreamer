@@ -975,8 +975,12 @@ export const nl: Translation = {
   "Subtitle timing could not be saved": "Ondertiteltiming kon niet worden bewaard",
   "Subtitle offset {seconds} s": "Ondertitelverschuiving {seconds} s",
   "Speed plays here only": "Snelheid werkt alleen hier",
+  "Back 10 seconds": "10 seconden terug",
+  "Forward 10 seconds": "10 seconden vooruit",
   "Back {seconds} seconds": "{seconds} seconden terug",
   "Forward {seconds} seconds": "{seconds} seconden vooruit",
+  "Sleep timer couldn't pause playback. Try pausing again.":
+    "De slaaptimer kon het afspelen niet pauzeren. Probeer opnieuw te pauzeren.",
   "Sleep timer paused playback": "Slaaptimer heeft het afspelen gepauzeerd",
   "Sleep timer": "Slaaptimer",
   "Pauses at {time}": "Pauzeert om {time}",

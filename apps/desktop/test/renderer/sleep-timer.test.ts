@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 // A sleep timer pauses the title once its minutes run out, saving how far it got and touching no
 // download or recording, or stops at the end of the episode so the next one doesn't start. It is
-// the player's: pausing, playing on and the next episode keep its time, and leaving the player,
+// the player's: pausing, playing on and the next episode keep its time, and leaving local playback,
 // another profile or cancelling it ends it. One that runs out while a run is on its way starts that
 // run paused, and one that runs out on the end screen stops the countdown to the next episode.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { runs } from "./title-engine-stand-in.ts";
+import type { OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
@@ -101,8 +102,9 @@ beforeEach(async () => {
   unmount = mounted.unmount;
 });
 
-afterEach(() => {
+afterEach(async () => {
   titlePlayer.close();
+  await act(async () => ipc.emit("output.changed", receiverStatus(false)));
   unmount();
   vi.useRealTimers();
 });
@@ -253,4 +255,162 @@ describe("a sleep timer for the end", () => {
     expect(phase()).toBe("ended");
     expect(titlePlayer.state().sleep).toBeNull();
   });
+});
+
+function receiverStatus(remote = true, media: RemoteMedia | null = null): OutputStatus {
+  const receiver = { id: "tv", kind: "cast", name: "Living Room TV" } as const;
+
+  return {
+    offers: ["cast"],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [receiver],
+    output: remote
+      ? { kind: "receiver", receiver, volume: { level: 0.5, muted: false }, media, failure: null }
+      : { kind: "local" },
+  };
+}
+
+const remoteTitle = () => ({
+  sessionId: "tv1",
+  title: episodeNow(series, pilot).title,
+  duration: 2700,
+  audio: [],
+  subtitles: [],
+  shows: ["text" as const],
+});
+
+const remoteMedia = (): RemoteMedia => ({
+  generation: 77,
+  sessionId: "tv1",
+  item: { kind: "title", title: episodeNow(series, pilot).title },
+  state: "playing",
+  position: 0,
+  at: Date.now(),
+  duration: 2700,
+  subtitles: false,
+});
+
+describe("sleep while a receiver answers", () => {
+  it("starts the receiver paused when expiry happens during openTitle", async () => {
+    await act(async () => ipc.emit("output.changed", receiverStatus()));
+    const opened = ipc.hold("output.openTitle");
+    const loaded = ipc.hold("output.playTitle");
+    await open(pilot, false);
+    await sleepAfter(1);
+    await minutes(1);
+    expect(container.textContent).not.toContain("Sleep timer paused playback");
+    await act(async () => opened.resolve(remoteTitle()));
+    expect(ipc.argsOf("output.playTitle").at(-1)?.paused).toBe(true);
+    await act(async () => loaded.resolve(remoteMedia()));
+    expect(container.textContent).toContain("Sleep timer paused playback");
+  });
+});
+
+it("pauses a load whose playTitle reply arrives after expiry, and reports a rejection with retry advice", async () => {
+  await act(async () => ipc.emit("output.changed", receiverStatus()));
+  ipc.always("output.openTitle", remoteTitle());
+  const loaded = ipc.hold("output.playTitle");
+  await open(pilot, false);
+  await sleepAfter(1);
+  await minutes(1);
+  const pause = ipc.hold("output.command");
+  await act(async () => loaded.resolve(remoteMedia()));
+  expect(ipc.argsOf("output.command")).toContainEqual({ generation: 77, command: "pause" });
+  expect(container.textContent).not.toContain("Sleep timer paused playback");
+  await act(async () => pause.reject({ kind: "output", failure: { kind: "unreachable" } }));
+  expect(container.textContent).toContain(
+    "Sleep timer couldn't pause playback. Try pausing again.",
+  );
+  expect(container.textContent).not.toContain("Sleep timer paused playback");
+  await act(async () => ipc.emit("output.changed", receiverStatus(true, remoteMedia())));
+  const retried = ipc.hold("output.command");
+  await act(async () => titlePlayer.togglePause());
+  expect(ipc.argsOf("output.command").at(-1)).toMatchObject({ command: "pause" });
+  await act(async () => retried.resolve(null));
+});
+
+describe("an expired timer belongs to its pending play", () => {
+  it("doesn't pause a different title opened before the first run started", async () => {
+    await open(pilot, false);
+    await sleepAfter(1);
+    await minutes(1);
+    await open(lowTide);
+    expect(phase()).toBe("playing");
+  });
+
+  it("doesn't pause a retry after the pending run failed", async () => {
+    await open(pilot, false);
+    await sleepAfter(1);
+    await minutes(1);
+    ipc.always("playback.failure", null);
+    await act(async () =>
+      runs.at(-1)?.fail({ kind: "media", detail: "Cannot decode", audio: "none" }),
+    );
+    expect(phase()).toBe("failed");
+    await act(async () => titlePlayer.retry());
+    await act(async () => runs.at(-1)?.start());
+    expect(phase()).toBe("playing");
+  });
+
+  it("transfers the pending pause to the receiver and consumes it there", async () => {
+    await open(pilot, false);
+    await sleepAfter(1);
+    await minutes(1);
+    ipc.always("output.openTitle", remoteTitle());
+    ipc.always("output.playTitle", remoteMedia());
+    await act(async () => ipc.emit("output.changed", receiverStatus()));
+    expect(ipc.argsOf("output.playTitle").at(-1)?.paused).toBe(true);
+    await act(async () => ipc.emit("output.changed", receiverStatus(true, remoteMedia())));
+    await act(async () => titlePlayer.playHere());
+    await act(async () => ipc.emit("output.changed", receiverStatus(false)));
+    await act(async () => runs.at(-1)?.start());
+    expect(phase()).toBe("playing");
+  });
+});
+
+it("waits for the receiver pause acknowledgement after a held playTitle reply", async () => {
+  await act(async () => ipc.emit("output.changed", receiverStatus()));
+  ipc.always("output.openTitle", remoteTitle());
+  const loaded = ipc.hold("output.playTitle");
+  await open(pilot, false);
+  await sleepAfter(1);
+  await minutes(1);
+  const pause = ipc.hold("output.command");
+  await act(async () => loaded.resolve(remoteMedia()));
+  expect(ipc.argsOf("output.command")).toContainEqual({ generation: 77, command: "pause" });
+  expect(container.textContent).not.toContain("Sleep timer paused playback");
+  await act(async () => pause.resolve(null));
+  expect(container.textContent).toContain("Sleep timer paused playback");
+});
+
+it("reports rejection when an already playing receiver refuses the timer's pause", async () => {
+  await act(async () => ipc.emit("output.changed", receiverStatus()));
+  ipc.always("output.openTitle", remoteTitle());
+  ipc.always("output.playTitle", remoteMedia());
+  await open(pilot, false);
+  await act(async () => ipc.emit("output.changed", receiverStatus(true, remoteMedia())));
+  const pause = ipc.hold("output.command");
+  await sleepAfter(1);
+  await minutes(1);
+  expect(ipc.argsOf("output.command")).toContainEqual({ generation: 77, command: "pause" });
+  expect(container.textContent).not.toContain("Sleep timer paused playback");
+  await act(async () => pause.reject({ kind: "output", failure: { kind: "unreachable" } }));
+  expect(container.textContent).toContain(
+    "Sleep timer couldn't pause playback. Try pausing again.",
+  );
+});
+
+it("doesn't carry expired intent from a failed local open into Retry", async () => {
+  const opening = ipc.hold("playback.openTitle");
+  await open(pilot, false);
+  await sleepAfter(1);
+  await minutes(1);
+  await act(async () =>
+    opening.reject({ kind: "stream", failure: { kind: "unavailable", status: 404 } }),
+  );
+  expect(phase()).toBe("failed");
+  await act(async () => titlePlayer.retry());
+  await act(async () => runs.at(-1)?.start());
+  expect(phase()).toBe("playing");
 });

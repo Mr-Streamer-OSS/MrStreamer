@@ -1049,8 +1049,12 @@ export const es: Translation = {
   "Subtitle timing could not be saved": "No se pudo guardar la sincronización de subtítulos",
   "Subtitle offset {seconds} s": "Desfase de subtítulos {seconds} s",
   "Speed plays here only": "La velocidad solo funciona aquí",
+  "Back 10 seconds": "Retroceder 10 segundos",
+  "Forward 10 seconds": "Avanzar 10 segundos",
   "Back {seconds} seconds": "Retroceder {seconds} segundos",
   "Forward {seconds} seconds": "Avanzar {seconds} segundos",
+  "Sleep timer couldn't pause playback. Try pausing again.":
+    "El temporizador no pudo pausar la reproducción. Intenta pausarla de nuevo.",
   "Sleep timer paused playback": "El temporizador de apagado ha pausado la reproducción",
   "Sleep timer": "Temporizador de apagado",
   "Pauses at {time}": "Pausa a las {time}",

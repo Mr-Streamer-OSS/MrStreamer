@@ -959,8 +959,12 @@ export const en = {
   "Subtitle timing could not be saved": "Subtitle timing could not be saved",
   "Subtitle offset {seconds} s": "Subtitle offset {seconds} s",
   "Speed plays here only": "Speed plays here only",
+  "Back 10 seconds": "Back 10 seconds",
+  "Forward 10 seconds": "Forward 10 seconds",
   "Back {seconds} seconds": "Back {seconds} seconds",
   "Forward {seconds} seconds": "Forward {seconds} seconds",
+  "Sleep timer couldn't pause playback. Try pausing again.":
+    "Sleep timer couldn't pause playback. Try pausing again.",
   "Sleep timer paused playback": "Sleep timer paused playback",
   "Sleep timer": "Sleep timer",
   "Pauses at {time}": "Pauses at {time}",
