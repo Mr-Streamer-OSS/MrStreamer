@@ -1577,7 +1577,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await leftBehind(dataDir)).toEqual([]);
   });
 
-  it.each(["initial save", "capture", "capture cleanup"] as const)(
+  it.each(["initial save", "capture", "capture marker", "capture cleanup"] as const)(
     "only lists a failed start that reached inventory (%s)",
     async (failure) => {
       const { dataDir, channel, recordings, runtime, provider, quit } = await connected({
@@ -1586,6 +1586,15 @@ describe.skipIf(!hasTools)("recordings", () => {
 
       const heard = await collect(runtime, recordings.changes);
       const manifest = join(dataDir, "recordings", "recordings.json");
+      const write = fs.writeFile;
+
+      const marker = vi.spyOn(fs, "writeFile").mockImplementation(async (path, data, options) => {
+        if (failure === "capture marker" && String(path).endsWith(".mrstreamer-failed"))
+          throw new Error("failed-start marker refused");
+
+        return write(path, data, options);
+      });
+
       const original = fs.rename;
       const writing = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
@@ -1615,6 +1624,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       onTestFinished(async () => {
         release.resolve();
         adapter.mockRestore();
+        marker.mockRestore();
         await quit();
       });
       const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
@@ -1641,7 +1651,10 @@ describe.skipIf(!hasTools)("recordings", () => {
         expect(provider.streamRequests()).toBe(0);
         expect(await recordings.list()).toEqual([]);
         expect(heard.every((list) => list.length === 0)).toBe(true);
-      } else if (failure === "capture") {
+      } else if (failure === "capture" || failure === "capture marker") {
+        expect(await recordings.list()).toMatchObject([
+          { status: { kind: "partial", cut: "stream" }, unsaved: true },
+        ]);
         expect(heard.at(-1)).toMatchObject([
           { status: { kind: "partial", cut: "stream" }, unsaved: true },
         ]);

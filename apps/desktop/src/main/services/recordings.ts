@@ -793,7 +793,7 @@ function make(deps: RecordingsDeps) {
     /**
      * Takes a failed start's record out of recordings.json and removes its folder. While it can't
      * be taken out, its folder is marked instead (see FAILED), for the next check, which it wakes,
-     * to remove; one that can't be marked is removed all the same.
+     * to remove. An unmarked folder is removed all the same; a committed record stays until saved.
      */
     const dropStart = (record: StoredRecording) =>
       writing(
@@ -837,7 +837,7 @@ function make(deps: RecordingsDeps) {
 
             // Still listed as far as this knows: else a save took it out as it was marked.
             if (marked && failedFolders.has(record.id)) return;
-            failedFolders.delete(record.id);
+            // A refused marker does not remove a record the inventory still holds.
             await rm(folder, { recursive: true, force: true }).catch(() => {});
           }),
         ),
