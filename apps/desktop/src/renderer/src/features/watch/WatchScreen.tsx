@@ -12,8 +12,9 @@
 //   own. Tab reaches what a failed channel offers, and Enter there presses it; Enter or Space on
 //   a message's cross closes the message.
 // A local MPEG-TS channel keeps its recent history while it plays, shown on a timeline under the
-// controls: Space or K pauses while the channel goes on arriving, J and L skip 10 seconds, End
-// goes live, and the slider seeks when let go. Other streams say they can't rewind.
+// controls: Space or K pauses while the channel goes on arriving, J and L skip the seek step set in
+// Settings (10 seconds unless changed), End goes live, and the slider seeks when let go. Other
+// streams say they can't rewind.
 // A picture that stands still for a few seconds while it should play says "Waiting for data" at
 // the top right until it moves again or the channel reconnects.
 // While a receiver on the network plays the channel, the controls stay: there is no picture to
@@ -27,7 +28,7 @@ import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { blocksPlayerShortcut, resolveShortcut } from "../../app/shortcuts.ts";
-import { currentPreferences } from "../../lib/preferences.ts";
+import { currentPreferences, seekStep, useSeekStep } from "../../lib/preferences.ts";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { closeWatch, useUi, type ChannelList } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
@@ -73,7 +74,6 @@ import {
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
 const PAGE_ROWS = 10;
-const SKIP_MS = 10_000;
 
 /** How often the retained window and cursor are read again. */
 const TIMELINE_MS = 1000;
@@ -337,7 +337,7 @@ export function WatchScreen() {
         case "seekForward":
           if (!rewinds()) break;
           wake();
-          void player.skip(command === "seekBack" ? -SKIP_MS : SKIP_MS);
+          void player.skip((command === "seekBack" ? -1000 : 1000) * seekStep());
           break;
         case "Escape":
           if (numberEntry.active()) numberEntry.cancel();
@@ -674,8 +674,8 @@ function LiveTimelineBar({
 }
 
 /**
- * Pause, 10-second skips, the slider over what is kept, how far behind live and Go live. The
- * slider seeks when let go; its own keys move 10 seconds, or a minute with Page Up and Down.
+ * Pause, skips by the seek step, the slider over what is kept, how far behind live and Go live.
+ * The slider seeks when let go; its own keys move the seek step, or a minute with Page Up and Down.
  * A read that fails keeps the last window shown. With `transport`, as in the multiview, the
  * slider has a row of its own above the buttons, and the selected pane's label says how far
  * behind live it is between the skips and what is kept.
@@ -692,6 +692,7 @@ function RetainedTimeline({
   transport?: TransportSlots | undefined;
 }) {
   const paused = usePlayer((state) => state.paused);
+  const step = useSeekStep();
   const [dragging, setDragging] = useState<number | null>(null);
   useEffect(() => {
     const timer = setInterval(() => void player.refreshTimeline().catch(() => {}), TIMELINE_MS);
@@ -735,8 +736,8 @@ function RetainedTimeline({
       </Tooltip>
       {(
         [
-          [t("Back 10 seconds"), -SKIP_MS, RotateCcw],
-          [t("Forward 10 seconds"), SKIP_MS, RotateCw],
+          [t("Back {seconds} seconds", { seconds: step }), -step * 1000, RotateCcw],
+          [t("Forward {seconds} seconds", { seconds: step }), step * 1000, RotateCw],
         ] as const
       ).map(([label, by, Icon]) => (
         <Tooltip key={by} label={label}>
@@ -768,7 +769,7 @@ function RetainedTimeline({
         value={cursor}
         min={start}
         max={Math.max(end, start + 1)}
-        step={SKIP_MS}
+        step={step * 1000}
         largeStep={60_000}
         onValueChange={(next) => setDragging(single(next))}
         onValueCommitted={(next) => {

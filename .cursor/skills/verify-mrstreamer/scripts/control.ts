@@ -37,6 +37,7 @@ import {
 import { languageScenario } from "./language.ts";
 import { settingsScenario } from "./settings.ts";
 import { controlsScenario } from "./controls.ts";
+import { titleControlsScenario } from "./title-controls.ts";
 import { backupChannel, customListSourcesScenario, customListsScenario } from "./custom-lists.ts";
 import { customListRoundTripScenario } from "./custom-lists-round-trip.ts";
 import { multiviewScenario } from "./multiview.ts";
@@ -116,6 +117,7 @@ const scenarios = [
   "preferences",
   "settings",
   "controls",
+  "title-controls",
   "custom-lists",
   "custom-lists-sources",
   "custom-lists-round-trip",
@@ -966,7 +968,8 @@ async function run(scenario: Scenario, prior?: string) {
       scenario === "language" ||
       scenario === "preferences" ||
       scenario === "settings" ||
-      scenario === "controls"
+      scenario === "controls" ||
+      scenario === "title-controls"
     ) {
       await (
         scenario === "language"
@@ -975,7 +978,9 @@ async function run(scenario: Scenario, prior?: string) {
             ? settingsScenario
             : scenario === "controls"
               ? controlsScenario
-              : preferencesScenario
+              : scenario === "title-controls"
+                ? titleControlsScenario
+                : preferencesScenario
       )({
         profile: ownedProfile,
         observed,

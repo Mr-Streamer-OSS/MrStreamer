@@ -35,6 +35,7 @@ import { usePresentationVisible } from "./presentation.ts";
 export {
   automaticVersion,
   clock,
+  parseClock,
   resumePoint,
   runtime,
   timeLeftOf,

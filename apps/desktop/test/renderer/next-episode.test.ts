@@ -276,6 +276,23 @@ describe("the end of an episode", () => {
     expect(opened()).toEqual(["e13", "e21"]);
   });
 
+  it("leaves the end screen with Escape when the time field was open as the episode ended", async () => {
+    ipc.hold("preferences.get").resolve(ipc.snapshot(defaultPreferences));
+    ipc
+      .hold("preferences.get")
+      .resolve(ipc.snapshot({ ...defaultPreferences, autoplayNext: false }));
+    await playToEnd(pilotHouse, "s1", async () => {
+      const time = container.querySelector<HTMLButtonElement>('button[aria-label^="Go to time "]')!;
+      await act(async () => time.click());
+      expect(container.querySelector('input[aria-label="Go to time"]')).not.toBeNull();
+    });
+
+    expect(text()).toContain("Next episode");
+    expect(container.querySelector('input[aria-label="Go to time"]')).toBeNull();
+    await key("Escape");
+    expect(useUi.getState().playingTitle).toBe(false);
+  });
+
   it("cancels a held next episode immediately when the viewer zaps to a channel", async () => {
     await playToEnd(pilotHouse, "s1", () =>
       act(async () => useUi.setState({ settings: "playback" })),

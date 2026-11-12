@@ -581,12 +581,14 @@ async function titles(d: Driver, locale: Locale) {
   const controls = await d.evaluate<string[]>(labels("[data-view=title] button[aria-label]"));
   d.observed[`title-player-${locale}`] = controls;
 
-  for (const key of ["Back 10 seconds", "Forward 10 seconds", "Pause", "Full screen"] as const) {
-    expect(
-      controls.includes(translate(locale, key)),
-      `Title control ${key} in ${locale}`,
-      controls,
-    );
+  // The run keeps the default seek step, 10 seconds.
+  for (const [key, label] of [
+    ["Back", translate(locale, "Back {seconds} seconds", { seconds: 10 })],
+    ["Forward", translate(locale, "Forward {seconds} seconds", { seconds: 10 })],
+    ["Pause", translate(locale, "Pause")],
+    ["Full screen", translate(locale, "Full screen")],
+  ] as const) {
+    expect(controls.includes(label), `Title control ${key} in ${locale}`, controls);
   }
 
   await d.capture(`title-player-${locale}`);

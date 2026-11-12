@@ -3,11 +3,12 @@
 // `navigator.mediaSession` on to each.
 //
 // A movie or episode shows its name, its series and "S1 E3", and its TMDB artwork, and takes play,
-// pause, 10 s back and forward, seeking and, when there is one, the next episode. A channel shows
-// the programme, the channel and its logo. Local retained channels take pause/play and ten-second
-// skips; other channels stop on Pause. A headphone's double tap never changes channel. Artwork must be http or https, or a data
-// URL; Chromium refuses the app's own file:// pictures. Only Watch and a playing title present
-// anything, so the muted previews leave the system alone.
+// pause, back and forward by the seek step set in Settings unless the system says how far, seeking
+// and, when there is one, the next episode. A channel shows the programme, the channel and its
+// logo. Local retained channels take pause/play and skips by the seek step; other channels stop
+// on Pause. A headphone's double tap never changes channel. Artwork must be http or https, or a
+// data URL; Chromium refuses the app's own file:// pictures. Only Watch and a playing title
+// present anything, so the muted previews leave the system alone.
 //
 // What a receiver on the network plays answers the same buttons, from what it last confirmed, in
 // its player's view and from the bar at the foot of the pages. A channel the receiver itself holds
@@ -20,14 +21,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey, sameOwned } from "@mrstreamer/contracts/subscription";
+import { seekStep } from "../lib/preferences.ts";
 import { queries } from "../lib/queries.ts";
 import { useOutput } from "./output.ts";
 import { player, receiverState, usePlayer } from "./player.ts";
 import { offersNext, titlePlayer, useTitlePlayer } from "./title-player.ts";
 import { defined } from "@mrstreamer/core/defined";
-
-/** How far the system's back and forward buttons skip when they don't say. */
-const SKIP_S = 10;
 
 const ACTIONS: readonly MediaSessionAction[] = [
   "play",
@@ -208,8 +207,8 @@ export function useTitleSession(): void {
         },
         pause,
         stop: pause,
-        seekbackward: (details) => titlePlayer.skip(-(details.seekOffset ?? SKIP_S)),
-        seekforward: (details) => titlePlayer.skip(details.seekOffset ?? SKIP_S),
+        seekbackward: (details) => titlePlayer.skip(-(details.seekOffset ?? seekStep())),
+        seekforward: (details) => titlePlayer.skip(details.seekOffset ?? seekStep()),
         seekto: (details) => {
           if (details.seekTime !== undefined) titlePlayer.seek(details.seekTime);
         },
@@ -317,12 +316,12 @@ export function useLiveSession(channel: LiveChannel | null): void {
         ...defined({
           seekbackward: retained
             ? () => {
-                if (!player.onReceiver()) void player.skip(-10_000);
+                if (!player.onReceiver()) void player.skip(-1000 * seekStep());
               }
             : undefined,
           seekforward: retained
             ? () => {
-                if (!player.onReceiver()) void player.skip(10_000);
+                if (!player.onReceiver()) void player.skip(1000 * seekStep());
               }
             : undefined,
         }),

@@ -45,6 +45,12 @@ const SETTINGS_CONTROLS = [
     label: "Next episode delay",
     synonyms: "settings.search.delay",
   },
+  {
+    id: "seek-step",
+    section: "playback",
+    label: "Seek step",
+    synonyms: "settings.search.seekStep",
+  },
   { id: "quality", section: "live", label: "Quality", synonyms: "settings.search.quality" },
   {
     id: "own-quality",

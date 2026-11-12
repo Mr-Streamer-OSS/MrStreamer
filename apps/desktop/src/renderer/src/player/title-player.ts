@@ -47,6 +47,13 @@ import {
 // Next to try again. A next episode whose copy isn't complete, or isn't on this computer, stops it
 // there, this copy left as it was; a copy queued before downloads kept their series has no next.
 //
+// A sleep timer pauses what plays: after a number of minutes on the clock, or at the end of the
+// title, where the next episode then doesn't start. It belongs to the player, not to one title: it
+// carries on through the next episode, another title opened here and a pause, and ends when it
+// fires, the viewer cancels it or the player closes (leaving it, Live TV taking the picture,
+// another profile). Back from a receiver view keeps it; a receiver stop that returns paused here
+// keeps it too. It stops only this playback, never a download or recording.
+//
 // A recording plays as a copy too, also while it records. Its session says what is verified of it
 // (`playback.copyState`), read as it opens and again each time main says it changed
 // (`playback.copyChanged`): its length once known, and where a run of the chosen tracks may start.
@@ -122,6 +129,15 @@ const RELEASE_AFTER_PAUSE_MS = 5 * 60_000;
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 export type Speed = (typeof SPEEDS)[number];
+
+/** A sleep timer to set: after so many minutes, or at the end of what plays. */
+export type SleepChoice =
+  { readonly kind: "after"; readonly minutes: number } | { readonly kind: "end" };
+
+/** The sleep timer set: the minutes chosen and when, in `Date.now()` time, it pauses, or at the end. */
+type Sleep =
+  | { readonly kind: "after"; readonly minutes: number; readonly at: number }
+  | { readonly kind: "end" };
 
 /** The subtitle formats the player shows: all of them. */
 const SHOWN_SUBTITLES: ReadonlySet<SubtitleFormat> = new Set([
@@ -302,6 +318,8 @@ export interface TitlePlayerState {
   readonly confirmed: number | null;
   /** For a recording, what its open session last said is verified of it; null otherwise. */
   readonly recording: RecordingSessionState | null;
+  /** The sleep timer set, or null for none. */
+  readonly sleep: Sleep | null;
 }
 
 const idle: TitlePlayerState = {
@@ -325,6 +343,7 @@ const idle: TitlePlayerState = {
   shows: null,
   confirmed: null,
   recording: null,
+  sleep: null,
 };
 
 const store = createStore<TitlePlayerState>(() => idle);
@@ -554,6 +573,12 @@ let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
 /** The countdown waits, at the seconds it has left, as while Settings is open over the title. */
 let countdownHeld = false;
+
+/** Pauses at the sleep timer's minutes. */
+let sleepTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Expiry intent for a pending local run or receiver load, consumed when it can pause. */
+let sleepOnStart = false;
 
 /** One ended episode's policy read and saved delay. Cancellation discards this identity. */
 let countdownRun: { generation: number; ready: Promise<void> } | null = null;
@@ -919,6 +944,10 @@ function stopCountdown(): void {
  * say what comes next, or for a copy, until main's list says the next one's copy is complete here.
  */
 function countDown(mine: number): Promise<void> {
+  // A sleep timer for the end is spent here: the record is still asked, for the series' end.
+  const asleep = store.getState().sleep?.kind === "end";
+
+  if (asleep) store.setState({ sleep: null });
   const pending = { generation: mine, ready: Promise.resolve() };
   countdownRun = pending;
   const request = ++nextRequest;
@@ -927,7 +956,7 @@ function countDown(mine: number): Promise<void> {
 
     if (countdownRun !== pending || mine !== generation) return;
 
-    if (!known || !offersNext(store.getState())) return stopCountdown();
+    if (asleep || !known || !offersNext(store.getState())) return stopCountdown();
     const preferences = await readPreferences().catch(() => null);
 
     if (countdownRun !== pending || mine !== generation) return;
@@ -1128,6 +1157,9 @@ async function run(asked: number, attempt = 0, paused = false): Promise<void> {
   }
 
   if (mine !== generation) return;
+
+  if (sleepOnStart) video.pause();
+  sleepOnStart = false;
   store.setState({ phase: { kind: video.paused ? "paused" : "playing" }, continued: false });
 
   // A run that starts paused holds the provider's connection until the release, as a pause does.
@@ -1214,6 +1246,7 @@ async function recover(
   const delay = RECONNECT_DELAYS_MS[reconnects];
 
   if (problem.kind !== "network" || delay === undefined) {
+    sleepOnStart = false;
     store.setState({ phase: { kind: "failed", problem } });
 
     return;
@@ -1329,6 +1362,7 @@ async function openOnReceiver(
     });
   } catch (cause) {
     if (mine !== generation) return;
+    sleepOnStart = false;
     store.setState({ phase: { kind: "failed", problem: receiverProblem(cause) } });
 
     return;
@@ -1336,7 +1370,7 @@ async function openOnReceiver(
 
   // One that played to its end stays there, open on this receiver for Play again.
   if (store.getState().phase.kind === "ended") return;
-  await loadOnReceiver(from, paused);
+  await loadOnReceiver(from, receiver?.paused ?? paused);
 }
 
 /** Has the receiver play the open title from `start` seconds with the chosen tracks. */
@@ -1382,12 +1416,15 @@ async function loadOnReceiver(start: number, paused = false): Promise<void> {
 
     receiver.load = media.generation;
     receiver.subtitle = subtitle?.id ?? null;
+
+    if (sleepOnStart) void pauseReceiverForSleep(paused);
     // What the receiver said of it before this answer arrived.
     const said = outputs.media();
 
     if (said?.generation === media.generation) follow(said);
   } catch (cause) {
     if (mine !== generation) return;
+    sleepOnStart = false;
     store.setState({ phase: { kind: "failed", problem: receiverProblem(cause) } });
   }
 }
@@ -1531,7 +1568,7 @@ function moveToReceiver(media: RemoteMedia | null): void {
     return void openOnReceiver(++generation, now, at, { audioId, subtitle }, paused);
   }
 
-  const paused = pausedByViewer();
+  const paused = sleepOnStart || pausedByViewer();
   save();
   const mine = ++generation;
   stopCountdown();
@@ -1602,6 +1639,7 @@ async function moveHere(): Promise<void> {
     store.setState({ duration: opened.duration, audio: opened.audio, subtitles: opened.subtitles });
   } catch (cause) {
     if (mine !== generation) return;
+    sleepOnStart = false;
     const error = appError(cause);
     store.setState({
       phase: {
@@ -1795,6 +1833,59 @@ function closeTitle(keepObservation = false): void {
   store.setState(idle);
 }
 
+/** Cancels the sleep timer, whichever it is. */
+function endSleep(): void {
+  if (sleepTimer) clearTimeout(sleepTimer);
+  sleepTimer = null;
+  sleepOnStart = false;
+
+  if (store.getState().sleep) store.setState({ sleep: null });
+}
+
+/** Completes an expired timer once the receiver has identified the load to pause. */
+async function pauseReceiverForSleep(alreadyPaused: boolean): Promise<void> {
+  if (receiver?.load == null) return;
+  const mine = generation;
+  sleepOnStart = false;
+
+  try {
+    if (!alreadyPaused)
+      await call("output.command", { generation: receiver.load, command: "pause" });
+
+    if (mine === generation) flash(t("Sleep timer paused playback"));
+  } catch {
+    if (mine === generation) flash(t("Sleep timer couldn't pause playback. Try pausing again."));
+  }
+}
+
+/**
+ * The sleep timer's minutes ran out: the countdown to the next episode stops, and what plays
+ * pauses, here or on the receiver. A run on its way here starts paused.
+ */
+function sleep(): void {
+  sleepTimer = null;
+  store.setState({ sleep: null });
+  stopCountdown();
+  const { phase } = store.getState();
+
+  if (phase.kind === "paused" || phase.kind === "ended" || phase.kind === "failed") return;
+
+  if (receiver) {
+    receiver.paused = true;
+    sleepOnStart = true;
+
+    if (receiver.load !== null) void pauseReceiverForSleep(false);
+
+    return;
+  } else if (phase.kind === "playing") {
+    video.pause();
+  } else {
+    sleepOnStart = true;
+  }
+
+  flash(t("Sleep timer paused playback"));
+}
+
 export const titlePlayer = {
   /**
    * Opens a title and plays it from `from` seconds: the resume position, or 0 to start at the
@@ -1816,6 +1907,7 @@ export const titlePlayer = {
 
     if (!claim.take()) return;
     closeTitle(retry);
+    sleepOnStart = false;
     playOwner = profileOwner();
 
     if (now.kind === "copy") now = { ...now, owner: playOwner };
@@ -1839,6 +1931,7 @@ export const titlePlayer = {
       position: from,
       speed: sameSeries ? before.speed : 1,
       continued,
+      sleep: before.sleep,
     });
     // Which episode comes next, the record says: none is offered until it has.
     void refreshNext();
@@ -1934,6 +2027,7 @@ export const titlePlayer = {
       });
     } catch (cause) {
       if (mine !== generation) return;
+      sleepOnStart = false;
       const error = appError(cause);
       observation.failure(playbackFailure(error), appDiagnostic(error));
       store.setState({
@@ -2436,7 +2530,25 @@ export const titlePlayer = {
     try {
       closeTitle(keepObservation);
     } finally {
+      endSleep();
       claim.release();
+    }
+  },
+
+  /**
+   * Sets the sleep timer, in place of one set before, or cancels it with null. Only while a title
+   * is open: closing the player cancels it.
+   */
+  setSleep(choice: SleepChoice | null): void {
+    if (choice && !store.getState().now) return;
+    endSleep();
+
+    if (choice?.kind === "after") {
+      const ms = choice.minutes * 60_000;
+      sleepTimer = setTimeout(sleep, ms);
+      store.setState({ sleep: { kind: "after", minutes: choice.minutes, at: Date.now() + ms } });
+    } else if (choice) {
+      store.setState({ sleep: choice });
     }
   },
 };

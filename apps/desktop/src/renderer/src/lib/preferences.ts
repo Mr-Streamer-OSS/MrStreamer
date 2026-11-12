@@ -1,9 +1,9 @@
 import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
-import { queryOptions, type QueryClient, type QueryOptions } from "@tanstack/react-query";
+import { queryOptions, useQuery, type QueryClient, type QueryOptions } from "@tanstack/react-query";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
-import type { Preferences } from "@mrstreamer/contracts/preferences";
+import { DEFAULT_SEEK_STEP, type Preferences } from "@mrstreamer/contracts/preferences";
 import {
   call,
   callForProfile,
@@ -134,6 +134,19 @@ export const preferenceQuery = () =>
 /** Reads the committed cache without starting another request. Pending editors keep only intent. */
 export function currentPreferences(client = connected): Preferences | undefined {
   return client?.getQueryData<PreferenceSnapshot>(key)?.preferences;
+}
+
+/** Seconds the skip keys and buttons move, as saved: for key handlers, which read it as pressed. */
+export function seekStep(preferences = currentPreferences()): number {
+  return preferences?.seekStepSeconds ?? DEFAULT_SEEK_STEP;
+}
+
+/**
+ * `seekStep` for skip buttons, which name the step and follow it as Settings changes it. They only
+ * follow the cache the app keeps: a button never starts a read of its own.
+ */
+export function useSeekStep(): number {
+  return seekStep(useQuery({ ...preferenceQuery(), enabled: false }).data);
 }
 
 /** Players can read/save outside React; composition attaches their renderer cache once. */

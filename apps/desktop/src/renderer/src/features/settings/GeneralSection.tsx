@@ -9,6 +9,7 @@ import {
   DEFAULT_NEXT_EPISODE_DELAY,
   DEFAULT_SUBTITLE_LOOK,
   ORIGINAL_SOUND,
+  SEEK_STEPS,
   type Preferences,
 } from "@mrstreamer/contracts/preferences";
 import { formatNumber, t } from "@mrstreamer/core/i18n";
@@ -18,7 +19,7 @@ import { useUi } from "../../app/ui-store.ts";
 import { changeLanguage } from "../../app/language.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
-import { updatePreferences } from "../../lib/preferences.ts";
+import { seekStep, updatePreferences } from "../../lib/preferences.ts";
 import { updateSubtitleLook } from "../../player/subtitle-look.ts";
 import { preferenceName } from "../../lib/quality.ts";
 import {
@@ -249,6 +250,25 @@ export function PlaybackSection() {
             <span>{t("seconds")}</span>
           </>
         )}
+      </PreferenceRow>
+      <PreferenceRow id="seek-step" field="seekStepSeconds" label={t("Seek step")}>
+        {(saved, change) => {
+          const step = seekStep(saved);
+          // A step a later release saved stays listed, so this one shows it as it is.
+          const steps = [...new Set([...SEEK_STEPS, step])].sort((a, b) => a - b);
+
+          return (
+            <Select
+              label={t("Seek step")}
+              value={String(step)}
+              options={steps.map((seconds) => ({
+                value: String(seconds),
+                label: t("{seconds} seconds", { seconds }),
+              }))}
+              onChange={(value) => change(Number(value))}
+            />
+          );
+        }}
       </PreferenceRow>
     </Section>
   );
