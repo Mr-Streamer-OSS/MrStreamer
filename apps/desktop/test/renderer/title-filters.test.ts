@@ -54,7 +54,12 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   ipc.reset();
-  useUi.setState({ details: null, searchOpen: false });
+  // Each test starts where a new window does, not where the last one left Movies.
+  useUi.setState({
+    details: null,
+    searchOpen: false,
+    browsing: useUi.getInitialState().browsing,
+  });
   vi.useRealTimers();
 });
 
@@ -401,8 +406,9 @@ it("uses current-kind words, keeps Unknown and MULTI reachable, resets between k
       .filter((entry) => entry.kind === "series")
       .every((entry) => !entry.filters),
   ).toBe(true);
+  // Movies comes back with its own filter: each kind keeps its place.
   await page.render("movie");
-  expect(page.group("Language").querySelector("button")?.textContent).toBe("Language");
+  expect(page.group("Language").querySelector("button")?.textContent).toBe("LanguageUnknown");
   expect(
     ipc
       .methods()

@@ -38,6 +38,7 @@ import {
 import { appError, describeError } from "../../lib/errors.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries, useSourceOf } from "../../lib/queries.ts";
+import { useKeptScroll, type KeptSpot } from "../../lib/use-kept-scroll.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { FilterEmpty, TitleFilterBar, type TitleFilterControls } from "./TitleFilters.tsx";
 
@@ -129,6 +130,7 @@ export function CollectionGrid({
   sortControl,
   hideCount,
   action,
+  kept,
 }: {
   kind: TitleKind;
   id: CollectionId;
@@ -138,6 +140,8 @@ export function CollectionGrid({
   hideCount?: boolean;
   /** Beside the filters' count, such as All's Save as collection. */
   action?: ReactNode;
+  /** Where the grid stood when the viewer last left it; see `Grid`. */
+  kept?: KeptSpot;
 } & Partial<TitleFilterControls>) {
   const listed = useCollection(kind, id, sort, filters);
 
@@ -181,6 +185,7 @@ export function CollectionGrid({
           settled={listed.settled}
           active={active}
           onOpen={open}
+          {...(kept ? { kept } : {})}
           tile={(title, grid) => <GridPoster title={title} caption={describe(title)} grid={grid} />}
         />
       )}
@@ -211,6 +216,7 @@ export function TitleGrid({
   asked = false,
   takeFocus = false,
   onFocusTaken,
+  kept,
 }: {
   titles: readonly Title[];
   active: boolean;
@@ -219,6 +225,7 @@ export function TitleGrid({
   asked?: boolean;
   takeFocus?: boolean;
   onFocusTaken?: () => void;
+  kept?: KeptSpot;
 }) {
   const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title), asked });
 
@@ -232,6 +239,7 @@ export function TitleGrid({
       onOpen={open}
       takeFocus={takeFocus}
       {...(onFocusTaken ? { onFocusTaken } : {})}
+      {...(kept ? { kept } : {})}
       tile={(title, grid) => <GridPoster title={title} caption={caption(title)} grid={grid} />}
     />
   );
@@ -301,6 +309,8 @@ function controlOf(scroller: HTMLElement, index: number, part: number): HTMLElem
  * keeps the focus and the Tab stop. `takeFocus` asks the selected tile to take the focus once it
  * is drawn, unless the focus went to another control first; `onFocusTaken` says it did. `settled`
  * is false while a page of the list is still being read, as a refresh reads them one at a time.
+ * `kept` brings the selection and the scroll back as the grid stood when it went, the selection
+ * by its key, and keeps them again as it goes.
  */
 export function Grid<T>({
   total,
@@ -313,6 +323,7 @@ export function Grid<T>({
   takeFocus = false,
   onFocusTaken,
   settled = true,
+  kept,
 }: {
   total: number;
   /** The item at a position, or undefined while its page loads. */
@@ -327,6 +338,7 @@ export function Grid<T>({
   takeFocus?: boolean;
   onFocusTaken?: () => void;
   settled?: boolean;
+  kept?: KeptSpot;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
@@ -348,7 +360,10 @@ export function Grid<T>({
   const rowHeight = tileWidth / POSTER_ASPECT_RATIO + POSTER_CAPTION_HEIGHT_REM * rem + gap;
   const rows = Math.ceil(total / columns);
 
-  const [chosen, setChosen] = useState<Chosen>({ key: null, index: 0 });
+  const [chosen, setChosen] = useState<Chosen>(() => ({
+    key: kept?.from?.key ?? null,
+    index: kept?.from?.index ?? 0,
+  }));
   const found = locate(chosen, total, itemAt, keyOf);
   // A title the loaded pages lack keeps its key while a page is still being read: a refresh
   // answers them one at a time, and the title can be in none of them for a moment. Meanwhile it
@@ -363,6 +378,9 @@ export function Grid<T>({
   // Kept where it was found, so the next render needn't look for it again.
   if (selected !== chosen.index || selectedKey !== chosen.key)
     setChosen({ key: selectedKey, index: selected });
+  const at = useRef<Chosen>(chosen);
+  at.current = { key: selectedKey, index: selected };
+  useKeptScroll(box, kept, () => at.current);
   const selectedRow = Math.floor(selected / columns);
 
   // The rows in view and their overscan, without the selected row drawn beside them.
