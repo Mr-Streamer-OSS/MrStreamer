@@ -340,8 +340,10 @@ it.each(["rollback", "playback"])(
     await act(async () => {});
     const write = ipc.hold("preferences.update");
     await press(named("Zoom In"));
+
     if (failure === "rollback") resume.mockRejectedValueOnce(new Error("device asleep"));
     await act(async () => write.reject({ kind: "unexpected", detail: "disk full" }));
+
     if (failure === "playback") resume.mockRejectedValueOnce(new Error("device asleep"));
     await act(async () => element.dispatchEvent(new Event("playing")));
     await act(async () => element.dispatchEvent(new Event("playing")));

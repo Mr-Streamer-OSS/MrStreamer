@@ -169,6 +169,7 @@ export async function adjustPlayback(
     });
     await play(restored, identity, captured).catch((cause: unknown) => {
       if (identity !== operation || !currentProfile(captured)) return;
+
       if (store.getState().failed?.kind === "save") return;
       store.setState({
         failed: {
