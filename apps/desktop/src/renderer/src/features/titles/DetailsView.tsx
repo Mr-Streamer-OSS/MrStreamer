@@ -285,8 +285,11 @@ export function DetailsView({
         />
       ) : title ? (
         <Header title={title} backdropUrl={title.backdropUrl} facts={factsOf(title)}>
-          <div className="mt-6">
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <SaveButton state={saving} />
+            {title.kind === "series" && (
+              <FollowSeries title={title} pending={!listed.isSuccess} version={playing} />
+            )}
             <SaveError state={saving} />
           </div>
           <p className="mt-6 text-[0.9375rem] text-muted-foreground">

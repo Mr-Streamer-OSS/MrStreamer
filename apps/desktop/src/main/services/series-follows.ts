@@ -95,6 +95,7 @@ function make() {
     const changes = yield* PubSub.unbounded<ActiveProfile | null>();
     // Episode reads are serialized; catalogue classification must not wait behind provider reads.
     const checking = yield* Semaphore.make(1);
+    const classification = yield* Semaphore.make(1);
     /**
      * The fetch of its lists each follow's last failed read was under, by version: the lists also
      * change as TMDB's metadata arrives, and a provider that failed is asked again only with a
@@ -226,38 +227,45 @@ function make() {
         const follows = yield* followsOf(found);
 
         if (follows.length === 0) return;
-        const titleFor = yield* titlesOf(follows.map((each) => each.series));
-        let changed = false;
 
-        // Classification belongs to the catalogue, never to a pending provider episode read.
-        // Drain it before queuing episode work so an intervening adult mark survives withdrawal.
-        for (const { source, series } of follows) {
-          const title = titleFor(series);
+        const titleFor = yield* classification.withPermits(1)(
+          Effect.gen(function* () {
+            const titleFor = yield* titlesOf(follows.map((each) => each.series));
+            let changed = false;
 
-          if (!title) continue;
+            // Classification belongs to the catalogue, never to a pending provider episode read.
+            // Drain it before queuing episode work so an intervening adult mark survives withdrawal.
+            for (const { source, series } of follows) {
+              const title = titleFor(series);
 
-          const metadataChanged = yield* store
-            .catalogue({
-              account: source.key,
-              seriesId: series.id,
-              name: title.title,
-              year: title.year,
-              adult: title.adult,
-              stands: () => subscriptions.standsNow(source),
-            })
-            .pipe(
-              Effect.catchTag("Failed", (failed) =>
-                Effect.logWarning(
-                  "[follows] a followed series' catalogue metadata can't be saved",
-                  failed.error.kind,
-                ).pipe(Effect.as(false)),
-              ),
-            );
+              if (!title) continue;
 
-          changed ||= metadataChanged;
-        }
+              const metadataChanged = yield* store
+                .catalogue({
+                  account: source.key,
+                  seriesId: series.id,
+                  name: title.title,
+                  year: title.year,
+                  adult: title.adult,
+                  stands: () => subscriptions.standsNow(source),
+                })
+                .pipe(
+                  Effect.catchTag("Failed", (failed) =>
+                    Effect.logWarning(
+                      "[follows] a followed series' catalogue metadata can't be saved",
+                      failed.error.kind,
+                    ).pipe(Effect.as(false)),
+                  ),
+                );
 
-        if (changed) yield* announce;
+              changed ||= metadataChanged;
+            }
+
+            if (changed) yield* announce;
+
+            return titleFor;
+          }),
+        );
 
         yield* Effect.forkScoped(
           checking
@@ -276,7 +284,7 @@ function make() {
                   const stands = () => subscriptions.standsNow(source);
                   const listed = entryOf(title, series, listsNow);
 
-                  if (listed !== null && listed === follow.listed) continue;
+                  if (!follow.failed && listed !== null && listed === follow.listed) continue;
                   const key = ownedKey(series);
 
                   const fetchedAt =

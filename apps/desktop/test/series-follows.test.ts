@@ -58,12 +58,16 @@ function news(follow: SeriesFollow | null | undefined) {
  * The app on a fake provider whose lists are loaded, with profile switching enabled. `as` runs a
  * call in the active profile's admission, as the IPC handlers do.
  */
-async function followsApp(warnings: unknown[] = []) {
-  const provider = await fakeProvider();
+async function followsApp(
+  warnings: unknown[] = [],
+  previous?: { provider: FakeProvider; directory: string },
+) {
+  const provider = previous?.provider ?? (await fakeProvider());
+  const directory = previous?.directory ?? (await tempDir());
 
   const runtime = runtimeFor(
     mainLayer({
-      ...testConfig(await tempDir()),
+      ...testConfig(directory),
       profiles: {
         consent: { read: Effect.succeed(true), write: () => Effect.void },
         stopInteractive: () => Effect.void,
@@ -82,7 +86,11 @@ async function followsApp(warnings: unknown[] = []) {
   const onDemand = await promised(runtime, OnDemand);
   const roster = await promised(runtime, Roster);
   const sessions = await runtime.runPromise(ProfileSessions);
-  let source = await subscriptions.add(demoLogin(provider));
+
+  let source = previous
+    ? (await subscriptions.saved())[0]!
+    : await subscriptions.add(demoLogin(provider));
+
   await onDemand.refresh(source.id);
   const series = (id: number) => ({ subscriptionId: source.id, id: String(id) });
 
@@ -126,6 +134,7 @@ async function followsApp(warnings: unknown[] = []) {
 
   return {
     provider,
+    directory,
     subscriptions,
     onDemand,
     subscriptionId: source.id,
@@ -249,6 +258,78 @@ describe("followed series", { timeout: 20_000 }, () => {
       }
     },
   );
+
+  it("does not let a delayed startup classification expose a withdrawn adult follow", async () => {
+    const app = await followsApp();
+    const viewer = await app.admitted();
+    await viewer.follow(FILES);
+    await viewer.showAdults(true);
+    await app.runtime.dispose();
+    const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    const requestType = type({ id: "number", method: "'byIds'" });
+    const replyType = type({ id: "number" });
+    let pending: number | undefined;
+    let holding = true;
+    const post = Worker.prototype.postMessage;
+    const emit = Worker.prototype.emit;
+
+    const outgoing = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
+      this: Worker,
+      ...args: Parameters<Worker["postMessage"]>
+    ) {
+      const request = requestType(args[0]);
+
+      if (holding && !(request instanceof type.errors)) {
+        pending = request.id;
+        holding = false;
+      }
+
+      return post.apply(this, args);
+    });
+
+    const incoming = vi.spyOn(Worker.prototype, "emit").mockImplementation(function (
+      this: Worker,
+      event: string | symbol,
+      ...args: unknown[]
+    ) {
+      const response = replyType(args[0]);
+
+      if (event === "message" && !(response instanceof type.errors) && response.id === pending) {
+        pending = undefined;
+        arrive();
+        void gate.then(() => emit.call(this, event, ...args));
+
+        return true;
+      }
+
+      return emit.call(this, event, ...args);
+    });
+
+    try {
+      const restarting = followsApp([], app);
+      await arrived;
+      const restarted = await restarting;
+      const restored = await restarted.admitted();
+      relist(app.provider, { [FILES]: (series) => ({ ...series, adult: true }) });
+      await restarted.refresh();
+      await vi.waitFor(async () => expect((await restored.state(FILES))?.title?.adult).toBe(true));
+      release();
+      // Round-trip through the catalogue after releasing the startup answer before withdrawal.
+      await restored.state(FILES);
+      app.provider.serveTitles((all) => ({
+        ...all,
+        series: all.series.filter((series) => series.id !== FILES),
+      }));
+      await restarted.refresh();
+      await restored.showAdults(false);
+      expect(await restored.state(FILES)).toBeNull();
+    } finally {
+      release();
+      outgoing.mockRestore();
+      incoming.mockRestore();
+    }
+  });
 
   it("does not fail a queued follow after its subscription is edited", async () => {
     const { promise: gate, resolve: release } = Promise.withResolvers<void>();
@@ -467,6 +548,10 @@ describe("followed series", { timeout: 20_000 }, () => {
         { id: "800013", season: 1, number: 0 },
       ]),
     );
+    expect((await viewer.state(FILES))?.newEpisodes.map((episode) => episode.title)).toEqual([
+      "Earth Files 0 (NL) - S01E00 - Part 0",
+      "Earth Files 0 (NL) - S01E00 - Part 0",
+    ]);
     relist(app.provider, {
       [FILES]: (series) => unnumbered(series, [800_012, 800_013, 800_014], 120),
     });
@@ -640,6 +725,21 @@ describe("followed series", { timeout: 20_000 }, () => {
         newEpisodes: [{ id: "800012" }],
       }),
     );
+  });
+
+  it("retries a failed check when the provider restores the last successful entry", async () => {
+    const app = await followsApp();
+    const viewer = await app.admitted();
+    await viewer.follow(FILES);
+    relist(app.provider, { [FILES]: (series) => withEpisode(series, 800_012) });
+    app.provider.failDetails(503);
+    await app.refresh();
+    await vi.waitFor(async () => expect((await viewer.state(FILES))?.lastCheck.failed).toBe(true));
+    relist(app.provider, {});
+    app.provider.failDetails(null);
+    await app.refresh();
+    await vi.waitFor(async () => expect((await viewer.state(FILES))?.lastCheck.failed).toBe(false));
+    expect(news(await viewer.state(FILES))).toEqual([]);
   });
 
   it("keeps provider addresses and free-form failure details out of background warnings", async () => {

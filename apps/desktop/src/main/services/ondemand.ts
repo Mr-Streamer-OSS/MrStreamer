@@ -1865,7 +1865,7 @@ function make(deps: OnDemandDeps) {
             id: episode.id,
             season: episode.season,
             number: episode.number,
-            title: episodeName(episode.name, episode.number),
+            title: episode.number > 0 ? episodeName(episode.name, episode.number) : episode.name,
           })),
         ),
 

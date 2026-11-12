@@ -101,9 +101,11 @@ const until = (check: () => void) =>
     { timeout: 5000 },
   );
 
-async function openSeries() {
+async function openSeries(detailsFail = false) {
   ipc.always("ondemand.titles", [series]);
-  ipc.always("ondemand.details", details);
+
+  if (detailsFail) ipc.refuse("ondemand.details", { kind: "unexpected", detail: "Offline" });
+  else ipc.always("ondemand.details", details);
   ipc.always("viewing.progress", []);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["subscriptions"], [SAVED]);
@@ -140,6 +142,17 @@ describe("Follow in a series' details", () => {
     ]);
     await until(() => expect(text()).not.toContain("new episodes"));
     expect(button("Following")).toBeDefined();
+  });
+
+  it("can stop following when provider details fail without cached details", async () => {
+    ipc.always("follows.state", followed([]));
+    await openSeries(true);
+    await until(() => expect(button("Following")?.getAttribute("aria-pressed")).toBe("true"));
+    ipc.always("follows.set", null);
+    ipc.always("follows.state", null);
+    await act(async () => button("Following")!.click());
+    await until(() => expect(button("Follow")?.getAttribute("aria-pressed")).toBe("false"));
+    expect(ipc.argsOf("follows.set")).toEqual([{ series: HARBOUR, following: false }]);
   });
 
   it("ignores another viewer's changes and says when a check or a follow failed", async () => {
