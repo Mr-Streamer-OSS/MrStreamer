@@ -23,7 +23,7 @@ export function TitleCollections({
 }: {
   title: Title | null;
   version: OwnedId;
-  /** True until a successful title read, including a failed read awaiting retry. */
+  /** True until a successful title read; the caller shows read failures while collections wait. */
   pending?: boolean;
 }) {
   return (
