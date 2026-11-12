@@ -1808,10 +1808,12 @@ it("publishes only the captured collection owner and refuses missing admitted co
 });
 
 it("keeps exact retained collection facts usable after a source refresh fails", async () => {
-  const f = await fixture();
+  const f = await fixture({ manualRefresh: true });
   const other = await fakeProvider();
-  const roster = await f.app.runPromise(Roster);
-  const source = await f.app.runPromise(roster.add(demoLogin(other)));
+  const subscriptions = await f.app.runPromise(Subscriptions);
+  // Add through Subscriptions: Roster.add also forks its own titles refresh, whose later
+  // acceptance correctly refuses a collection read that started before it.
+  const source = await f.app.runPromise(subscriptions.add(demoLogin(other)));
   await f.app.runPromise(f.onDemand.refresh(source.id));
   const movies = (await f.app.runPromise(f.onDemand.search("TEST"))).movies;
 
