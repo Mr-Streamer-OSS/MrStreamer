@@ -33,5 +33,11 @@ export function viewingHandlers({
       viewing.markEpisode(commandId, episode, watched),
     "viewing.undoMark": ({ commandId, series, revision }) =>
       Effect.as(viewing.undoMark(commandId, series, revision), null),
+    "viewing.markTitles": ({ commandId, scope, watched }) =>
+      viewing.markTitles(commandId, scope, watched),
+    "viewing.undoMarks": ({ commandId, made }) =>
+      Effect.as(viewing.undoMarks(commandId, made), null),
+    "viewing.filmMarks": ({ movies }) => viewing.filmMarks(movies),
+    "viewing.history": () => viewing.history,
   };
 }

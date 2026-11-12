@@ -15,13 +15,14 @@
 // record, so removing a subscription takes its entries out of the lists and nothing else, and
 // what another build wrote for one account still reads as it wrote it.
 //
-// An episode's mark is kept by its series and its numbers, apart from how far any file played
-// (see ./marks.ts and ./episodes.ts). Which series that is, and which versions of it a
-// subscription lists, the lists say when the mark is made and each time it is read: the UI names
-// a version and never says what it belongs to. Where a marked series goes on is worked out each
-// time the record is read, from how it stands then and the episodes the series listed when it
-// was last marked, so it follows what a play saves afterwards and asks no provider. When the
-// app reads those episodes again for its own ends, it tells the record what they are now.
+// A film's mark is kept by each version marked, and an episode's by its series and its numbers,
+// both apart from how far any file played (see ./marks.ts and ./episodes.ts). Which series that is,
+// and which versions of it a subscription lists, the lists say when the mark is made and each time
+// it is read: the UI names a version and never says what it belongs to. Where a marked series goes
+// on is worked out each time the record is read, from how it stands then and the episodes the
+// series listed when it was last marked, so it follows what a play saves afterwards and asks no
+// provider. When the app reads those episodes again for its own ends, it tells the record what they
+// are now.
 //
 // The app supplies five ports: which subscriptions are saved, the store, the lists kept in
 // preferences.json before the record, which the first start imports once, the catalogues'
@@ -43,7 +44,12 @@ import {
   RECENT_LIMIT,
   type EpisodeMark,
   type FavouriteOrder,
+  type FilmMark,
+  type HistoryEntry,
   type MarkedNext,
+  type MarkMade,
+  type MarkScope,
+  type MarksChanged,
   type SeriesViewing,
   type TitleFilter,
   type TitleProgress,
@@ -56,15 +62,26 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { Failed } from "../failure.ts";
-import { leading, standing, undoable, type SeriesIdentity, type SeriesMarks } from "./marks.ts";
+import { episodeStates } from "./episodes.ts";
+import {
+  filmState,
+  leading,
+  standing,
+  stands,
+  undoable,
+  type SeriesIdentity,
+  type SeriesMarks,
+} from "./marks.ts";
 import { removalScope, type RawProgress } from "./titles.ts";
 import {
   decide,
   importEvents,
   reordered,
   type AccountEvent,
+  type EpisodeTitle,
   type SeriesListing,
   type StoredChannel,
+  type StoredFilmMark,
   type StoredMark,
   type ViewingCommand,
   type ViewingEvent,
@@ -141,6 +158,10 @@ export class ViewingSeries extends Context.Service<
   {
     /** What a series version is as the lists have it now. Asks no provider. */
     readonly identity: (series: OwnedId) => Effect.Effect<SeriesIdentity, Failed>;
+    /** Current identities in input order, from one catalogue read. Older adapters use identity. */
+    readonly identities?: (
+      series: readonly OwnedId[],
+    ) => Effect.Effect<readonly SeriesIdentity[], Failed>;
     /** The seasons that version lists: what its details hold, as when its sheet opened. */
     readonly seasons: (series: OwnedId) => Effect.Effect<SeriesSeasons, Failed>;
   }
@@ -178,6 +199,18 @@ export interface StoredLook {
   readonly marks: (account: string, keys: readonly string[]) => readonly SeriesMarks[];
   /** The marks of every series that listed one of these versions when it was last marked. */
   readonly marksIn: (account: string, seriesIds: readonly string[]) => readonly StoredMark[];
+  /** The marks of those of these movies that have one, by the provider's ids. */
+  readonly films: (account: string, movieIds: readonly string[]) => readonly StoredFilmMark[];
+}
+
+/** What an account's viewing history is made of, as stored: each in no particular order. */
+export interface StoredHistory {
+  /** Every movie's row, and the latest episode row of each series version. */
+  readonly rows: readonly RawProgress[];
+  /** Every movie's mark. */
+  readonly films: readonly StoredFilmMark[];
+  /** The latest mark kept under each key series' marks are kept under. */
+  readonly series: readonly StoredMark[];
 }
 
 /**
@@ -226,11 +259,20 @@ export class ViewingStore extends Context.Service<
       account: string,
       seriesIds: readonly string[],
     ) => Effect.Effect<readonly StoredMark[], Failed>;
+    /** Its marks of those of these movies that have one. */
+    readonly films: (
+      account: string,
+      movieIds: readonly string[],
+    ) => Effect.Effect<readonly StoredFilmMark[], Failed>;
+    /** Everything `account` played or marked, for its history. */
+    readonly history: (account: string) => Effect.Effect<StoredHistory, Failed>;
     /**
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
      * the records of `accounts` as they stand, each to its own account's and in the order given,
-     * and stores the states they add up to. Returns the records after. A `Failed` from `decide`
-     * refuses the command: the call fails with it and stores nothing, the id neither.
+     * and stores the states they add up to. Returns the records after with at least the mark
+     * events and their sequence numbers for receipt recovery. A
+     * `Failed` from `decide` refuses the command: the call fails with it and stores nothing, the id
+     * neither.
      */
     readonly commit: (input: {
       readonly accounts: readonly string[];
@@ -242,7 +284,12 @@ export class ViewingStore extends Context.Service<
         stored: StoredViewing,
         look: StoredLook,
       ) => readonly AccountEvent[] | Failed;
-    }) => Effect.Effect<StoredViewing, Failed>;
+    }) => Effect.Effect<
+      StoredViewing & {
+        readonly recorded: readonly (AccountEvent & { readonly sequence: number })[];
+      },
+      Failed
+    >;
     /**
      * In one transaction with the import marker: appends `events` for `account`. Does nothing,
      * and returns false, once the marker is set.
@@ -363,6 +410,41 @@ export class ViewingRecord extends Context.Service<
      */
     undoMark(commandId: string, series: OwnedId, revision: number): Effect.Effect<void, Failed>;
     /**
+     * Marks what `scope` names watched or unwatched, all in one save, each film version and
+     * series in the record of its own subscription. Leaves out the films and episodes that already
+     * stand so, by their marks or their plays, and changes nothing of how far any file played.
+     * Answers how many it changed and what Undo takes back.
+     *
+     * Fails, storing nothing, with `no-subscription` when a version's subscription isn't saved,
+     * with `title-not-found` when the series doesn't list the season, and with whatever kept the
+     * lists or the details from answering. A command sent again changes nothing more, and answers
+     * with its original changed count and Undo receipt while the id and subscription data remain
+     * (at least the last 500 command ids in memory snapshots; without that cap in SQLite).
+     */
+    markTitles(
+      commandId: string,
+      scope: MarkScope,
+      watched: boolean,
+    ): Effect.Effect<MarksChanged, Failed>;
+    /**
+     * Takes back every mark `made` names at once: each film and episode, where its series goes on
+     * and whether it shows in Continue watching are as before. Fails with `mark-changed`, changing
+     * nothing, unless each is still its film's or series' latest mark, no play of it began after
+     * it and it didn't leave Continue watching since: checked in the transaction that takes them
+     * back. Marks of another profile's record are not found in this one, and fail alike.
+     */
+    undoMarks(commandId: string, made: readonly MarkMade[]): Effect.Effect<void, Failed>;
+    /**
+     * The marks of these movies that still stand, no play of them having begun after: by their
+     * versions, each in its own subscription's record. None for a subscription that isn't saved.
+     */
+    filmMarks(movies: readonly OwnedId[]): Effect.Effect<readonly FilmMark[], Failed>;
+    /**
+     * Every film and series version the saved subscriptions played or marked, most recent first,
+     * each in its own: removing one from Continue watching leaves it here.
+     */
+    readonly history: Effect.Effect<readonly HistoryEntry[], Failed>;
+    /**
      * Notes the episodes a series version lists now, as its details were just read, and the
      * versions its subscription lists of the series: where a series last marked in that version
      * goes on is worked out from them from then on. Changes nothing for a series without marks,
@@ -436,6 +518,109 @@ const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 /** A mark as the UI reads it: without what the record keeps beside it. */
 function markOf({ season, episode, watched, at, revision }: StoredMark): EpisodeMark {
   return { season, episode, watched, at, revision };
+}
+
+/** A movie's mark as the UI reads it, in `owner`'s subscription. */
+function filmMarkOf(
+  owner: ViewingOwner,
+  { title, watched, at, revision }: StoredFilmMark,
+): FilmMark {
+  return { movie: { subscriptionId: owner.subscriptionId, id: title.id }, watched, at, revision };
+}
+
+/**
+ * An account's history, in `owner`'s subscription: one entry per movie and series version, by
+ * when it was last played or marked. A movie's mark shows while it stands.
+ */
+function historyOf(owner: ViewingOwner, stored: StoredHistory): HistoryEntry[] {
+  const { subscriptionId } = owner;
+  const own = (id: string): OwnedId => ({ subscriptionId, id });
+
+  const later = <A extends { readonly at: number }>(a: A | undefined, b: A) =>
+    a && a.at >= b.at ? a : b;
+
+  const movies = new Map<string, { progress?: RawProgress; mark?: StoredFilmMark }>();
+  const series = new Map<string, { progress?: RawProgress; mark?: StoredMark }>();
+
+  for (const row of stored.rows) {
+    const { title } = row;
+
+    if (title.kind === "movie") movies.set(title.id, { progress: row });
+    else {
+      const entry = series.get(title.seriesId);
+      series.set(title.seriesId, { progress: later(entry?.progress, row) });
+    }
+  }
+
+  for (const mark of stored.films)
+    movies.set(mark.title.id, { ...movies.get(mark.title.id), mark });
+
+  for (const mark of stored.series) {
+    const entry = series.get(mark.title.seriesId) ?? {};
+    series.set(mark.title.seriesId, { ...entry, mark: later(entry.mark, mark) });
+  }
+
+  const at = (...times: (number | undefined)[]) =>
+    Math.max(...times.filter((time) => time !== undefined));
+
+  return [
+    ...[...movies].map(([id, { progress, mark }]): HistoryEntry => ({
+      kind: "movie",
+      movie: own(id),
+      progress: progress ? progressOf(owner, progress) : null,
+      mark: mark && stands(mark, progress) ? filmMarkOf(owner, mark) : null,
+      at: at(progress?.at, mark?.at),
+    })),
+    ...[...series].map(([id, { progress, mark }]): HistoryEntry => ({
+      kind: "series",
+      series: own(id),
+      progress: progress ? progressOf(owner, progress) : null,
+      mark: mark ? markOf(mark) : null,
+      at: at(progress?.at, mark?.at),
+    })),
+  ];
+}
+
+/** How far a title got, named with `owner`'s subscription. */
+function progressOf(owner: ViewingOwner, progress: RawProgress): TitleProgress {
+  return { ...progress, title: { ...progress.title, subscriptionId: owner.subscriptionId } };
+}
+
+/** An episode as a series version lists it. */
+type ListedEpisode = SeriesSeasons[number]["episodes"][number];
+
+/**
+ * The episodes of `season`, or of every season when null, one per number: the first file listed
+ * for it, with the episode a mark of it names.
+ */
+function episodesIn(
+  seasons: SeriesSeasons,
+  series: OwnedId,
+  season: number | null,
+): (ListedEpisode & { readonly title: EpisodeTitle })[] {
+  const found = new Map<string, ListedEpisode & { readonly title: EpisodeTitle }>();
+
+  for (const listed of seasons) {
+    if (season !== null && listed.number !== season) continue;
+
+    for (const episode of listed.episodes) {
+      const key = `${listed.number}:${episode.number}`;
+
+      if (found.has(key)) continue;
+
+      const title: EpisodeTitle = {
+        kind: "episode",
+        id: episode.id,
+        seriesId: series.id,
+        season: listed.number,
+        episode: episode.number,
+      };
+
+      found.set(key, { ...episode, title });
+    }
+  }
+
+  return [...found.values()];
 }
 
 /** Logical episodes in source order, with current exact files for playlist progress. */
@@ -643,11 +828,6 @@ function make() {
       return { movieIds: own(filter.movies), seriesIds: own(filter.series) };
     };
 
-    const progressOf = (owner: ViewingOwner, progress: RawProgress): TitleProgress => ({
-      ...progress,
-      title: { ...progress.title, subscriptionId: owner.subscriptionId },
-    });
-
     const shown = (found: Found): Viewing => {
       const listed = (list: readonly StoredChannel[], by: "channelsOf" | "favouritesOf") => [
         ...new Map(
@@ -711,7 +891,7 @@ function make() {
      * found. The transaction checks the named owners' presence again, so no change lands after
      * a removal erased their records, even if the last roster read answered an older snapshot.
      */
-    const run = (
+    const committed = (
       commandId: string,
       named: readonly { readonly subscriptionId: string }[],
       events: (
@@ -759,7 +939,147 @@ function make() {
           sequence: stored.sequence,
         });
 
-        return shown({ ...found, stored });
+        return { found, stored };
+      });
+
+    /** `committed`, answered with the records as the lists show them after. */
+    const run = (...input: Parameters<typeof committed>) =>
+      Effect.map(committed(...input), ({ found, stored }) => shown({ ...found, stored }));
+
+    /** The saved owner of `title`'s subscription among `owners`, else `noSubscription`. */
+    const ownerIn = (owners: readonly ViewingOwner[], title: { readonly subscriptionId: string }) =>
+      owners.find((owner) => owner.subscriptionId === title.subscriptionId) ?? noSubscription;
+
+    /** Commits mark events and recovers their original Undo receipt on retries. */
+    const marking = (
+      commandId: string,
+      named: readonly OwnedId[],
+      decide: (
+        owners: readonly ViewingOwner[],
+        look: StoredLook,
+      ) => readonly AccountEvent[] | Failed,
+    ) =>
+      Effect.gen(function* () {
+        const { stored } = yield* committed(commandId, named, (_found, owners, look) =>
+          decide(owners, look),
+        );
+
+        // The store returns the original events on retries too, even after a restart.
+        const owners = yield* account.owners;
+
+        const made = stored.recorded.flatMap<{ count: number; mark: MarkMade }>(
+          ({ account: key, event, sequence }) => {
+            const owner = owners.find((each) => each.key === key);
+
+            if (!owner) return [];
+
+            if (event.type === "movie-marked")
+              return [
+                {
+                  count: 1,
+                  mark: {
+                    kind: "movie" as const,
+                    title: { subscriptionId: owner.subscriptionId, id: event.title.id },
+                    revision: sequence,
+                  },
+                },
+              ];
+            const first = event.type === "episodes-marked" ? event.titles[0] : undefined;
+
+            if (event.type === "episodes-marked" && first)
+              return [
+                {
+                  count: event.titles.length,
+                  mark: {
+                    kind: "series" as const,
+                    title: { subscriptionId: owner.subscriptionId, id: first.seriesId },
+                    revision: sequence,
+                  },
+                },
+              ];
+
+            return [];
+          },
+        );
+
+        return {
+          changed: made.reduce((sum, each) => sum + each.count, 0),
+          made: made.map((each) => each.mark),
+        } satisfies MarksChanged;
+      });
+
+    /** Marks every version of a film watched or unwatched, each that doesn't stand so already. */
+    const markFilm = (commandId: string, versions: readonly OwnedId[], watched: boolean) => {
+      const wanted = watched ? "watched" : "unwatched";
+      const unique = [...new Map(versions.map((each) => [ownedKey(each), each])).values()];
+
+      return marking(commandId, unique, (owners, look) => {
+        const made = [];
+
+        for (const version of unique) {
+          const owner = ownerIn(owners, version);
+
+          if (owner instanceof Failed) return owner;
+          const [mark] = look.films(owner.key, [version.id]);
+          const [row] = look.titles(owner.key, { movieIds: [version.id] });
+
+          if (filmState(mark, row) === wanted) continue;
+          const title = { kind: "movie" as const, id: version.id };
+          const event = { type: "movie-marked" as const, title, watched };
+          made.push({ account: owner.key, event });
+        }
+
+        return made;
+      });
+    };
+
+    /** Marks a season, or every episode a series lists, each that doesn't stand so already. */
+    const markEpisodes = (
+      commandId: string,
+      series: OwnedId,
+      season: number | null,
+      watched: boolean,
+    ) =>
+      Effect.gen(function* () {
+        // Asked first: the lists and the details can take a while.
+        const { key, keys, versions } = yield* listed.identity(series);
+        const seasons = yield* listed.seasons(series);
+        const listing = listingOf(seasons);
+
+        if (season !== null && !listing.some((each) => each.number === season)) {
+          return yield* new Failed({ error: { kind: "title-not-found", titleId: series.id } });
+        }
+
+        const episodes = episodesIn(seasons, series, season);
+        const wanted = watched ? "watched" : "unwatched";
+
+        return yield* marking(commandId, [series], (owners, look) => {
+          const owner = ownerIn(owners, series);
+
+          if (owner instanceof Failed) return owner;
+
+          const stateOf = episodeStates(
+            look.titles(owner.key, { seriesIds: versions }),
+            standing(look.marks(owner.key, keys)),
+          );
+
+          const titles = episodes.flatMap((each) =>
+            stateOf(each).kind === wanted ? [] : [each.title],
+          );
+
+          if (titles.length === 0) return [];
+
+          const event = {
+            type: "episodes-marked" as const,
+            series: key,
+            titles,
+            watched,
+            versions,
+            listing,
+          };
+
+          return [{ account: owner.key, event }];
+        });
       });
 
     /**
@@ -790,6 +1110,67 @@ function make() {
         );
 
         return new Map(played);
+      });
+
+    /** Takes back every mark `made` names, all at once or none: see `ViewingRecord.undoMarks`. */
+    const undoMarks = (commandId: string, made: readonly MarkMade[]) =>
+      Effect.gen(function* () {
+        // What each series is as the lists have it, asked before the transaction.
+        const identities = yield* Effect.forEach(made, (each) =>
+          each.kind === "series" ? listed.identity(each.title) : Effect.succeed(null),
+        );
+
+        yield* run(
+          commandId,
+          made.map(({ title }) => title),
+          (_found, owners, look) => {
+            const events: AccountEvent[] = [];
+
+            for (const [at, each] of made.entries()) {
+              const owner = ownerIn(owners, each.title);
+
+              if (owner instanceof Failed) return owner;
+              const identity = identities[at];
+
+              if (!identity) {
+                const [mark] = look.films(owner.key, [each.title.id]);
+                const [row] = look.titles(owner.key, { movieIds: [each.title.id] });
+
+                if (mark?.revision !== each.revision || !mark.undo || !stands(mark, row)) {
+                  return markChanged;
+                }
+
+                const event = {
+                  type: "movie-mark-undone" as const,
+                  title: mark.title,
+                  revision: mark.revision,
+                };
+
+                events.push({ account: owner.key, event });
+                continue;
+              }
+
+              const mark = undoable(
+                look.marks(owner.key, identity.keys),
+                look.titles(owner.key, { seriesIds: identity.versions }),
+              );
+
+              if (mark?.revision !== each.revision) return markChanged;
+
+              events.push({
+                account: owner.key,
+                event: {
+                  type: "episode-mark-undone",
+                  series: mark.series,
+                  title: mark.title,
+                  revision: mark.revision,
+                },
+              });
+            }
+
+            return events;
+          },
+        );
       });
 
     return {
@@ -969,31 +1350,86 @@ function make() {
           return stored ? markOf(stored) : null;
         }),
       undoMark: (commandId: string, series: OwnedId, revision: number) =>
+        undoMarks(commandId, [{ kind: "series", title: series, revision }]),
+      undoMarks,
+      markTitles: (commandId: string, scope: MarkScope, watched: boolean) =>
+        scope.kind === "film"
+          ? markFilm(commandId, scope.versions, watched)
+          : markEpisodes(
+              commandId,
+              scope.series,
+              scope.kind === "season" ? scope.season : null,
+              watched,
+            ),
+      filmMarks: (movies: readonly OwnedId[]) =>
         Effect.gen(function* () {
-          const { keys, versions } = yield* listed.identity(series);
-          yield* run(commandId, [series], (_found, [owner], look) => {
-            if (!owner) return noSubscription;
+          const named = new Set(movies.map((each) => each.subscriptionId));
+          const owners = (yield* account.owners).filter((owner) => named.has(owner.subscriptionId));
 
-            const mark = undoable(
-              look.marks(owner.key, keys),
-              look.titles(owner.key, { seriesIds: versions }),
+          const marks = yield* Effect.forEach(owners, (owner) =>
+            Effect.gen(function* () {
+              const ids = rawFilter({ movies }, owner).movieIds ?? [];
+              const rows = yield* store.titles(owner.key, { movieIds: ids });
+              const kept = yield* store.films(owner.key, ids);
+
+              return kept.flatMap((mark) =>
+                stands(
+                  mark,
+                  rows.find((row) => row.title.id === mark.title.id),
+                )
+                  ? [filmMarkOf(owner, mark)]
+                  : [],
+              );
+            }),
+          );
+
+          return marks.flat();
+        }),
+      history: Effect.gen(function* () {
+        const owners = yield* account.owners;
+
+        const entries = yield* Effect.forEach(owners, (owner) =>
+          Effect.gen(function* () {
+            const entries = historyOf(owner, yield* store.history(owner.key));
+
+            const series = entries.flatMap((entry) =>
+              entry.kind === "series" ? [entry.series] : [],
             );
 
-            if (mark?.revision !== revision) return markChanged;
+            const identities =
+              series.length === 0
+                ? []
+                : yield* listed.identities
+                    ? listed.identities(series)
+                    : Effect.forEach(series, listed.identity);
 
-            return [
-              {
-                account: owner.key,
-                event: {
-                  type: "episode-mark-undone",
-                  series: mark.series,
-                  title: mark.title,
-                  revision,
-                },
-              },
-            ];
-          });
-        }),
+            const byVersion = new Map(
+              series.map((each, index) => [ownedKey(each), identities[index]]),
+            );
+
+            return yield* Effect.forEach(entries, (entry) =>
+              Effect.gen(function* () {
+                if (entry.kind === "movie") return entry;
+                const identity = byVersion.get(ownedKey(entry.series));
+
+                if (!identity)
+                  return yield* new Failed({
+                    error: {
+                      kind: "unexpected",
+                      detail: "Missing series identity.",
+                    },
+                  });
+                const played = yield* store.titles(owner.key, { seriesIds: identity.versions });
+                const kept = yield* store.marks(owner.key, identity.keys);
+
+                return { ...entry, undoable: undoable(kept, played)?.revision ?? null };
+              }),
+            );
+          }),
+        );
+
+        return entries.flat().toSorted((a, b) => b.at - a.at);
+      }),
       relist: (commandId: string, series: OwnedId, seasons: SeriesSeasons) =>
         Effect.gen(function* () {
           const listing = listingOf(seasons);

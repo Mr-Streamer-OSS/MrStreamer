@@ -3,10 +3,10 @@
 // desktop's tables (./project.ts) and reads the same way, so the record service (./service.ts)
 // answers alike over either.
 //
-// It keeps the state the events add up to, not the events: a phone records a checkpoint a minute
-// while a title plays, and a file of every one would grow without end. So nothing here is rebuilt
-// when the rules change (STATE_VERSION); the rows and marks stay as they were committed. Command
-// ids are kept for the latest commands only, enough for a command sent again to change nothing.
+// It keeps state and recent command receipts, rather than an unbounded event log: a phone
+// records a checkpoint a minute while a title plays. Rows and marks stay as committed rather
+// than rebuilding from events. Recent command ids prevent duplicate writes; only mark commands
+// retain events to recover their original changed count and Undo receipt.
 import { CONTINUE_OFFERED } from "@mrstreamer/contracts/viewing";
 import * as Effect from "effect/Effect";
 import { Failed, failedWith } from "../failure.ts";
@@ -16,10 +16,12 @@ import {
   apply,
   emptyState,
   isMarkEvent,
+  isMarkReceiptEvent,
   isTitleEvent,
   type AccountEvent,
   type ChannelEvent,
   type StoredChannel,
+  type StoredFilmMark,
   type ViewingState,
 } from "./record.ts";
 import type { RawTitleFilter, StoredLook, StoredViewing, ViewingStore } from "./service.ts";
@@ -37,6 +39,8 @@ export type AccountSnapshot = {
   readonly rows: readonly TitleRow[];
   readonly removals: Readonly<Record<string, number>>;
   readonly series: Readonly<Record<string, SeriesMarks>>;
+  /** Each marked movie's mark, by the provider's id. Missing in snapshots from before them. */
+  readonly films?: Readonly<Record<string, StoredFilmMark>>;
 };
 
 /** Everything the store holds, as JSON. */
@@ -46,6 +50,9 @@ export type ViewingSnapshot = {
   readonly sequence: number;
   /** The latest commands done, oldest first. */
   readonly receipts: readonly string[];
+  readonly receiptEvents?: Readonly<
+    Record<string, readonly (AccountEvent & { readonly sequence: number })[]>
+  >;
   readonly imported: boolean;
   readonly accounts: Readonly<Record<string, AccountSnapshot>>;
 };
@@ -74,6 +81,7 @@ function accountOf(saved: AccountSnapshot): Account {
     rows: new Map(saved.rows.map((row) => [titleKeyOf(row), row])),
     removals: new Map(Object.entries(saved.removals)),
     series: new Map(Object.entries(saved.series)),
+    films: new Map(Object.entries(saved.films ?? {})),
     state: saved.state,
     sequence: saved.sequence,
     placed: {
@@ -103,12 +111,19 @@ export function memoryViewingStore(deps: {
 
   let accounts = new Map<string, Account>();
   let receipts = new Set<string>();
+  let receiptEvents: NonNullable<ViewingSnapshot["receiptEvents"]> = {};
   let sequence = 0;
   let imported = false;
 
   const load = (from: ViewingSnapshot) => {
     accounts = new Map(Object.entries(from.accounts).map(([key, each]) => [key, accountOf(each)]));
     receipts = new Set(from.receipts);
+    receiptEvents = Object.fromEntries(
+      Object.entries(from.receiptEvents ?? {}).map(([id, events]) => [
+        id,
+        events.filter(({ event }) => isMarkReceiptEvent(event)),
+      ]),
+    );
     sequence = from.sequence;
     imported = from.imported;
   };
@@ -119,6 +134,9 @@ export function memoryViewingStore(deps: {
     version: 1,
     sequence,
     receipts: [...receipts].slice(-RECEIPTS),
+    receiptEvents: Object.fromEntries(
+      [...receipts].slice(-RECEIPTS).map((id) => [id, receiptEvents[id] ?? []]),
+    ),
     imported,
     accounts: Object.fromEntries(
       [...accounts].map(([key, each]) => [
@@ -133,6 +151,7 @@ export function memoryViewingStore(deps: {
           rows: [...each.rows.values()],
           removals: Object.fromEntries(each.removals),
           series: Object.fromEntries(each.series),
+          films: Object.fromEntries(each.films),
         },
       ]),
     ),
@@ -146,6 +165,7 @@ export function memoryViewingStore(deps: {
       deps.save(next);
       saved = next;
       receipts = new Set(next.receipts);
+      receiptEvents = next.receiptEvents ?? {};
 
       return result;
     } catch (cause) {
@@ -177,9 +197,16 @@ export function memoryViewingStore(deps: {
     return held ? keys.flatMap((key) => held.series.get(key) ?? []) : [];
   };
 
+  const filmsOf = (account: string, movieIds: readonly string[]): StoredFilmMark[] => {
+    const held = accounts.get(account);
+
+    return held ? movieIds.flatMap((id) => held.films.get(id) ?? []) : [];
+  };
+
   const look: StoredLook = {
     titles: titlesOf,
     marks: marksOf,
+    films: filmsOf,
     marksIn: (account, seriesIds) => {
       const held = accounts.get(account);
 
@@ -225,7 +252,7 @@ export function memoryViewingStore(deps: {
     return {
       account,
       held,
-      continueWatching: continueWatching(rows),
+      continueWatching: continueWatching(rows, (id) => held.films.get(id)?.at ?? null),
       recentTitles: rows
         .filter((row) => !row.hidden && (row.finished || row.position >= STARTED_SECONDS))
         .slice(0, 32)
@@ -313,19 +340,52 @@ export function memoryViewingStore(deps: {
     titles: (account, filter) => attempt(() => titlesOf(account, filter)),
     marks: (account, keys) => attempt(() => marksOf(account, keys)),
     marksIn: (account, seriesIds) => attempt(() => look.marksIn(account, seriesIds)),
+    films: (account, movieIds) => attempt(() => filmsOf(account, movieIds)),
+    history: (account) =>
+      attempt(() => {
+        const held = accounts.get(account) ?? fresh();
+        const latest = new Map<string, RawProgress>();
+
+        for (const row of held.rows.values()) {
+          const key =
+            row.title.kind === "movie" ? `movie:${row.title.id}` : `series:${row.title.seriesId}`;
+
+          const kept = latest.get(key);
+
+          if (!kept || row.at >= kept.at) latest.set(key, strip(row));
+        }
+
+        return {
+          rows: [...latest.values()],
+          films: [...held.films.values()],
+          series: [...held.series.values()].flatMap((state) => leading(state) ?? []),
+        };
+      }),
     commit: ({ accounts: wanted, commandId, at, decide }) =>
       attempt(() => {
-        if (receipts.has(commandId)) return read(wanted);
+        if (receipts.has(commandId))
+          return { ...read(wanted), recorded: receiptEvents[commandId] ?? [] };
         const events = decide(read(wanted), look);
 
         // Thrown, so the transaction stores nothing, the command's id neither.
         if (events instanceof Failed) throw events;
+        const first = sequence + 1;
+
         transaction(() => {
           receipts.add(commandId);
+          receiptEvents = {
+            ...receiptEvents,
+            [commandId]: events.flatMap((event, index) =>
+              isMarkReceiptEvent(event.event) ? [{ ...event, sequence: first + index }] : [],
+            ),
+          };
           append(at, events);
         });
 
-        return read(wanted);
+        return {
+          ...read(wanted),
+          recorded: receiptEvents[commandId] ?? [],
+        };
       }),
     importOnce: ({ account, at, events }) =>
       attempt(() => {
@@ -344,7 +404,15 @@ export function memoryViewingStore(deps: {
       }),
     erase: (account) =>
       attempt(() => {
-        transaction(() => accounts.delete(account));
+        transaction(() => {
+          accounts.delete(account);
+          receiptEvents = Object.fromEntries(
+            Object.entries(receiptEvents).map(([id, events]) => [
+              id,
+              events.filter((event) => event.account !== account),
+            ]),
+          );
+        });
       }),
   };
 }

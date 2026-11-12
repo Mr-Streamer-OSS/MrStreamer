@@ -3,6 +3,13 @@
 // it or quits, and what it captured stays until the viewer deletes it, whatever room it takes. An
 // ended recording plays from this computer as a downloaded copy does, kept where it got to.
 //
+// Nothing else deletes a recording unless the viewer turns on retention for the rule that made it
+// (`retain`, after `previewRetention`): its newest few, or those of the last days, stay, and the
+// rest go as checks find them, the rule's recordings made before it was turned on only when the
+// viewer took them in. Retention keeps one the viewer protected (`protect`, which Delete refuses
+// too), one handed to playback since the app started, and one whose end isn't written down yet,
+// checked again just before each deletion. One it couldn't delete is listed so and tried again.
+//
 // Its time is what it owes: when capture stops early for the stream, the disk, the room the viewer
 // gave recordings, the computer's sleep, a crash or the system shutting down, the recording pauses
 // with a gap from then, and goes on with the rest of its time, appended to its file, once the app
@@ -56,10 +63,13 @@ import type {
   RecordingGapReason,
   RecordingLimits,
   RecordingPlan,
+  RecordingRetention,
   RecordingRule,
   RecordingRulePlan,
   RecordingRulePreview,
   RecordingStart,
+  RetentionHold,
+  RetentionPreview,
   RecordingStorage,
   ScheduledRecording,
   ScheduleMiss,
@@ -74,11 +84,13 @@ import {
 import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
+import { DAY_MS } from "@mrstreamer/core/catchup";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { t, type PlainKey } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
@@ -132,7 +144,7 @@ const CHECK_MS = 60_000;
 const RETRY_MS = 10_000;
 
 /** How far back a long absence writes missed results. */
-const MISSED_KEPT_MS = 7 * 24 * 60 * 60_000;
+const MISSED_KEPT_MS = 7 * DAY_MS;
 
 /** A schedule that starts within this of its time started on time. */
 const ON_TIME_MS = 60_000;
@@ -230,9 +242,14 @@ export class Recordings extends Context.Service<
     stop(id: string): Effect.Effect<void, Failed>;
     /**
      * Deletes an ended recording, its file and the subtitles kept for it, closing what plays it
-     * first.
+     * first. Refuses one that records, or that the viewer protected.
      */
     remove(id: string): Effect.Effect<void, Failed>;
+    /**
+     * Protects a recording, also one that records, from deletion: by its rule's retention, by
+     * Delete and by Remove; with `on` false, takes protection off. Kept in recordings.json.
+     */
+    protect(id: string, on: boolean): Effect.Effect<void, Failed>;
     /**
      * A subscription is going: its recordings stop as the viewer stops one, their requests over
      * before this answers. What they captured stays.
@@ -293,6 +310,26 @@ export class Recordings extends Context.Service<
     previewRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRulePreview, Failed>;
     saveRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRule, Failed>;
     cancelRule(id: string): Effect.Effect<void, Failed>;
+    /**
+     * What `retention` would delete now of rule `id`'s recordings, deleting nothing: with
+     * `existing`, also those made before it is turned on.
+     */
+    previewRetention(
+      id: string,
+      retention: RecordingRetention,
+      existing: boolean,
+    ): Effect.Effect<RetentionPreview, Failed>;
+    /**
+     * Turns rule `id`'s retention on or changes it, then deletes what it lets go now; null turns
+     * it off. `existing` is as for `previewRetention`. Refuses, saving nothing, when it would
+     * delete one `seen` doesn't list, as the preview the viewer saw.
+     */
+    retain(
+      id: string,
+      retention: RecordingRetention | null,
+      existing?: boolean,
+      seen?: readonly string[],
+    ): Effect.Effect<RecordingRule, Failed>;
     /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
     readonly schedules: Effect.Effect<readonly ScheduledRecording[], Failed>;
     /**
@@ -419,7 +456,12 @@ function make(deps: RecordingsDeps) {
     const changes = yield* PubSub.sliding<readonly Recording[]>(4);
     /** Asks the schedules to be checked: a recording started or ended, or the lists changed. */
     const wakes = yield* Queue.sliding<void>(1);
-    const wake = Effect.asVoid(Queue.offer(wakes, undefined));
+    const retentionWakes = yield* Queue.sliding<void>(1);
+
+    const wake = Effect.asVoid(
+      Effect.andThen(Queue.offer(wakes, undefined), Queue.offer(retentionWakes, undefined)),
+    );
+
     /** One write of recordings.json at a time, each with every record as it is then. */
     const writing = (yield* Semaphore.make(1)).withPermits(1);
 
@@ -630,6 +672,28 @@ function make(deps: RecordingsDeps) {
     /** What a check, or a recording's end, couldn't write, for the next check to write again. */
     const unsaved = { recordings: failedFolders.size > 0, schedules: false };
 
+    // Protection and retention. Each save writes `protected` from this set rather than from the
+    // record, so no flow that replaces a record from an older copy of it loses its protection. Any
+    // `protected` kept at all counts, so a mangled one still protects.
+    const protection = new Set(
+      (read.kind === "read" ? read.items : []).flatMap((each) =>
+        "protected" in each ? [each.id] : [],
+      ),
+    );
+
+    /**
+     * Recordings handed to playback since the app started (see `copy`): retention keeps them,
+     * as nothing here hears when a player closes.
+     */
+    const played = new Set<string>();
+    /** Recordings retention is deleting now: playback refuses them meanwhile. */
+    const removing = new Set<string>();
+
+    /** Recordings retention couldn't delete, for the list to say so until a deletion works. */
+    const retentionFailures = new Set(
+      [...records.values()].flatMap((each) => (each.retentionDeleting ? [each.id] : [])),
+    );
+
     /**
      * Drops a failed start's record (see FAILED) whose mark couldn't be read as the app started,
      * for the next write to take out, with its folder.
@@ -653,33 +717,36 @@ function make(deps: RecordingsDeps) {
     /** How many times in a row each recording's capture ended quickly, by id. */
     const quickEnds = new Map<string, number>();
 
-    const save = writing(
-      Effect.tryPromise({
-        try: async () => {
-          // One not read yet (see unseen) is kept as it was, its gap not guessed.
-          const kept = [
-            ...[...records.values()].map((record) =>
-              isLive(record) ? (unseen.get(record.id) ?? record) : record,
-            ),
-            ...beginning.values(),
-          ];
+    const saveInventory = Effect.tryPromise({
+      try: async () => {
+        // One not read yet (see unseen) is kept as it was, its gap not guessed.
+        const kept = [
+          ...[...records.values()].map((record) =>
+            isLive(record) ? (unseen.get(record.id) ?? record) : record,
+          ),
+          ...beginning.values(),
+        ];
 
-          await writeRecordings(path, kept);
-          // Failed starts it no longer lists lose their marked folders.
-          const listed = new Set(kept.map(({ id }) => id));
+        await writeRecordings(
+          path,
+          kept.map(({ protected: _protected, retentionFailed: _failed, ...record }) =>
+            protection.has(record.id) ? { ...record, protected: true as const } : record,
+          ),
+        );
+        // Failed starts it no longer lists lose their marked folders.
+        const listed = new Set(kept.map(({ id }) => id));
 
-          for (const [id, folder] of failedFolders) {
-            if (listed.has(id)) continue;
-            failedFolders.delete(id);
-            void rm(folder, { recursive: true, force: true }).catch(() => {});
-          }
-        },
-        catch: () =>
-          new Failed({
-            error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
-          }),
-      }),
-    ).pipe(
+        for (const [id, folder] of failedFolders) {
+          if (listed.has(id)) continue;
+          failedFolders.delete(id);
+          void rm(folder, { recursive: true, force: true }).catch(() => {});
+        }
+      },
+      catch: () =>
+        new Failed({
+          error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
+        }),
+    }).pipe(
       // Every record is written each time: what couldn't be kept before is now.
       Effect.tap(() =>
         Effect.sync(() => {
@@ -689,6 +756,8 @@ function make(deps: RecordingsDeps) {
         }),
       ),
     );
+
+    const save = writing(saveInventory);
 
     /**
      * Saves how the recordings `ended` ended, leaving what couldn't be written for the next check
@@ -780,10 +849,19 @@ function make(deps: RecordingsDeps) {
             mark: _mark,
             variants: _variants,
             progress: _progress,
+            protected: _protected,
+            retentionFailed: _failed,
+            retentionDeleting: _deleting,
             ...rest
           } = record;
 
-          const marked = unsavedEnds.has(record.id) ? { ...rest, unsaved: true } : rest;
+          const marked: Recording = {
+            ...rest,
+            ...(unsavedEnds.has(record.id) && { unsaved: true }),
+            ...(protection.has(record.id) && { protected: true }),
+            ...(retentionFailures.has(record.id) && { retentionFailed: true }),
+          };
+
           const capturing = active.get(record.id);
 
           if (capturing) return { ...marked, bytes: capturing.bytes() };
@@ -1575,6 +1653,14 @@ function make(deps: RecordingsDeps) {
 
     const ruleErrors = new Map<string, string>();
     const blockedRules = new Set<string>();
+
+    /** A rule as the window sees it, with its last check's failure. */
+    const ruleView = ({ id, plan, retention }: KeptRule): RecordingRule => ({
+      id,
+      plan,
+      ...(retention && { retention }),
+      ...(ruleErrors.has(id) && { error: ruleErrors.get(id)! }),
+    });
 
     const findRuleMatches = (plan: RecordingRulePlan, status: readonly GuideStatus[]) =>
       Effect.gen(function* () {
@@ -2675,6 +2761,239 @@ function make(deps: RecordingsDeps) {
       );
     });
 
+    // Deleting recordings: Delete, and the retention a viewer turns on for a rule.
+
+    /** One deletion, or change of protection, at a time, each checking what holds it just then. */
+    const retaining = (yield* Semaphore.make(1)).withPermits(1);
+
+    /** A schedule's time `record` recorded stays settled without it, so it never records again. */
+    const settleRecorded = (record: StoredRecording) =>
+      Effect.gen(function* () {
+        const { scheduled } = record;
+
+        if (!scheduled) return;
+        yield* scheduling(settleRuleSchedule(scheduled.schedule));
+        yield* scheduling(
+          Effect.suspend(() => {
+            const schedule = schedules.get(scheduled.schedule);
+
+            if (!schedule) return Effect.void;
+
+            // That time as the plan has it now, as a guide that ran later moved its end.
+            const through = Math.max(
+              record.stop,
+              ...occurrences(schedule.plan, scheduled.from, scheduled.from + 1)
+                .filter((each) => each.start === scheduled.from)
+                .map((each) => each.stop),
+            );
+
+            return schedule.through < through
+              ? keep(schedule.id, { ...schedule, through })
+              : Effect.void;
+          }),
+        );
+      });
+
+    /**
+     * Deletes an ended recording's folder, then its record. The file goes first: one that stays,
+     * as one Windows holds open, keeps its record to delete again, and a record whose file went
+     * lists it as missing until it is deleted. Retention writes its intent first, so a failed
+     * metadata write or restart retries completion. Its room counts as free only once it went.
+     */
+    const deleteRecord = (record: StoredRecording) =>
+      Effect.gen(function* () {
+        const { id } = record;
+        yield* Effect.tryPromise({
+          try: () => rm(folderOf(record), { recursive: true, force: true }),
+          catch: () =>
+            new Failed({
+              error: { kind: "unexpected", detail: t("The recording couldn't be deleted.") },
+            }),
+        });
+        records.delete(id);
+        recordingFiles.delete(id);
+        const written = yield* Effect.result(save);
+
+        if (written._tag === "Failure") {
+          records.set(id, record);
+          missing.add(id);
+          yield* publish;
+
+          return yield* written.failure;
+        }
+
+        missing.delete(id);
+        protection.delete(id);
+        played.delete(id);
+        retentionFailures.delete(id);
+        yield* publish;
+        // What was saved for its subtitles goes with it, as a copy's does.
+        yield* Effect.ignore(savedSubtitles.forget(subtitlesOfCopy(id, { kind: "movie", id })));
+        // Room it took may let a paused one go on.
+        yield* retryPaused;
+      });
+
+    const holdOf = (id: string): RetentionHold | null =>
+      protection.has(id)
+        ? "protected"
+        : played.has(id)
+          ? "played"
+          : unsavedEnds.has(id)
+            ? "unsaved"
+            : null;
+
+    /**
+     * What `retention` lets go now of rule `rule`'s ended recordings that started at or after
+     * `from`, with files as last looked for (`look`), oldest first; what it holds of those; and
+     * when the next of the rest goes by age, Infinity for none.
+     */
+    const retentionOf = (rule: string, retention: RecordingRetention, from: number) => {
+      const now = Date.now();
+
+      const covered = [...records.values()]
+        .filter(
+          (each) =>
+            each.scheduled?.rule === rule &&
+            each.start >= from &&
+            !isLive(each) &&
+            each.status.kind !== "missed" &&
+            !missing.has(each.id),
+        )
+        .toSorted((a, b) => b.start - a.start);
+
+      const until = (each: StoredRecording) =>
+        (each.ended ?? each.stop) + (retention.kind === "days" ? retention.days * DAY_MS : 0);
+
+      const going = (
+        retention.kind === "count"
+          ? covered.slice(retention.count)
+          : covered.filter((each) => until(each) <= now)
+      ).toReversed();
+
+      return {
+        remove: going.filter((each) => holdOf(each.id) === null),
+        held: going.flatMap((each) => {
+          const why = holdOf(each.id);
+
+          return why ? [{ id: each.id, why }] : [];
+        }),
+        next:
+          retention.kind === "days"
+            ? Math.min(...covered.flatMap((each) => (until(each) > now ? [until(each)] : [])))
+            : Infinity,
+      };
+    };
+
+    /**
+     * Where a rule's retention starts, turned on or changed: with `existing`, from the first
+     * recording; else from where it started before, or now for one that took none in before.
+     */
+    const retentionFrom = (rule: KeptRule, existing: boolean) =>
+      existing ? 0 : rule.retention?.from || Date.now();
+
+    /**
+     * Deletes `record` for its rule's retention, unless something holds it as checked again just
+     * before its files go; one that couldn't be deleted is listed so, for the next check to try
+     * again.
+     */
+    const retire = (record: StoredRecording) =>
+      Effect.gen(function* () {
+        yield* settleRecorded(record);
+
+        // In one step with the check, so playback refuses it from here (see `copy`).
+        const claimed = yield* Effect.sync(() => {
+          if (records.get(record.id) !== record || holdOf(record.id) !== null) return false;
+          removing.add(record.id);
+
+          return true;
+        });
+
+        if (claimed)
+          yield* Effect.gen(function* () {
+            let pending = record;
+
+            if (!record.retentionDeleting) {
+              pending = { ...record, retentionDeleting: true };
+              records.set(record.id, pending);
+              const written = yield* Effect.result(save);
+
+              if (written._tag === "Failure") {
+                records.set(record.id, record);
+
+                return yield* written.failure;
+              }
+            }
+
+            yield* deleteRecord(pending);
+          }).pipe(
+            // Keep the claim until the durable intent and filesystem work settle, even during quit.
+            Effect.uninterruptible,
+            Effect.ensuring(Effect.sync(() => removing.delete(record.id))),
+          );
+      }).pipe(
+        Effect.catch(() =>
+          Effect.andThen(
+            Effect.sync(() => retentionFailures.add(record.id)),
+            publish,
+          ),
+        ),
+      );
+
+    /**
+     * Deletes what each rule's retention lets go now, answering when the next goes by age, or soon
+     * while a deletion failed; null for neither. Unreadable ledgers prevent new selection;
+     * already saved deletion intents can finish.
+     */
+    const retainNow = (approved?: { rule: string; seen: readonly string[] }) =>
+      Effect.gen(function* () {
+        /** What this pass tried to delete: a failure of any other is no longer due. */
+        const tried = new Set<string>();
+
+        const retained = (read.kind === "read" ? (rules ?? []) : []).flatMap(({ id, retention }) =>
+          retention && (!approved || approved.rule === id) ? [{ id, retention }] : [],
+        );
+
+        let next = Infinity;
+
+        // A saved deletion intent owns completion even if the rule was subsequently turned off.
+        // Retry independently of missing files: the folder may already have gone before save failed.
+        const pending = [...records.values()].filter((each) => each.retentionDeleting);
+
+        for (const record of pending) {
+          if (holdOf(record.id) !== null) continue;
+          tried.add(record.id);
+          yield* retire(record);
+        }
+
+        if (retained.length > 0) yield* look;
+
+        for (const { id, retention } of retained) {
+          const found = retentionOf(id, retention, retention.from);
+
+          for (const record of found.remove) {
+            if (tried.has(record.id) || (approved && !approved.seen.includes(record.id))) continue;
+            tried.add(record.id);
+            yield* retire(record);
+          }
+
+          next = Math.min(next, found.next);
+        }
+
+        // One no longer due, as one protected since, stops saying it failed.
+        const settled = [...retentionFailures].filter(
+          (id) =>
+            !tried.has(id) && (!approved || records.get(id)?.scheduled?.rule === approved.rule),
+        );
+
+        for (const id of settled) retentionFailures.delete(id);
+
+        if (settled.length > 0) yield* publish;
+
+        if (retentionFailures.size > 0) next = Math.min(next, Date.now() + CHECK_MS);
+
+        return Number.isFinite(next) ? next : null;
+      });
+
     const checkOnce = scheduling(checkNow).pipe(
       Effect.catchDefect((defect) =>
         Effect.andThen(
@@ -2693,6 +3012,35 @@ function make(deps: RecordingsDeps) {
             : Effect.raceFirst(Effect.sleep(Math.max(0, next - Date.now())), Queue.take(wakes));
         }
       }),
+    );
+
+    const retentionWorker = yield* Effect.forkDetach(
+      Effect.gen(function* () {
+        for (;;) {
+          const next = yield* retaining(retainNow()).pipe(
+            Effect.catchDefect((defect) =>
+              Effect.andThen(
+                Effect.logWarning("[recordings] retention failed", defect),
+                Effect.sync(() => Date.now() + CHECK_MS),
+              ),
+            ),
+          );
+
+          yield* next === null
+            ? Queue.take(retentionWakes)
+            : Effect.raceFirst(
+                Effect.sleep(Math.max(0, next - Date.now())),
+                Queue.take(retentionWakes),
+              );
+        }
+      }),
+    );
+
+    // Request cancellation without joining stalled filesystem work. The worker keeps its
+    // deletion claim and permit until the in-flight removal settles; its durable intent
+    // recovers completion if the process exits first. Cancellation stops further selection.
+    yield* Effect.addFinalizer(() =>
+      Effect.asVoid(Effect.forkDetach(Fiber.interrupt(retentionWorker))),
     );
     // The lists may list a schedule's channel anew or no longer, and the guide another programme
     // at its start.
@@ -3114,79 +3462,109 @@ function make(deps: RecordingsDeps) {
           ),
         ),
       remove: (id: string) =>
-        Effect.gen(function* () {
-          yield* usable;
-          const record = records.get(id);
+        retaining(
+          Effect.gen(function* () {
+            yield* usable;
+            const record = records.get(id);
 
-          if (!record) return;
+            if (!record) return;
 
-          if (isLive(record))
-            return yield* new Failed({
-              error: { kind: "unexpected", detail: t("Stop the recording before deleting it.") },
-            });
-          // A schedule's time it recorded stays settled without it, so it never records again.
-          const { scheduled } = record;
+            if (isLive(record))
+              return yield* new Failed({
+                error: { kind: "unexpected", detail: t("Stop the recording before deleting it.") },
+              });
 
-          if (scheduled) yield* scheduling(settleRuleSchedule(scheduled.schedule));
-
-          if (scheduled)
-            yield* scheduling(
-              Effect.suspend(() => {
-                const schedule = schedules.get(scheduled.schedule);
-
-                if (!schedule) return Effect.void;
-
-                // That time as the plan has it now, as a guide that ran later moved its end.
-                const through = Math.max(
-                  record.stop,
-                  ...occurrences(schedule.plan, scheduled.from, scheduled.from + 1)
-                    .filter((each) => each.start === scheduled.from)
-                    .map((each) => each.stop),
-                );
-
-                return schedule.through < through
-                  ? keep(schedule.id, { ...schedule, through })
-                  : Effect.void;
-              }),
-            );
-          yield* playback.closeCopy(id);
-          // The file goes first: one that stays, as one Windows holds open, keeps its record to
-          // delete again, and a record whose file went lists it as missing until it is deleted.
-          yield* Effect.tryPromise({
-            try: () => rm(folderOf(record), { recursive: true, force: true }),
-            catch: () =>
-              new Failed({
+            if (protection.has(id))
+              return yield* new Failed({
                 error: {
                   kind: "unexpected",
-                  detail: t("The recording couldn't be deleted."),
+                  detail: t("Take protection off before deleting it."),
                 },
-              }),
-          });
-          records.delete(id);
-          recordingFiles.delete(id);
-          const written = yield* Effect.result(save);
+              });
+            yield* settleRecorded(record);
+            yield* playback.closeCopy(id);
+            yield* deleteRecord(record);
+          }),
+        ),
+      protect: (id: string, on: boolean) =>
+        retaining(
+          Effect.gen(function* () {
+            yield* usable;
+            const record = records.get(id);
 
-          if (written._tag === "Failure") {
-            records.set(id, record);
-            missing.add(id);
+            if (!record)
+              return yield* new Failed({
+                error: { kind: "unexpected", detail: t("This recording is no longer there.") },
+              });
+
+            if (record.status.kind === "missed")
+              return yield* new Failed({
+                error: {
+                  kind: "unexpected",
+                  detail: t("A missed recording has no copy to protect."),
+                },
+              });
+
+            if (protection.has(id) === on) return;
+
+            const intact =
+              on && record.retentionDeleting
+                ? yield* Effect.promise(() =>
+                    stat(fileOf(record)).then(
+                      () => true,
+                      () => false,
+                    ),
+                  )
+                : false;
+
+            // Tentative protection and intent changes belong to the same write transaction:
+            // no queued save may persist them before this operation commits or rolls back.
+            yield* writing(
+              Effect.gen(function* () {
+                if (on) protection.add(id);
+                else protection.delete(id);
+                let changed: typeof record | undefined;
+
+                if (on && record.retentionDeleting && intact && records.get(id) === record) {
+                  const { retentionDeleting: _deleting, ...kept } = record;
+                  changed = kept;
+                  records.set(id, kept);
+                }
+
+                const written = yield* Effect.result(saveInventory);
+
+                if (written._tag === "Failure") {
+                  if (on) protection.delete(id);
+                  else protection.add(id);
+
+                  if (changed && records.get(id) === changed) records.set(id, record);
+
+                  return yield* written.failure;
+                }
+              }).pipe(Effect.uninterruptible),
+            );
+
+            if (on) retentionFailures.delete(id);
             yield* publish;
-
-            return yield* written.failure;
-          }
-
-          missing.delete(id);
-          yield* publish;
-          // What was saved for its subtitles goes with it, as a copy's does.
-          yield* Effect.ignore(savedSubtitles.forget(subtitlesOfCopy(id, { kind: "movie", id })));
-          // Room it took may let a paused one go on.
-          yield* retryPaused;
-        }),
+            yield* wake;
+          }),
+        ),
       copy: (id: string, captured?: ActiveProfile) =>
         Effect.gen(function* () {
           const owner = captured ? personal.of(captured) : yield* personal.admit;
           const record = records.get(id);
 
           if (!record || record.status.kind === "missed") return null;
+
+          // With retention's own check in one step each (see `retire`): either it deletes this one
+          // first and playback refuses it, or retention keeps it.
+          if (removing.has(id))
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: t("This recording is no longer there.") },
+            });
+          played.add(id);
+
+          if (retentionFailures.delete(id)) yield* publish;
 
           // Its file may have gone since the list was read: the list says so at once.
           const there = yield* Effect.promise(() =>
@@ -3403,13 +3781,7 @@ function make(deps: RecordingsDeps) {
       rules: scheduling(
         Effect.andThen(
           rulesUsable,
-          Effect.sync(() =>
-            (rules ?? []).map(({ id, plan }) => ({
-              id,
-              plan,
-              ...(ruleErrors.has(id) && { error: ruleErrors.get(id)! }),
-            })),
-          ),
+          Effect.sync(() => (rules ?? []).map(ruleView)),
         ),
       ),
       previewRule: (plan: RecordingRulePlan, id?: string) =>
@@ -3435,6 +3807,7 @@ function make(deps: RecordingsDeps) {
                   priority: plan.priority ?? RECORDING_PRIORITY_DEFAULT,
                 },
                 occurrences: was?.occurrences ?? [],
+                ...(was?.retention && { retention: was.retention }),
               };
 
               yield* persistRules(
@@ -3443,23 +3816,90 @@ function make(deps: RecordingsDeps) {
                   : [...(rules ?? []), rule],
               );
 
-              return { id: rule.id, plan: rule.plan };
+              return ruleView(rule);
             }),
           ),
           () => wake,
         ),
       cancelRule: (id: string) =>
         Effect.tap(
-          scheduling(
-            Effect.gen(function* () {
-              yield* rulesUsable;
-              const rule = rules?.find((each) => each.id === id);
-              yield* persistRules((rules ?? []).filter((each) => each.id !== id));
+          retaining(
+            scheduling(
+              Effect.gen(function* () {
+                yield* rulesUsable;
+                const rule = rules?.find((each) => each.id === id);
+                yield* persistRules((rules ?? []).filter((each) => each.id !== id));
 
-              for (const each of rule?.occurrences ?? []) schedules.delete(each.id);
-            }),
+                for (const each of rule?.occurrences ?? []) schedules.delete(each.id);
+              }),
+            ),
           ),
           () => wake,
+        ),
+      previewRetention: (id: string, retention: RecordingRetention, existing: boolean) =>
+        retaining(
+          Effect.gen(function* () {
+            yield* usable;
+            yield* rulesUsable;
+            const rule = rules?.find((each) => each.id === id);
+
+            if (!rule) return yield* ruleFailure("This recording rule is no longer there.");
+            yield* look;
+            const { remove, held } = retentionOf(id, retention, retentionFrom(rule, existing));
+
+            return {
+              remove: remove.map((each) => each.id),
+              bytes: remove.reduce((sum, each) => sum + each.bytes, 0),
+              held,
+            } satisfies RetentionPreview;
+          }),
+        ),
+      retain: (
+        id: string,
+        retention: RecordingRetention | null,
+        existing = false,
+        seen: readonly string[] = [],
+      ) =>
+        retaining(
+          Effect.gen(function* () {
+            yield* usable;
+            yield* look;
+
+            const rule = yield* scheduling(
+              Effect.gen(function* () {
+                yield* rulesUsable;
+                const was = rules?.find((each) => each.id === id);
+
+                if (!rules || !was)
+                  return yield* ruleFailure("This recording rule is no longer there.");
+                const { retention: _was, ...rest } = was;
+
+                const next: KeptRule = retention
+                  ? {
+                      ...rest,
+                      retention: { ...retention, from: retentionFrom(was, existing) },
+                    }
+                  : rest;
+
+                // Never more than the viewer saw: a preview since outgrown is asked for again.
+                if (
+                  next.retention &&
+                  retentionOf(id, next.retention, next.retention.from).remove.some(
+                    (each) => !seen.includes(each.id),
+                  )
+                )
+                  return yield* ruleFailure("The recordings to delete changed. Preview again.");
+
+                yield* persistRules(rules.map((each) => (each.id === id ? next : each)));
+
+                return next;
+              }),
+            );
+
+            yield* retainNow({ rule: id, seen });
+
+            return ruleView(rule);
+          }),
         ),
       schedules: scheduling(
         Effect.andThen(

@@ -1,28 +1,30 @@
 // A movie's or series' details, in a sheet over the page it was opened from, which stays in view
-// behind it: the facts, the actions, the story, the cast with their photos, and a series'
-// episodes. Resume is the main action for anything partly watched, and From the beginning plays
-// at once, without asking. Save puts the movie or the whole series on the watchlist and takes it
-// off again; it goes by the title in the lists, so it works before the details arrive. Beside it,
-// the collections menu puts the version that plays in the viewer's collections and takes it out
-// (see features/collections/TitleCollections.tsx). A series' Follow keeps the viewer told of
-// the episodes later refreshes list for that version, here and on Home (FollowSeries.tsx). A title
-// with several versions plays the one picked with the arrow beside Play, else the one it was
-// opened on, as from the 4K tab, else the one that suits best; the sheet shows that version, so a
-// series lists its episodes. The versions can be of several subscriptions: the menu then names
-// each one's, and Resume goes by how far the version that plays got in its own subscription,
-// never by another's. A series opens on the season being watched, and marks the episode. Each
-// episode's row carries everything known about it, TMDB's details once the season shown has its
-// answer, and beside it the three dots that mark it watched or unwatched by hand (see
-// EpisodeMarks.tsx). Where a series goes on, and how each episode stands, follow one set of rules
-// (`@mrstreamer/core/viewing/episodes`), which Continue watching and the player go by too, on
-// what the viewing record says: when it can't be read, the sheet says so, names no episode to go
-// on with and shows none as watched or not. The title from the lists heads the sheet at once; the
-// rest follows when the provider answers, and TMDB's details when they arrive. A related title
-// opens its details in place of these, and Back in the sheet's top bar returns through them as
-// they stood (`openRelated` in `app/ui-store.ts`); Close and Escape return to the page.
+// behind it: the facts, the actions, the story, the cast with their photos, and a series' episodes.
+// Resume is the main action for anything partly watched, and From the beginning plays at once,
+// without asking. Save puts the movie or the whole series on the watchlist and takes it off again;
+// it goes by the title in the lists, so it works before the details arrive. Beside it, the
+// collections menu puts the version that plays in the viewer's collections and takes it out (see
+// features/collections/TitleCollections.tsx). A series Follow keeps new episodes on Details and
+// Home (FollowSeries.tsx). A title with several versions plays the one picked
+// with the arrow beside Play, else the one it was opened on, as from the 4K tab, else the one that
+// suits best; the sheet shows that version, so a series lists its episodes. The versions can be of
+// several subscriptions: the menu then names each one's, and Resume goes by how far the version
+// that plays got in its own subscription, never by another's. A series opens on the season being
+// watched, and marks the episode. Each episode's row carries everything known about it, TMDB's
+// details once the season shown has its answer, and beside it the three dots that mark it watched
+// or unwatched by hand (see EpisodeMarks.tsx). A movie is marked watched or unwatched in its
+// actions, and a series' season shown or the whole series beside its season tabs, each in the
+// subscription of the version that plays, with one line saying what changed and Undo. Where a
+// series goes on, and how each episode stands, follow one set of rules
+// (`@mrstreamer/core/viewing/episodes`), which Continue watching and the player go by too, on what
+// the viewing record says: when it can't be read, the sheet says so, names no episode to go on with
+// and shows none as watched or not. The title from the lists heads the sheet at once; the rest
+// follows when the provider answers, and TMDB's details when they arrive. A related title opens its
+// details in place of these, and Back in the sheet's top bar returns through them as they stood
+// (`openRelated` in `app/ui-store.ts`); Close and Escape return to the page.
 import { Dialog } from "@base-ui/react/dialog";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, CircleDashed, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Circle, CircleDashed, Play, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   Episode,
@@ -35,10 +37,11 @@ import type {
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import type { EpisodeMark, TitleProgress } from "@mrstreamer/contracts/viewing";
+import type { EpisodeMark, MarkScope, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { episodeFileVersion } from "@mrstreamer/core/ondemand/details";
 import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
+import { standingFilmMark } from "@mrstreamer/core/viewing/marks";
 import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
 import { formatDate, formatDecimal, t } from "@mrstreamer/core/i18n";
 import {
@@ -84,7 +87,14 @@ import { transferred, useDownloadOf } from "../../lib/downloads.ts";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 import { TitleCollections } from "../collections/TitleCollections.tsx";
 import { FollowSeries } from "./FollowSeries.tsx";
-import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
+import {
+  EpisodeMenu,
+  filmScope,
+  MarkNotice,
+  TitleMarkNotice,
+  useEpisodeMarks,
+  useTitleMarks,
+} from "./EpisodeMarks.tsx";
 import { RelatedTitles } from "./RelatedTitles.tsx";
 import { VersionMenu } from "./VersionMenu.tsx";
 import { defined } from "@mrstreamer/core/defined";
@@ -344,7 +354,14 @@ function Content({
       facts={factsOf(details.title, details)}
     >
       {details.kind === "movie" ? (
-        <MovieActions details={details} versions={versions} switching={switching} saving={saving} />
+        // A mark made here is of the subscription that plays: another's sheet says nothing of it.
+        <MovieActions
+          key={versions.playing.subscriptionId}
+          details={details}
+          versions={versions}
+          switching={switching}
+          saving={saving}
+        />
       ) : (
         <SeriesActions
           details={details}
@@ -368,7 +385,12 @@ function Content({
       />
       {details.kind === "series" && (
         <div inert={switching || undefined}>
-          <Episodes details={details} season={place.season} onSeason={place.onSeason} />
+          <Episodes
+            key={ownedKey(details.title)}
+            details={details}
+            season={place.season}
+            onSeason={place.onSeason}
+          />
         </div>
       )}
     </Header>
@@ -502,10 +524,21 @@ function MovieActions({
   // Progress counts across a subscription's versions: Resume carries on from there in the
   // version that plays.
   const current = ownProgress(progress.data, versions.playing).toSorted((a, b) => b.at - a.at)[0];
-  const partly = current && !current.finished && current.position > 0;
+  // A mark is of the film's versions in that subscription too, and stands over their progress.
+  const film = filmScope(versions.title?.versions ?? details.title.versions, versions.playing);
+  const filmMarks = useQuery(queries.filmMarks(film.versions));
+  const ready = filmMarks.isSuccess && progress.isSuccess;
+  const readError = filmMarks.error ?? progress.error;
+  const mark = standingFilmMark(filmMarks.data ?? [], ownProgress(progress.data, versions.playing));
+  const partly = ready && !mark && current && !current.finished && current.position > 0;
+  const watched = mark ? mark.watched : current?.finished === true;
   const now = movieNow({ ...details.title, ...versions.playing }, details.backdropUrl);
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
+
+  const marking = useTitleMarks(
+    filmMarks.data && new Set(filmMarks.data.map((each) => each.revision)),
+  );
 
   return (
     <Actions
@@ -514,12 +547,84 @@ function MovieActions({
       saving={saving}
       progress={partly ? current : undefined}
       primaryLabel={partly ? t("Resume") : t("Play")}
-      onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
+      primaryPending={!ready && !readError}
+      onPrimary={() => {
+        if (ready || readError) playTitle(now, resumePoint(partly ? current : undefined));
+      }}
       onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={listed ? () => removal.mutate(details.title) : null}
       removeError={removal.error}
       download={<MovieDownload title={now.title} />}
+      markControl={
+        // Until the marks are read, the sheet can't say which of the two the film needs.
+        ready && (
+          <MarkButton
+            busy={marking.busy}
+            watched={watched}
+            onMark={(next) =>
+              marking.mark(film, next, {
+                name: details.title.title,
+                episodes: false,
+              })
+            }
+          />
+        )
+      }
+      notice={
+        <>
+          <TitleMarkNotice marks={marking} className="mt-3" />
+          {readError && (
+            <p role="alert" className="mt-3 text-sm text-destructive">
+              {t("Couldn't read what you watched.")} {describeError(appError(readError))}{" "}
+              <button
+                onClick={() => {
+                  void filmMarks.refetch();
+                  void progress.refetch();
+                }}
+                className="text-white underline underline-offset-4"
+              >
+                {t("Try again")}
+              </button>
+            </p>
+          )}
+        </>
+      }
     />
+  );
+}
+
+/**
+ * Mark watched, or Mark unwatched once it is: never disabled, so it keeps the keyboard's focus
+ * while the mark is stored, and does nothing meanwhile.
+ */
+function MarkButton({
+  busy,
+  watched,
+  onMark,
+  label,
+  size,
+}: {
+  /** A mark is being stored: the button takes no other meanwhile. */
+  busy: boolean;
+  watched: boolean;
+  onMark: (watched: boolean) => void;
+  /** What the button marks, as "Mark season watched"; a film's says only "Mark watched". */
+  label?: { readonly watched: string; readonly unwatched: string };
+  size?: "sm";
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size={size}
+      aria-busy={busy || undefined}
+      aria-disabled={busy || undefined}
+      onClick={() => {
+        if (!busy) onMark(!watched);
+      }}
+    >
+      {watched ? <Circle /> : <Check />}
+      {watched ? (label?.unwatched ?? t("Mark unwatched")) : (label?.watched ?? t("Mark watched"))}
+    </Button>
   );
 }
 
@@ -672,12 +777,15 @@ function Actions({
   saving,
   progress,
   primaryLabel,
+  primaryPending = false,
   onPrimary,
   onBeginning,
   onRemove,
   removeError,
   download,
   follow,
+  markControl,
+  notice,
 }: {
   versions: Versions;
   /** Another version's details are on their way: nothing plays until they're here. */
@@ -685,6 +793,8 @@ function Actions({
   saving: SaveToggle;
   progress: TitleProgress | undefined;
   primaryLabel: string;
+  /** Keeps the initial focus while progress or marks are unresolved. */
+  primaryPending?: boolean;
   onPrimary: () => void;
   onBeginning: (() => void) | null;
   /** Shown while Continue watching holds the title. */
@@ -695,6 +805,10 @@ function Actions({
   download?: ReactNode;
   /** A series' Follow, after Save and the collections menu. */
   follow?: ReactNode;
+  /** Marks the title watched or unwatched, after the collections menu. */
+  markControl?: ReactNode;
+  /** Lines under the actions about what they did, as a mark's with Undo. */
+  notice?: ReactNode;
 }) {
   const { title, playing, automatic } = versions;
   const all = title?.versions ?? [];
@@ -718,6 +832,8 @@ function Actions({
             size="lg"
             autoFocus
             disabled={switching}
+            aria-busy={primaryPending || undefined}
+            aria-disabled={primaryPending || undefined}
             onClick={onPrimary}
             className={cn(several && "rounded-r-none pr-5")}
           >
@@ -745,6 +861,7 @@ function Actions({
         <SaveButton state={saving} />
         <TitleCollections title={title} pending={versions.pending} version={playing} />
         {follow}
+        {markControl}
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>
             {t("Remove from Continue watching")}
@@ -764,6 +881,7 @@ function Actions({
       {removeError && (
         <p className="mt-3 text-sm text-destructive">{describeError(appError(removeError))}</p>
       )}
+      {notice}
     </div>
   );
 }
@@ -884,6 +1002,12 @@ function Episodes({
   const stateOf = standing && episodeStates(standing.progress, standing.marks);
   const target = standing ? continuation(details, standing.progress, standing.marks) : null;
   const marking = useEpisodeMarks(ownedId(details.title), standing);
+
+  // A season or the whole series at once, Undo going by the series' latest mark as it stands.
+  const bulk = useTitleMarks(
+    standing && new Set(standing.undoable === null ? [] : [standing.undoable]),
+  );
+
   // Whose record a mark goes to, said once the title's versions are of several subscriptions.
   const source = useVersionNames(details.title)(details.title)?.source ?? null;
   // The season picked here, else the one being watched once progress has loaded.
@@ -904,36 +1028,81 @@ function Episodes({
   // marked keeps its place, with its dots and the keyboard's focus on them.
   const marks = {
     ...marking,
+    // One mark at a time, of an episode or of many: while many are stored, no episode's line
+    // or row speaks of an earlier one.
+    change: bulk.busy ? null : marking.change,
+    busy: marking.busy || bulk.busy,
     mark: (episode: Episode, watched: boolean) => {
       setSeason(shown.number);
       marking.mark(episode, watched);
     },
   };
 
+  const series = ownedId(details.title);
+
+  const every = (list: readonly Episode[]) =>
+    !!stateOf && list.length > 0 && list.every((each) => stateOf(each).kind === "watched");
+
+  const seasonWatched = every(episodes);
+  const seriesWatched = every(details.seasons.flatMap((each) => each.episodes));
+
+  // Only offered by a MarkButton, which takes none while a mark is stored.
+  const markMany = (scope: MarkScope, watched: boolean, name: string) => {
+    setSeason(shown.number);
+    bulk.mark(scope, watched, { name, episodes: true });
+  };
+
+  // Offered once how the episodes stand was read, as each row's own marks are.
+  const bulkMarks = stateOf && (
+    <span className="flex flex-none items-center gap-1 pb-1.5">
+      <MarkButton
+        busy={marks.busy}
+        watched={seasonWatched}
+        size="sm"
+        label={{ watched: t("Mark season watched"), unwatched: t("Mark season unwatched") }}
+        onMark={(watched) =>
+          markMany({ kind: "season", series, season: shown.number }, watched, shown.name)
+        }
+      />
+      <MarkButton
+        busy={marks.busy}
+        watched={seriesWatched}
+        size="sm"
+        label={{ watched: t("Mark series watched"), unwatched: t("Mark series unwatched") }}
+        onMark={(watched) => markMany({ kind: "series", series }, watched, details.title.title)}
+      />
+    </span>
+  );
+
   return (
     <section className="mt-10">
-      {details.seasons.length > 1 && (
+      {(details.seasons.length > 1 || bulkMarks) && (
         <div className="mb-2 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-b border-border">
-          {details.seasons.map((each) => (
-            <button
-              key={each.number}
-              aria-pressed={each.number === shown.number}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => setSeason(each.number)}
-              className={cn(
-                "-mb-px border-b-2 pb-2 text-[0.9375rem]",
-                each.number === shown.number
-                  ? "border-white font-semibold text-white"
-                  : "border-transparent text-muted-foreground hover:text-white",
-              )}
-            >
-              {each.name}
-            </button>
-          ))}
-          {source && <span className="ml-auto pb-2 text-xs text-muted-foreground">{source}</span>}
+          {details.seasons.length > 1 &&
+            details.seasons.map((each) => (
+              <button
+                key={each.number}
+                aria-pressed={each.number === shown.number}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setSeason(each.number)}
+                className={cn(
+                  "-mb-px border-b-2 pb-2 text-[0.9375rem]",
+                  each.number === shown.number
+                    ? "border-white font-semibold text-white"
+                    : "border-transparent text-muted-foreground hover:text-white",
+                )}
+              >
+                {each.name}
+              </button>
+            ))}
+          <span className="ml-auto flex items-baseline gap-3">
+            {source && <span className="pb-2 text-xs text-muted-foreground">{source}</span>}
+            {bulkMarks}
+          </span>
         </div>
       )}
       <MarkNotice marks={marks} source={source} />
+      <TitleMarkNotice marks={bulk} className="mx-2 mb-2" />
       <div>
         {episodes.map((episode) => {
           const state = stateOf?.(episode);

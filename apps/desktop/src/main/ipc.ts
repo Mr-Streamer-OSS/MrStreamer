@@ -640,6 +640,28 @@ function kidsHandlers({ approved, owner }: ProfileAdmission, handlers: IpcHandle
         : denied(),
     "viewing.markEpisode": (input, frame) =>
       titleRef(input.episode) ? handlers["viewing.markEpisode"](input, frame) : denied(),
+    "viewing.markTitles": (input, frame) =>
+      (
+        input.scope.kind === "film"
+          ? input.scope.versions.every((ref) => online("movie", ref))
+          : online("series", input.scope.series)
+      )
+        ? handlers["viewing.markTitles"](input, frame)
+        : denied(),
+    "viewing.undoMarks": (input, frame) =>
+      input.made.every((each) => online(each.kind, each.title))
+        ? handlers["viewing.undoMarks"](input, frame)
+        : denied(),
+    "viewing.filmMarks": (input, frame) =>
+      input.movies.every((ref) => online("movie", ref))
+        ? handlers["viewing.filmMarks"](input, frame)
+        : denied(),
+    "viewing.history": (input, frame) =>
+      Effect.map(handlers["viewing.history"](input, frame), (entries) =>
+        entries.filter((entry) =>
+          entry.kind === "movie" ? online("movie", entry.movie) : online("series", entry.series),
+        ),
+      ),
     "downloads.list": (input, frame) =>
       Effect.map(handlers["downloads.list"](input, frame), (list) =>
         visibleDownloads(list, allows),
