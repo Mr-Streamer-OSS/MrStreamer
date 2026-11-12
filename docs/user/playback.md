@@ -122,7 +122,7 @@ Mr. Streamer sends what you watch to a TV on your network: with AirPlay on macOS
 
 For Live TV, open **More > Play on**. Movies and episodes have the TV button beside the volume. **O** opens the chooser from either player. On Windows, pick a Cast device from the list. On macOS, **AirPlay** in Play on opens Apple's list; a title's TV button and **O** open it directly. A TV may ask for a code the first time. What you watch plays on here until the TV answers, and **This computer** cancels.
 
-Google Cast isn't offered on macOS and Linux yet: it waits for a test with a real Cast device on those systems.
+Google Cast isn't offered by default on macOS and Linux yet. Real Cast device qualification remains pending on every desktop system, including Windows.
 
 While the TV plays:
 
