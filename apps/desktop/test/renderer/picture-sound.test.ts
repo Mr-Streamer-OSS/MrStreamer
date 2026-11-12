@@ -332,10 +332,11 @@ it("ignores a lifecycle completion after the profile switches, before hydration"
   selectProfileOwner(null);
 });
 
-it.each(["rollback", "playback"])(
+it.each(["rollback", "playback", "hydration"])(
   "keeps a failed save retryable after %s sound recovers",
   async (failure) => {
-    await menu({ ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 });
+    const saved = { ...DEFAULT_PLAYBACK_ADJUSTMENTS, soundDelayMs: 50 };
+    const client = await menu(saved);
     const { resume, element } = soundDevice();
     await act(async () => {});
     const write = ipc.hold("preferences.update");
@@ -345,6 +346,17 @@ it.each(["rollback", "playback"])(
     await act(async () => write.reject({ kind: "unexpected", detail: "disk full" }));
 
     if (failure === "playback") resume.mockRejectedValueOnce(new Error("device asleep"));
+
+    if (failure === "hydration") {
+      resume.mockRejectedValueOnce(new Error("device asleep"));
+      await act(async () =>
+        acceptPreferences(
+          client,
+          ipc.snapshot({ ...defaultPreferences, volume: 0.4, playbackAdjustments: saved }),
+        ),
+      );
+    }
+
     await act(async () => element.dispatchEvent(new Event("playing")));
     await act(async () => element.dispatchEvent(new Event("playing")));
     expect(dialog().querySelector('[role="alert"]')?.textContent).toContain("disk full");

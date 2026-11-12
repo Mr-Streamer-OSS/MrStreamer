@@ -99,6 +99,9 @@ export function hydratePlaybackAdjustments(preferences: Preferences): void {
     const identity = ++operation;
     void play(saved(preferences), identity, captured).catch((cause: unknown) => {
       if (identity !== operation || !currentProfile(captured) || pending) return;
+
+      if (store.getState().failed?.kind === "save") return;
+
       store.setState({
         failed: {
           kind: "sound",
