@@ -21,7 +21,7 @@ import {
 } from "../../src/renderer/src/app/ui-store.ts";
 import { openCollection, TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
 import { RecordingsPage } from "../../src/renderer/src/features/recordings/RecordingsPage.tsx";
-import { queries } from "../../src/renderer/src/lib/queries.ts";
+import { queries, syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 
 // happy-dom lays nothing out; the grid draws the rows that fit this height, in one column.
 Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
@@ -342,6 +342,129 @@ it("restores Recordings only after its independently arriving sections are ready
     unmount();
 
     for (const property of ["scrollTop", "scrollHeight", "clientHeight"]) {
+      const descriptor = descriptors[property];
+
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, property, descriptor);
+      else Reflect.deleteProperty(HTMLElement.prototype, property);
+    }
+  }
+});
+
+it("retains a search scroll until cold results arrive", async () => {
+  const OriginalObserver = ResizeObserver;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class extends OriginalObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super(callback);
+        queueMicrotask(() => callback([], this));
+      }
+    },
+  );
+  const results = Array.from({ length: 100 }, (_, index) => film(String(index), `Search ${index}`));
+  let position = 0;
+  const descriptors = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
+  Object.defineProperties(HTMLElement.prototype, {
+    clientWidth: { configurable: true, get: () => 960 },
+    scrollTop: {
+      configurable: true,
+      get: () => position,
+      set: (value: number) => {
+        position = Math.min(
+          value,
+          document.querySelectorAll('[role="listitem"]').length > 0 ? 1000 : 0,
+        );
+      },
+    },
+  });
+
+  try {
+    ipc.always("ondemand.searchKind", { titles: results, total: results.length });
+    setBrowsing("movie", (place) => ({ ...place, query: "film" }));
+    const page = await movies();
+    await until(() => expect(selectedPoster()).toBe("Search 0, 2020"));
+    const list = document.querySelector('[role="list"]')!.parentElement!;
+    Object.defineProperty(list, "scrollTop", {
+      configurable: true,
+      get: () => position,
+      set: (value: number) => {
+        position = value;
+      },
+    });
+    position = 700;
+    await act(async () => list.dispatchEvent(new Event("scroll")));
+    await page.leave();
+    expect(useUi.getState().browsing.movie.spots.tab?.top).toBe(700);
+    position = 0;
+    page.client.removeQueries({ queryKey: ["ondemand", "searchKind"] });
+    const held = ipc.hold("ondemand.searchKind", () => true);
+    await page.back();
+    await act(async () => held.resolve({ titles: results, total: results.length }));
+    await until(() => expect(selectedPoster()).toBe("Search 0, 2020"));
+    expect(position).toBe(700);
+  } finally {
+    unmount();
+    vi.unstubAllGlobals();
+
+    for (const prop of ["clientWidth", "scrollTop"]) {
+      if (descriptors[prop]) Object.defineProperty(HTMLElement.prototype, prop, descriptors[prop]!);
+      else Reflect.deleteProperty(HTMLElement.prototype, prop);
+    }
+  }
+});
+
+it("keeps the privacy-reset selection and scroll together after returning", async () => {
+  const OriginalObserver = ResizeObserver;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class extends OriginalObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super(callback);
+        queueMicrotask(() => callback([], this));
+      }
+    },
+  );
+  const descriptors = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
+  let position = 0;
+  Object.defineProperties(HTMLElement.prototype, {
+    clientWidth: { configurable: true, get: () => 960 },
+    scrollTop: {
+      configurable: true,
+      get: () => position,
+      set: (value: number) => {
+        position = value;
+      },
+    },
+  });
+  let stop = () => {};
+
+  try {
+    const page = await movies();
+    stop = syncOnDemand(page.client);
+    await until(() => expect(selectedPoster()).toBe("Arrival, 2020"));
+    const scroller = document.querySelector('[role="list"]')!.parentElement!;
+    await act(async () => {
+      scroller.scrollTop = 700;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    const held = ipc.hold("ondemand.collection", ({ id }) => id === "all");
+    await act(async () =>
+      ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+    );
+    await until(() => expect(document.querySelectorAll('[role="listitem"]')).toHaveLength(0));
+    await act(async () => held.resolve({ name: "All", titles: films, total: films.length }));
+    await until(() => expect(selectedPoster()).toBe("Arrival, 2020"));
+    await page.leave();
+    expect(useUi.getState().browsing.movie.spots.tab?.top).toBe(0);
+    await page.back();
+    await until(() => expect(selectedPoster()).toBe("Arrival, 2020"));
+    expect(position).toBe(0);
+  } finally {
+    stop();
+    unmount();
+    vi.unstubAllGlobals();
+
+    for (const property of ["clientWidth", "scrollTop"]) {
       const descriptor = descriptors[property];
 
       if (descriptor) Object.defineProperty(HTMLElement.prototype, property, descriptor);

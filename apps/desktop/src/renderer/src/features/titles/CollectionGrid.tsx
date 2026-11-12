@@ -182,7 +182,7 @@ export function CollectionGrid({
       {listed.error ? (
         <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>
       ) : (
-        (hasGrid || (listed.total !== null && listed.total > 0)) && (
+        hasGrid && (
           <Grid
             key={listKey}
             total={listed.total ?? 0}
@@ -225,11 +225,14 @@ export function TitleGrid({
   active,
   caption = describe,
   asked = false,
+  ready = true,
   takeFocus = false,
   onFocusTaken,
   kept,
 }: {
   titles: readonly Title[];
+  /** The query has answered, even if its result is empty. */
+  ready?: boolean;
   active: boolean;
   caption?: (title: Title) => string;
   /** Filtered results open the matching version even when it is the usual primary version. */
@@ -243,6 +246,7 @@ export function TitleGrid({
   return (
     <Grid
       total={titles.length}
+      ready={ready}
       itemAt={(index) => titles[index]}
       keyOf={titleKey}
       onVisible={nothing}
@@ -320,7 +324,8 @@ function controlOf(scroller: HTMLElement, index: number, part: number): HTMLElem
  * keeps the focus and the Tab stop. `takeFocus` asks the selected tile to take the focus once it
  * is drawn, unless the focus went to another control first; `onFocusTaken` says it did. `settled`
  * is false while a page of the list is still being read, as a refresh reads them one at a time.
- * `reset` safely clears selection while unread privacy data is withheld, without losing focus handoff.
+ * `reset` withholds scroll restoration and clears its offset during a privacy refresh; an empty
+ * unread list clamps selection to its first position without losing focus handoff.
  * `kept` brings the selection and the scroll back as the grid stood when it went, the selection
  * by its key, and keeps them again as it goes.
  */
@@ -335,6 +340,7 @@ export function Grid<T>({
   takeFocus = false,
   onFocusTaken,
   reset = false,
+  ready = true,
   settled = true,
   kept,
 }: {
@@ -351,6 +357,8 @@ export function Grid<T>({
   takeFocus?: boolean;
   onFocusTaken?: () => void;
   reset?: boolean;
+  /** The query has answered, even if its result is empty. */
+  ready?: boolean;
   settled?: boolean;
   kept?: KeptSpot;
 }) {
@@ -379,22 +387,18 @@ export function Grid<T>({
     index: kept?.from?.index ?? 0,
   }));
 
-  // A privacy invalidation withholds the old list and explicitly resets selection, while
-  // the mounted grid retains the focus handoff for an open details sheet.
-  const selection = reset ? { key: null, index: 0 } : chosen;
-  const found = locate(selection, total, itemAt, keyOf);
+  const found = locate(chosen, total, itemAt, keyOf);
 
   // A title the loaded pages lack keeps its key while a page is still being read: a refresh
   // answers them one at a time, and a restored position can need a page not yet requested. Meanwhile it
   // shows no ring, takes no focus and opens nothing. Once every page answered, a title still
   // missing counts as gone, and what now stands at its position takes its place. One that moved
   // past the pages loaded so far isn't looked for beyond them.
-  const pending =
-    found === null && (!settled || (selection.index < total && !itemAt(selection.index)));
+  const pending = found === null && (!settled || (chosen.index < total && !itemAt(chosen.index)));
 
-  const selected = found ?? Math.min(selection.index, Math.max(total - 1, 0));
+  const selected = found ?? Math.min(chosen.index, Math.max(total - 1, 0));
   const selectedItem = itemAt(selected);
-  const selectedKey = pending || !selectedItem ? selection.key : keyOf(selectedItem);
+  const selectedKey = pending || !selectedItem ? chosen.key : keyOf(selectedItem);
 
   // Kept where it was found, so the next render needn't look for it again.
   if (selected !== chosen.index || selectedKey !== chosen.key)
@@ -404,7 +408,8 @@ export function Grid<T>({
   useKeptScroll(
     box,
     kept && { from: kept.from?.top ?? null, keep: (top) => kept.keep({ ...at.current, top }) },
-    width > 0 && !reset,
+    width > 0 && ready && !reset,
+    reset,
   );
   const selectedRow = Math.floor(selected / columns);
 

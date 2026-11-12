@@ -13,11 +13,13 @@ const TAKEN = ["wheel", "pointerdown", "touchstart"] as const;
 
 /** Restores an offset once the caller has its content and measured geometry. Viewer input wins, including global navigation keys.
  * Until restoration finishes, leaving preserves the requested offset rather than an empty list's zero.
+ * A privacy reset clears both the current and remembered offset while keeping focus ownership mounted.
  */
 export function useKeptScroll(
   ref: RefObject<HTMLElement | null>,
   kept: Kept<number> | undefined,
   ready: boolean,
+  reset = false,
 ): void {
   const top = useRef(kept?.from ?? 0);
   const latest = useRef(kept);
@@ -27,11 +29,19 @@ export function useKeptScroll(
 
   useLayoutEffect(() => {
     const element = ref.current;
-    const target = latest.current?.from ?? 0;
+    const target = top.current;
+
+    if (reset) {
+      top.current = 0;
+
+      if (element) element.scrollTop = 0;
+
+      return;
+    }
 
     if (!element || target <= 0) return;
     restoring.current = true;
-    let applied = element.scrollTop;
+    const applied = element.scrollTop;
 
     function finish() {
       restoring.current = false;
@@ -49,7 +59,6 @@ export function useKeptScroll(
 
     function apply() {
       element!.scrollTop = target;
-      applied = element!.scrollTop;
 
       finish();
     }
@@ -65,12 +74,12 @@ export function useKeptScroll(
 
       if (pending) top.current = target;
     };
-  }, [ref]);
+  }, [ref, reset]);
 
   // The caller owns content and layout readiness; overflow can be only a partial result.
   useLayoutEffect(() => {
     if (ready) complete.current?.();
-  }, [ready]);
+  }, [ready, reset]);
 
   useEffect(() => {
     const element = ref.current;

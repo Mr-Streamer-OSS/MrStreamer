@@ -410,6 +410,7 @@ function SearchResults({
           <TitleGrid
             key={`${debounced}:${JSON.stringify(filters)}`}
             titles={titles}
+            ready={found.data !== undefined && !found.isPlaceholderData && debounced === query}
             active={active && !found.isPlaceholderData && debounced === query}
             caption={searchCaption}
             asked={Object.keys(filters).length > 0}
