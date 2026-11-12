@@ -46,6 +46,7 @@ import {
   type Collections,
 } from "@mrstreamer/core/ondemand/collections";
 import {
+  linkedTitles,
   relatedProviderFacts,
   relatedTitles,
   type RelatedProviderFacts,
@@ -1026,6 +1027,12 @@ const handlers: {
       },
     });
   },
+  linked: async ({ language, titles, owners }) => {
+    speaking(language);
+    const found = await catalogueOf(owners, language);
+
+    return linkedTitles(found.index, titles).map((title) => named(title, language));
+  },
   tiles: async ({ language, kind, of, owners }) => {
     speaking(language);
     const made = collectionsOf(await catalogueOf(owners, language, true), kind);
@@ -1207,6 +1214,8 @@ parentPort?.on("message", (request: WorkerRequest) => {
         return handlers.recommendations(request.args);
       case "related":
         return handlers.related(request.args);
+      case "linked":
+        return handlers.linked(request.args);
       case "tiles":
         return handlers.tiles(request.args);
       case "collection":

@@ -354,6 +354,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
         name: "Alan Actor",
         role: "The Lead",
         photoUrl: "https://image.tmdb.org/t/p/w185/alan.jpg",
+        tmdbId: 1,
       },
     ]);
     expect(details.directors).toEqual(["Grace Director"]);

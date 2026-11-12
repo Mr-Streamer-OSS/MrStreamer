@@ -82,6 +82,27 @@ export interface RelatedTitles {
   readonly titles: readonly { readonly title: Title; readonly reason: string }[];
 }
 
+/**
+ * A person or film franchise a title's details link to, by TMDB id: `Person.tmdbId`,
+ * `DetailsBase.directorCredits` or `MovieDetails.franchise`.
+ */
+export const RelatedLink = lazy(() =>
+  type({ kind: "'person' | 'franchise'", id: "number.integer > 0" }),
+);
+
+export type RelatedLink = Infer<typeof RelatedLink>;
+
+/**
+ * The titles of a person or franchise that the viewer's subscriptions list now and the viewer may
+ * see, matched by kind and TMDB id alone: a person's newest first, a franchise's in release
+ * order. Each shows and opens the version listed first, by its own subscription and id.
+ */
+export interface LinkedTitles {
+  /** TMDB's name for them in the viewer's language; null when TMDB doesn't know the id. */
+  readonly name: string | null;
+  readonly titles: readonly Title[];
+}
+
 /** A bounded recommendation from an actual recent local play and loaded catalogue. */
 export interface HomeRecommendation {
   readonly title: Title;
@@ -131,6 +152,11 @@ interface DetailsBase {
   readonly cast: readonly Person[];
   /** A film's directors, or a series' creators. */
   readonly directors: readonly string[];
+  /**
+   * `directors` with their TMDB person ids, when TMDB named them; what opens their titles
+   * (`RelatedLink`).
+   */
+  readonly directorCredits?: readonly { readonly tmdbId: number; readonly name: string }[];
   /** "1981-05-23", as the provider wrote it. */
   readonly releaseDate: string | null;
   /** Seconds. For a series, the usual length of an episode. */
@@ -143,10 +169,14 @@ export interface Person {
   /** The part they play. */
   readonly role: string | null;
   readonly photoUrl: string | null;
+  /** TMDB's person id, when TMDB named them; what opens their titles (`RelatedLink`). */
+  readonly tmdbId?: number;
 }
 
 export interface MovieDetails extends DetailsBase {
   readonly kind: "movie";
+  /** The film franchise TMDB says it belongs to, by TMDB id (`RelatedLink`). */
+  readonly franchise?: { readonly tmdbId: number; readonly name: string } | null;
 }
 
 export interface SeriesDetails extends DetailsBase {

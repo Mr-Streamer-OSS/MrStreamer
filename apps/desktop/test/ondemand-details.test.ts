@@ -16,6 +16,8 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { DetailCache } from "../src/main/platform/detail-cache.ts";
+import { AdmittedKids } from "../src/main/services/profile-policy.ts";
+import type { LinkedTitles, Title } from "@mrstreamer/contracts/ondemand";
 import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
 import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 import { defined } from "@mrstreamer/core/defined";
@@ -715,5 +717,147 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     a.provider.failDetails(503);
     expect((await a.service.file(a.episode)).listingKey).toBe(current.listingKey);
     expect(a.provider.detailRequests()).toBe(3);
+  });
+});
+
+describe("people and film franchises a title links to", { timeout: 20_000 }, () => {
+  /** Kind and TMDB id of each title, in order. */
+  const listed = (titles: readonly Title[]) =>
+    titles.map((title) => `${title.kind}:${title.tmdbId}`);
+
+  /** Its name and titles, without what TMDB's metadata adds to titles as it arrives. */
+  const named = ({ name, titles }: LinkedTitles) => ({ name, titles: listed(titles) });
+
+  /** A title's details once TMDB's have joined them. */
+  async function described(a: Awaited<ReturnType<typeof app>>, kind: "movie" | "series") {
+    const version = kind === "movie" ? a.movie : a.series;
+    await expect.poll(async () => (await a.service.details(kind, version)).plot).toMatch(/^TMDB/);
+
+    return a.service.details(kind, version);
+  }
+
+  it("links cast, directors, creators and franchise by TMDB id and lists their titles in the subscriptions", async () => {
+    const a = await app({ metadata: true });
+    await a.service.refresh(a.subscriptionId);
+    const movie = await described(a, "movie");
+
+    expect(movie.cast[0]).toMatchObject({ name: "Alan Actor", tmdbId: 1 });
+    expect(movie.directorCredits).toEqual([{ tmdbId: 2, name: "Grace Director" }]);
+    expect(movie.kind === "movie" && movie.franchise).toEqual({ tmdbId: 10, name: "Test Saga" });
+
+    const actor = await a.service.linked({ kind: "person", id: 1 });
+    expect(actor.name).toBe("Alan Actor");
+    // Newest first, undated last; a title no subscription lists and a producer's credit are not.
+    expect(listed(actor.titles)).toEqual([
+      "series:90000",
+      "movie:100003",
+      "movie:100002",
+      "movie:100005",
+    ]);
+    // Each opens the exact version the lists show, of its own subscription.
+    expect(actor.titles[2]).toMatchObject({ subscriptionId: a.subscriptionId, id: "90002" });
+    expect(actor.titles[0]!.versions).toContainEqual(expect.objectContaining(a.series));
+
+    const director = await a.service.linked({ kind: "person", id: 2 });
+    expect(listed(director.titles)).toEqual(["movie:100001"]);
+
+    const saga = await a.service.linked({ kind: "franchise", id: 10 });
+    expect(saga.name).toBe("Test Saga");
+    expect(listed(saga.titles)).toEqual(["movie:100000", "movie:100004"]);
+    expect(saga.titles[0]!.versions).toContainEqual(expect.objectContaining(a.movie));
+
+    const series = await described(a, "series");
+    expect(series.directorCredits).toEqual([{ tmdbId: 3, name: "Ada Creator" }]);
+    expect(listed((await a.service.linked({ kind: "person", id: 3 })).titles)).toEqual([
+      "series:90000",
+    ]);
+  });
+
+  it("leaves out titles for adults and titles a kids profile isn't approved for", async () => {
+    const a = await app({ metadata: true });
+    a.provider.serveTitles((titles) => ({
+      ...titles,
+      movies: titles.movies.map((movie) =>
+        movie.id === 90003 ? { ...movie, adult: true, categoryId: "505" } : movie,
+      ),
+    }));
+    await a.service.refresh(a.subscriptionId);
+
+    expect(listed((await a.service.linked({ kind: "person", id: 1 })).titles)).toEqual([
+      "series:90000",
+      "movie:100002",
+      "movie:100005",
+    ]);
+
+    const service = await a.runtime.runPromise(OnDemand);
+
+    const kids = await a.runtime.runPromise(
+      service.linked({ kind: "person", id: 1 }).pipe(
+        Effect.provideService(AdmittedKids, {
+          approved: [{ kind: "movie", ...a.own("90002") }],
+        }),
+      ),
+    );
+
+    expect(listed(kids.titles)).toEqual(["movie:100002"]);
+  });
+
+  it("keeps TMDB's answer, tells an unknown id from a failure and retries a failure", async () => {
+    const a = await app({ metadata: true });
+    await a.service.refresh(a.subscriptionId);
+    const saga = named(await a.service.linked({ kind: "franchise", id: 10 }));
+    expect(saga).toEqual({ name: "Test Saga", titles: ["movie:100000", "movie:100004"] });
+    expect(named(await a.service.linked({ kind: "franchise", id: 10 }))).toEqual(saga);
+    expect(a.remote!.linkedRequests()).toEqual(["collection/10"]);
+
+    // An id TMDB doesn't know lists nothing, without failing.
+    expect(await a.service.linked({ kind: "person", id: 404 })).toEqual({ name: null, titles: [] });
+
+    a.remote!.refuse(true);
+    await expect(a.service.linked({ kind: "person", id: 1 })).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "TMDB refused the key. Check it in Settings." },
+    });
+    // What TMDB said stays usable while it fails, until it would have expired.
+    await a.time(NOW + 150 * DAY);
+    expect(named(await a.service.linked({ kind: "franchise", id: 10 }))).toEqual(saga);
+    await a.time(NOW + 182 * DAY);
+    await expect(a.service.linked({ kind: "franchise", id: 10 })).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+
+    a.remote!.refuse(false);
+    expect((await a.service.linked({ kind: "person", id: 1 })).name).toBe("Alan Actor");
+  });
+
+  it("fails with what to do without a TMDB key", async () => {
+    const a = await app();
+    await a.service.refresh(a.subscriptionId);
+    await expect(a.service.linked({ kind: "person", id: 1 })).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "People and franchises need a TMDB key, in Settings." },
+    });
+  });
+
+  it("asks TMDB again for details kept before they named people by id", async () => {
+    const a = await app({ metadata: true });
+    await a.service.refresh(a.subscriptionId);
+    await described(a, "movie");
+    const key = { kind: "about", titleKind: "movie", id: "100000", language: "en" } as const;
+    const kept = await a.cache.read(key);
+
+    if (kept?.kind !== "about" || !kept.value) throw new Error("Expected kept details");
+
+    // As kept before details named people and franchises by TMDB id.
+    const { directorCredits: _credits, collection: _collection, ...before } = kept.value;
+    await a.cache.remember(key, {
+      ...kept,
+      value: { ...before, cast: before.cast.map(({ id: _id, ...person }) => person) },
+    });
+
+    const next = await a.start();
+    const requests = a.remote!.aboutRequests();
+    await expect
+      .poll(async () => (await next.service.details("movie", a.movie)).cast[0]?.tmdbId)
+      .toBe(1);
+    expect(a.remote!.aboutRequests()).toBe(requests + 1);
   });
 });

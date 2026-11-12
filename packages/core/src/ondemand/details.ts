@@ -28,7 +28,13 @@ export function movieDetails(
   details: ProviderDetails,
   about: TitleAbout | null = null,
 ): MovieDetails {
-  return { kind: "movie", ...shared(title, details, about) };
+  const franchise = about?.collection;
+
+  return {
+    kind: "movie",
+    ...shared(title, details, about),
+    ...defined({ franchise: franchise && { tmdbId: franchise.id, name: franchise.name } }),
+  };
 }
 
 /**
@@ -253,6 +259,7 @@ function person(about: TitleAbout["cast"][number]): Person {
     name: about.name,
     role: about.character,
     photoUrl: about.profile ? tmdbImage(about.profile, 185) : null,
+    ...defined({ tmdbId: about.id }),
   };
 }
 
@@ -280,6 +287,11 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
       ? about.cast.map(person)
       : details.cast.map((name) => ({ name, role: null, photoUrl: null })),
     directors: about?.directors.length ? about.directors : details.directors,
+    ...defined({
+      directorCredits: about?.directors.length
+        ? about.directorCredits?.map(({ id, name }) => ({ tmdbId: id, name }))
+        : undefined,
+    }),
     releaseDate: details.releaseDate,
     // TMDB's runtime, else what the provider says of the file.
     duration: runtimeSeconds(about?.runtime) ?? details.duration,

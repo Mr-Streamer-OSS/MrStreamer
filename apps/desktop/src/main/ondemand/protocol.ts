@@ -178,6 +178,14 @@ export interface WorkerCalls {
     };
     result: RelatedTitles;
   };
+  /** A person's or franchise's titles in the lists, by kind and TMDB id, in the order asked. */
+  linked: {
+    args: Owners & {
+      language: string;
+      titles: readonly { readonly kind: TitleKind; readonly tmdbId: string }[];
+    };
+    result: readonly Title[];
+  };
   recommendations: {
     args: Owners & { language: string; seeds: readonly HomeSeed[] };
     result: readonly HomeRecommendation[];
@@ -327,6 +335,7 @@ export const workerResults: { [M in WorkerMethod]: Type<WorkerCalls[M]["result"]
     basis: "string | null",
     titles: type({ title: ListedTitle, reason: "string" }).array(),
   }),
+  linked: ListedTitle.array(),
   recommendations: type({ title: ListedTitle, seed: "string", reason: "string" }).array(),
   tiles: type({
     id: Collection,

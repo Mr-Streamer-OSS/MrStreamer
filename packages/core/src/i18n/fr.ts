@@ -871,6 +871,9 @@ export const fr: Translation = {
   Episodes: "Épisodes",
   "Genres need a TMDB key, in Settings.": "Les genres nécessitent une clé TMDB, dans Réglages.",
   "Services need a TMDB key, in Settings.": "Les services nécessitent une clé TMDB, dans Réglages.",
+  "People and franchises need a TMDB key, in Settings.":
+    "Les personnes et les sagas ont besoin d'une clé TMDB, dans Réglages.",
+  "TMDB didn't answer. Try again.": "TMDB n'a pas répondu. Réessayez.",
   "TMDB refused the key. Check it in Settings.": "TMDB a refusé la clé. Vérifiez-la dans Réglages.",
   "Genres appear as details arrive from TMDB.":
     "Les genres apparaissent à mesure que les détails arrivent de TMDB.",

@@ -57,6 +57,7 @@ import type { ThirdPartyNotice } from "./licences.ts";
 import {
   COLLECTION_SORTS,
   isCollectionId,
+  RelatedLink,
   ROW_TABS,
   TitleRef,
   TITLE_KINDS,
@@ -66,6 +67,7 @@ import {
   type EpisodeDetails,
   type OnDemandStatus,
   type OnDemandUpdate,
+  type LinkedTitles,
   type RelatedTitles,
   type HomeRecommendation,
   type Title,
@@ -452,6 +454,8 @@ export const ipcInputs = {
   /** The details of one version of a movie or series. */
   "ondemand.details": () => type({ kind: titleKind(), version: owned() }),
   "ondemand.related": () => type({ kind: titleKind(), version: owned() }),
+  /** A person's or film franchise's titles, from a link on a title's details. */
+  "ondemand.linked": () => type({ link: RelatedLink() }),
   "ondemand.recommendations": () =>
     type({ seeds: type({ kind: titleKind(), version: owned() }).array().atMostLength(32) }),
   /** One season of a series version, by number, asked for when the viewer opens it. */
@@ -1023,6 +1027,11 @@ export interface IpcOutputs {
   /** A title's details, asked for when the viewer opens it: the provider's and TMDB's. */
   "ondemand.details": TitleDetails;
   "ondemand.related": RelatedTitles;
+  /**
+   * A person's or film franchise's titles in the viewer's subscriptions; an empty list when none
+   * is, and a failure when TMDB didn't answer.
+   */
+  "ondemand.linked": LinkedTitles;
   "ondemand.recommendations": readonly HomeRecommendation[];
   /**
    * The season's episodes as the provider lists them, in its order, with TMDB's name, story,
