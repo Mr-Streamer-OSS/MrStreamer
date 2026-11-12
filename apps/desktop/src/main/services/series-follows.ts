@@ -216,78 +216,109 @@ function make() {
      * that are loaded. Failures are kept on the follow; the lists being unreadable changes none.
      */
     const check = (listsNow: readonly TitleListsStatus[]) =>
-      checking
-        .withPermits(1)(
-          Effect.gen(function* () {
-            const loaded = listsNow.filter((each) => each.fetchedAt !== null);
+      Effect.gen(function* () {
+        const loaded = listsNow.filter((each) => each.fetchedAt !== null);
 
-            const found = (yield* saving).filter((source) =>
-              loaded.some((each) => each.subscriptionId === source.id),
+        const found = (yield* saving).filter((source) =>
+          loaded.some((each) => each.subscriptionId === source.id),
+        );
+
+        const follows = yield* followsOf(found);
+
+        if (follows.length === 0) return;
+        const titleFor = yield* titlesOf(follows.map((each) => each.series));
+        let changed = false;
+
+        // Classification belongs to the catalogue, never to a pending provider episode read.
+        // Drain it before queuing episode work so an intervening adult mark survives withdrawal.
+        for (const { source, series } of follows) {
+          const title = titleFor(series);
+
+          if (!title) continue;
+
+          const metadataChanged = yield* store
+            .catalogue({
+              account: source.key,
+              seriesId: series.id,
+              name: title.title,
+              year: title.year,
+              adult: title.adult,
+              stands: () => subscriptions.standsNow(source),
+            })
+            .pipe(
+              Effect.catchTag("Failed", (failed) =>
+                Effect.logWarning(
+                  "[follows] a followed series' catalogue metadata can't be saved",
+                  failed.error.kind,
+                ).pipe(Effect.as(false)),
+              ),
             );
 
-            const follows = yield* followsOf(found);
+          changed ||= metadataChanged;
+        }
 
-            if (follows.length === 0) return;
-            const titleFor = yield* titlesOf(follows.map((each) => each.series));
-            let changed = false;
+        if (changed) yield* announce;
 
-            for (const { follow, source, series } of follows) {
-              const title = titleFor(series);
+        yield* Effect.forkScoped(
+          checking
+            .withPermits(1)(
+              Effect.gen(function* () {
+                let changed = false;
 
-              // Unlisted for now: it stays as it was, and shows as unavailable.
-              if (!title) continue;
-              const stands = () => subscriptions.standsNow(source);
+                for (const { follow, source, series } of follows) {
+                  const title = titleFor(series);
 
-              const metadataChanged = yield* store.catalogue({
-                account: source.key,
-                seriesId: series.id,
-                name: title.title,
-                year: title.year,
-                adult: title.adult,
-                stands,
-              });
+                  if (!title) continue;
+                  const stands = () => subscriptions.standsNow(source);
+                  const listed = entryOf(title, series, listsNow);
 
-              changed ||= metadataChanged;
-              const listed = entryOf(title, series, listsNow);
+                  if (listed !== null && listed === follow.listed) continue;
+                  const key = ownedKey(series);
 
-              if (listed !== null && listed === follow.listed) continue;
-              const key = ownedKey(series);
+                  const fetchedAt =
+                    listsNow.find((each) => each.subscriptionId === source.id)?.fetchedAt ?? null;
 
-              const fetchedAt =
-                listsNow.find((each) => each.subscriptionId === source.id)?.fetchedAt ?? null;
+                  if (failedUnder.has(key) && failedUnder.get(key) === fetchedAt) continue;
 
-              if (failedUnder.has(key) && failedUnder.get(key) === fetchedAt) continue;
-
-              const news = yield* factsOf(series, source.key, title, listed, stands).pipe(
-                Effect.flatMap(store.checked),
-                Effect.tap(() => Effect.sync(() => failedUnder.delete(key))),
-                Effect.catchTag("Failed", (failed) =>
-                  Effect.logWarning(
-                    "[follows] a followed series' episodes can't be read",
-                    failed.error.kind,
-                  ).pipe(
-                    Effect.andThen(
-                      Effect.sync(() => {
-                        failedUnder.set(key, fetchedAt);
-                      }),
+                  const news = yield* factsOf(series, source.key, title, listed, stands).pipe(
+                    Effect.flatMap(store.checked),
+                    Effect.tap(() => Effect.sync(() => failedUnder.delete(key))),
+                    Effect.catchTag("Failed", (failed) =>
+                      Effect.logWarning(
+                        "[follows] a followed series' episodes can't be read",
+                        failed.error.kind,
+                      ).pipe(
+                        Effect.andThen(
+                          Effect.sync(() => {
+                            failedUnder.set(key, fetchedAt);
+                          }),
+                        ),
+                        Effect.andThen(Clock.currentTimeMillis),
+                        Effect.flatMap((at) => store.failed(source.key, follow.seriesId, at)),
+                      ),
                     ),
-                    Effect.andThen(Clock.currentTimeMillis),
-                    Effect.flatMap((at) => store.failed(source.key, follow.seriesId, at)),
-                  ),
+                  );
+
+                  changed ||= news;
+                }
+
+                if (changed) yield* announce;
+              }),
+            )
+            .pipe(
+              Effect.catchTag("Failed", (failed) =>
+                Effect.logWarning(
+                  "[follows] followed series keep what they had",
+                  failed.error.kind,
                 ),
-              );
-
-              changed ||= news;
-            }
-
-            if (changed) yield* announce;
-          }),
-        )
-        .pipe(
-          Effect.catchTag("Failed", (failed) =>
-            Effect.logWarning("[follows] followed series keep what they had", failed.error.kind),
-          ),
+              ),
+            ),
         );
+      }).pipe(
+        Effect.catchTag("Failed", (failed) =>
+          Effect.logWarning("[follows] followed series keep what they had", failed.error.kind),
+        ),
+      );
 
     // After every change to the lists, and once for the lists as this profile's service starts.
     yield* Effect.forkScoped(Stream.runForEach(onDemand.changes, ({ lists }) => check(lists)));

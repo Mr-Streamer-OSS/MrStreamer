@@ -1,3 +1,5 @@
+import { Worker } from "node:worker_threads";
+import { type } from "arktype";
 import type { SeriesFollow } from "@mrstreamer/contracts/ondemand";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -124,6 +126,9 @@ async function followsApp(warnings: unknown[] = []) {
 
   return {
     provider,
+    subscriptions,
+    onDemand,
+    subscriptionId: source.id,
     runtime,
     sessions,
     readd,
@@ -172,6 +177,170 @@ describe("followed series", { timeout: 20_000 }, () => {
 
     await viewer.follow(FILES, false);
     expect(await viewer.state(FILES)).toBeNull();
+  });
+
+  it(
+    "withholds adult follows withdrawn while a prior details read is pending",
+    { timeout: 20000 },
+    async () => {
+      let release!: () => void;
+      let arrive!: () => void;
+      let hold = false;
+
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+
+      const arrived = new Promise<void>((r) => {
+        arrive = r;
+      });
+
+      const original = globalThis.fetch;
+
+      const interception = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        if (hold && String(input).includes("get_series_info")) {
+          arrive();
+          await gate;
+        }
+
+        return original(input, init);
+      });
+
+      try {
+        const app = await followsApp();
+        const viewer = await app.admitted();
+        await viewer.follow(FILES);
+        relist(app.provider, { [FILES]: (s) => withEpisode(s, 800_012) });
+        await app.refresh();
+        await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toHaveLength(1));
+        hold = true;
+        relist(app.provider, {
+          [FILES]: (s) => withEpisode(withEpisode(s, 800_012), 800_013, 120),
+        });
+        await app.refresh();
+        await arrived;
+        relist(app.provider, {
+          [FILES]: (s) => ({ ...withEpisode(withEpisode(s, 800_012), 800_013, 180), adult: true }),
+        });
+        await app.refresh();
+        expect(await viewer.alerts()).toEqual([]);
+        app.provider.serveTitles((all) => ({
+          ...all,
+          series: all.series.filter((s) => s.id !== FILES),
+        }));
+        await app.refresh();
+        expect(await viewer.alerts()).toEqual([]);
+        expect(await viewer.state(FILES)).toBeNull();
+        release();
+        await viewer.showAdults(true);
+        await vi.waitFor(async () =>
+          expect((await viewer.state(FILES))?.lastCheck.failed).toBe(true),
+        );
+        expect(await viewer.state(FILES)).toMatchObject({
+          title: null,
+          newEpisodes: [{ id: "800012" }],
+        });
+        await viewer.showAdults(false);
+        expect(await viewer.state(FILES)).toBeNull();
+        expect(await viewer.alerts()).toEqual([]);
+      } finally {
+        release();
+        interception.mockRestore();
+      }
+    },
+  );
+
+  it("reconciles and announces other sources after a subscription edit during a catalogue read", async () => {
+    const app = await followsApp();
+    const viewer = await app.admitted();
+    await viewer.follow(FILES);
+    const otherProvider = await fakeProvider();
+    const other = await app.subscriptions.add(demoLogin(otherProvider));
+    await app.onDemand.refresh(other.id);
+    const admission = await app.runtime.runPromise(app.sessions.admit);
+    const otherSeries = { subscriptionId: other.id, id: String(FILES) };
+
+    const run = <A, E>(effect: Effect.Effect<A, E>) =>
+      app.runtime.runPromise(admission.run(effect) as Effect.Effect<A, unknown>);
+
+    await run(admission.services.follows.follow(otherSeries, true));
+
+    const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    const catalogueRequest = type({ id: "number", method: "'byIds'" });
+    const workerReply = type({ id: "number" });
+    let pending: number | undefined;
+    let holding = true;
+    const post = Worker.prototype.postMessage;
+    const emit = Worker.prototype.emit;
+
+    // Delay only the external worker transport. Services, persistence and catalogue stay real.
+    const outgoing = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
+      this: Worker,
+      ...args: Parameters<Worker["postMessage"]>
+    ) {
+      const request = catalogueRequest(args[0]);
+
+      if (holding && !(request instanceof type.errors)) {
+        pending = request.id;
+        holding = false;
+      }
+
+      return post.apply(this, args);
+    });
+
+    const incoming = vi.spyOn(Worker.prototype, "emit").mockImplementation(function (
+      this: Worker,
+      event: string | symbol,
+      ...args: unknown[]
+    ) {
+      const response = workerReply(args[0]);
+
+      if (event === "message" && !(response instanceof type.errors) && response.id === pending) {
+        pending = undefined;
+        arrive();
+        void gate.then(() => emit.call(this, event, ...args));
+
+        return true;
+      }
+
+      return emit.call(this, event, ...args);
+    });
+
+    try {
+      const announced: unknown[] = [];
+      await app.runtime.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* app.sessions.changes;
+            yield* Effect.forkScoped(
+              Stream.runForEach(stream, (event) =>
+                Effect.sync(() => {
+                  if (event.kind === "follows") announced.push(event);
+                }),
+              ),
+            );
+            yield* Effect.promise(async () => {
+              relist(otherProvider, { [FILES]: (series) => withEpisode(series, 800_012) });
+              await app.onDemand.refresh(other.id);
+              await arrived;
+              await app.subscriptions.update(app.subscriptionId, { secret: "demo" });
+              release();
+              await vi.waitFor(async () =>
+                expect(news(await run(admission.services.follows.state(otherSeries)))).toEqual([
+                  { id: "800012", season: 1, number: 3 },
+                ]),
+              );
+              await vi.waitFor(() => expect(announced).not.toEqual([]));
+            });
+          }),
+        ),
+      );
+    } finally {
+      release();
+      outgoing.mockRestore();
+      incoming.mockRestore();
+    }
   });
 
   it.each(["unchanged stamp", "failed details"])(
