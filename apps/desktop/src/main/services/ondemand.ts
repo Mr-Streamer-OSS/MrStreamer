@@ -821,10 +821,17 @@ function make(deps: OnDemandDeps) {
       } satisfies OnDemandStatus;
     });
 
-    /** Tells the UI the status; `marked` after lists that mark a title they listed for adults. */
+    /**
+     * Publishes household status; the window re-reads it under fresh viewer admission. `marked`
+     * follows lists that mark a title they listed for adults. Acceptance can outlive its viewer.
+     */
     const publish = (marked: boolean) =>
       Effect.flatMap(status, (current) =>
         PubSub.publish(updates, marked ? { ...current, markedForAdults: true } : current),
+      ).pipe(
+        Effect.updateContext((context: Context.Context<never>) =>
+          Context.omit(AdmittedSettings, AdmittedKids)(context),
+        ),
       );
 
     const publishStatus = publish(false);
@@ -1708,6 +1715,16 @@ function make(deps: OnDemandDeps) {
 
           // Unmapped playlists retain Live-only behavior.
           if (hasTitles(source)) yield* refreshOf(source, playlist);
+          const admitted = yield* Effect.serviceOption(AdmittedSettings);
+
+          // Acceptance can settle after its viewer's admission ended: the status isn't theirs to read.
+          if (admitted._tag === "Some" && !admitted.value.current())
+            return yield* new Failed({
+              error: {
+                kind: "unexpected",
+                detail: "Viewing profile changed; retry this catalogue read.",
+              },
+            });
 
           return yield* status;
         }),

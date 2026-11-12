@@ -537,7 +537,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
     await held.arrived;
     active = false;
     held.release();
-    await expect(refresh).rejects.toThrow("Viewing profile changed");
+    await expect(refresh).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
 
     const snapshot = await runtime.runPromise(onDemand.catalogueSnapshot([subscriptionId]));
     expect(Effect.runSyncExit(snapshot.current)._tag).toBe("Success");
@@ -599,6 +601,92 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect(Effect.runSyncExit(before.current)._tag).toBe("Failure");
     const after = await runtime.runPromise(onDemand.catalogueSnapshot([id]));
     expect(Effect.runSyncExit(after.current)._tag).toBe("Success");
+  });
+
+  it("refuses the answer to a refresh the worker accepted after its viewer's admission ended, and tells the window", async () => {
+    const config = testConfig(await tempDir());
+    let hold = false;
+    let release = () => {};
+    const { promise: accepted, resolve: answered } = Promise.withResolvers<void>();
+
+    const runtime = runtimeFor(
+      mainLayer({
+        ...config,
+        catalogueWorker: (setup) => {
+          const worker = config.catalogueWorker(setup);
+          const held = new Set<number>();
+          const send = worker.postMessage.bind(worker);
+          const emit = worker.emit.bind(worker);
+
+          worker.postMessage = (value: WorkerRequest, transfers) => {
+            if (hold && value.method === "finishRefresh") {
+              hold = false;
+              held.add(value.id);
+            }
+
+            send(value, transfers);
+          };
+
+          // The worker accepts and answers; the answer waits until the admission has ended.
+          worker.emit = (event: string | symbol, ...args: unknown[]) => {
+            const [reply] = args;
+
+            if (
+              event !== "message" ||
+              !arkType({ id: "number" }).allows(reply) ||
+              !held.has(reply.id)
+            )
+              return emit(event, ...args);
+            held.delete(reply.id);
+            release = () => void emit(event, ...args);
+            answered();
+
+            return true;
+          };
+
+          return worker;
+        },
+      }),
+    );
+
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+    const subscriptions = await promised(runtime, Subscriptions);
+    const { id } = await subscriptions.add(demoLogin(await fakeProvider()));
+    await runtime.runPromise(onDemand.refresh(id));
+    const told = await collect(runtime, onDemand.changes);
+    let active = true;
+    hold = true;
+
+    const refresh = runtime.runPromise(
+      onDemand.refresh(id).pipe(
+        Effect.provideService(AdmittedSettings, {
+          owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+          settings,
+          current: () => active,
+        }),
+      ),
+    );
+
+    await accepted;
+    active = false;
+    release();
+
+    await expect(refresh).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+    // The window hears the accepted lists, without the viewer whose admission ended.
+    await vi.waitFor(() =>
+      expect(told.at(-1)?.lists).toEqual([
+        expect.objectContaining({
+          subscriptionId: id,
+          fetchedAt: expect.any(Number),
+          failure: null,
+        }),
+      ]),
+    );
+    const snapshot = await runtime.runPromise(onDemand.catalogueSnapshot([id]));
+    expect(Effect.runSyncExit(snapshot.current)._tag).toBe("Success");
   });
 
   it("finds nothing by a version that names another subscription", async () => {
