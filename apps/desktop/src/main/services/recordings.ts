@@ -537,8 +537,8 @@ function make(deps: RecordingsDeps) {
     };
 
     /**
-     * Folders of failed starts recordings.json still lists, by id (see FAILED): they go once it is
-     * written without them, as the next check does.
+     * Folders of failed starts recordings.json still lists, by id (see FAILED): each write leaves
+     * them out, and once one is kept their records and folders go, as the next check does.
      */
     const failedFolders = new Map<string, string>();
 
@@ -580,7 +580,8 @@ function make(deps: RecordingsDeps) {
     const unseen = new Map<string, StoredRecording>();
 
     /**
-     * Reads `record`, which the app didn't see end, as of `now`: a failed start goes (see FAILED);
+     * Reads `record`, which the app didn't see end, as of `now`: a failed start stays listed as it
+     * was until a write takes it out (see failedFolders);
      * its time over, it was cut short by the quit, with what its file holds; else it goes on,
      * missing the time since its file was last written, or since it paused. While its chosen folder
      * isn't there, nor are its marks and file: it is read again once that folder is (see unseen).
@@ -606,8 +607,7 @@ function make(deps: RecordingsDeps) {
         else unseen.delete(record.id);
 
         if (failed) {
-          records.delete(record.id);
-          recordingFiles.delete(record.id);
+          records.set(record.id, current ?? record);
           failedFolders.set(record.id, folderOf(record));
 
           return;
@@ -695,12 +695,10 @@ function make(deps: RecordingsDeps) {
     );
 
     /**
-     * Drops a failed start's record (see FAILED) whose mark couldn't be read as the app started,
-     * for the next write to take out, with its folder.
+     * Gives a failed start's record (see FAILED) whose mark couldn't be read as the app started to
+     * the next write to take out, with its folder (see failedFolders).
      */
     const forgetStart = (record: StoredRecording) => {
-      records.delete(record.id);
-      recordingFiles.delete(record.id);
       failedFolders.set(record.id, folderOf(record));
       unsaved.recordings = true;
     };
@@ -719,7 +717,8 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Writes recordings.json with every record but `without`, the one deleteRecord takes out while
-     * it stays listed until this write is kept. Run it holding `writing`.
+     * it stays listed until this write is kept, and the failed starts in failedFolders, which go
+     * once it is. Run it holding `writing`.
      */
     const writeInventory = (without?: string) =>
       Effect.tryPromise({
@@ -727,7 +726,7 @@ function make(deps: RecordingsDeps) {
           // One not read yet (see unseen) is kept as it was, its gap not guessed.
           const kept = [
             ...[...records.values()].flatMap((record) =>
-              record.id === without
+              record.id === without || failedFolders.has(record.id)
                 ? []
                 : [isLive(record) ? (unseen.get(record.id) ?? record) : record],
             ),
@@ -740,12 +739,14 @@ function make(deps: RecordingsDeps) {
               protection.has(record.id) ? { ...record, protected: true as const } : record,
             ),
           );
-          // Failed starts it no longer lists lose their marked folders.
+          // Failed starts it no longer lists lose their records and marked folders.
           const listed = new Set(kept.map(({ id }) => id));
 
           for (const [id, folder] of failedFolders) {
             if (listed.has(id)) continue;
             failedFolders.delete(id);
+            records.delete(id);
+            recordingFiles.delete(id);
             void rm(folder, { recursive: true, force: true }).catch(() => {});
           }
         },
@@ -836,11 +837,15 @@ function make(deps: RecordingsDeps) {
       Promise.all(
         [...records.values()].map(async (record) => {
           if (isLive(record) || record.status.kind === "missed") return;
+          const was = missing.has(record.id);
 
           const there = await stat(fileOf(record)).then(
             () => true,
             () => false,
           );
+
+          // Marked or cleared while this looked, as by a deletion: that newer state stays.
+          if (missing.has(record.id) !== was) return;
 
           if (there) missing.delete(record.id);
           else missing.add(record.id);
@@ -2445,7 +2450,8 @@ function make(deps: RecordingsDeps) {
         const over: string[] = [];
 
         for (let record of records.values()) {
-          if (!isLive(record) || active.has(record.id)) continue;
+          // A failed start still listed waits for the write that takes it out (see failedFolders).
+          if (!isLive(record) || active.has(record.id) || failedFolders.has(record.id)) continue;
 
           if (
             stopping.has(record.id) ||
@@ -2473,7 +2479,7 @@ function make(deps: RecordingsDeps) {
               continue;
             }
 
-            if (!again || !isLive(again)) {
+            if (!again || !isLive(again) || failedFolders.has(record.id)) {
               resumeTried.delete(record.id);
               over.push(record.id);
               continue;

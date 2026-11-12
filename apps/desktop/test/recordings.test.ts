@@ -7408,6 +7408,137 @@ describe("recording protection and retention", () => {
     expect((await second.recordings.list()).map((each) => each.id)).not.toContain(id);
   });
 
+  it("keeps a deleted recording missing when a list read before its deletion answers late", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const id = ids[0]!;
+    const heard = await collect(first.runtime, first.recordings.changes);
+    const originalStat = fs.stat;
+    const originalRename = fs.rename;
+    const statted = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    const writing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let hold = true;
+
+    // A list's look finds the file there, then answers only after the deletion took it.
+    const looking = vi.spyOn(fs, "stat").mockImplementation(async (path, options) => {
+      const found = await originalStat(path, options);
+
+      if (hold && path === join(root, id, "a.ts")) {
+        hold = false;
+        statted.resolve();
+        await answer.promise;
+      }
+
+      return found;
+    });
+
+    // The inventory write after the folder went stalls, then fails.
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === join(root, "recordings.json") && !existsSync(join(root, id))) {
+        writing.resolve();
+        await release.promise;
+        throw new Error("inventory replacement refused after folder removal");
+      }
+
+      return originalRename(from, to);
+    });
+
+    onTestFinished(() => {
+      looking.mockRestore();
+      adapter.mockRestore();
+    });
+    const reading = first.recordings.list();
+    await statted.promise;
+    const removing = first.recordings.remove(id);
+    removing.catch(() => {});
+
+    try {
+      await writing.promise;
+    } finally {
+      answer.resolve();
+      await reading;
+      release.resolve();
+    }
+
+    await expect(removing).rejects.toMatchObject({
+      error: { detail: "Recordings could not be saved." },
+    });
+    // What the window was told last, without a list read since, says its file is gone.
+    expect(heard.at(-1)?.find((each) => each.id === id)).toMatchObject({
+      status: { kind: "missing" },
+    });
+  });
+
+  it("keeps a failed start listed until recordings.json is written without it", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const manifest = join(root, "recordings.json");
+    const id = ids[0]!;
+    const kept = await readRecordings(manifest);
+
+    if (kept.kind !== "read") throw new Error("Seed inventory unreadable");
+    // Recordings.json still lists a start whose folder was marked failed, as the app quit.
+    await writeFile(
+      manifest,
+      JSON.stringify({
+        version: 1,
+        recordings: kept.items.map((each) =>
+          each.id === id
+            ? { ...each, status: { kind: "recording" }, ended: null, stop: Date.now() + HOUR }
+            : each,
+        ),
+      }),
+    );
+    await writeFile(join(root, id, ".mrstreamer-failed"), "");
+    const original = fs.rename;
+    const writing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let refuse = true;
+
+    // The first write without it stalls, as on a slow drive, then fails.
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (refuse && to === manifest && !(await fs.readFile(from, "utf8")).includes(id)) {
+        refuse = false;
+        writing.resolve();
+        await release.promise;
+        throw new Error("inventory replacement refused");
+      }
+
+      return original(from, to);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const checking = first.recordings.check();
+
+    try {
+      await writing.promise;
+      expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+    } finally {
+      release.resolve();
+      await checking;
+    }
+
+    expect((await first.recordings.list()).map((each) => each.id)).toContain(id);
+    expect(existsSync(join(root, id))).toBe(true);
+    // The next check writes it out, and its folder goes.
+    await first.recordings.check();
+    expect((await first.recordings.list()).map((each) => each.id)).not.toContain(id);
+    expect(
+      await until(
+        async () => existsSync(join(root, id)),
+        (there) => !there,
+      ),
+    ).toBe(false);
+    await first.quit();
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+    expect((await second.recordings.list()).map((each) => each.id)).not.toContain(id);
+  });
+
   it("starts a scheduled recording while retention waits on a stalled recording drive", async () => {
     const { dataDir, root } = await seeded(2);
     const provider = await fakeProvider({ live: true, maxConnections: 2 });
