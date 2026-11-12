@@ -754,7 +754,7 @@ function make(deps: RecordingsDeps) {
             error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
           }),
       }).pipe(
-        // Every record is written each time: what couldn't be kept before is now.
+        // Every retained record is written each time: what couldn't be kept before is now.
         Effect.tap(() =>
           Effect.sync(() => {
             unsaved.recordings = false;
@@ -2842,7 +2842,10 @@ function make(deps: RecordingsDeps) {
         yield* Effect.ignore(savedSubtitles.forget(subtitlesOfCopy(id, { kind: "movie", id })));
         // Room it took may let a paused one go on.
         yield* retryPaused;
-      });
+      }).pipe(
+        // Once its folder goes, finish the inventory commit and publication even on cancellation.
+        Effect.uninterruptible,
+      );
 
     const holdOf = (id: string): RetentionHold | null =>
       protection.has(id)

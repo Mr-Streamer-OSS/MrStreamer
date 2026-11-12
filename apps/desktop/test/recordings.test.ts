@@ -7361,6 +7361,53 @@ describe("recording protection and retention", () => {
     });
   });
 
+  it("does not resurrect a deleted recording when manual deletion is interrupted during its write", async () => {
+    const { dataDir, root, ids } = await seeded(2);
+    const first = await app(dataDir);
+    onTestFinished(first.quit);
+    const id = ids[0]!;
+    const service = await first.runtime.runPromise(Recordings);
+    const original = fs.rename;
+    const writing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const committed = Promise.withResolvers<void>();
+
+    const adapter = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === join(root, "recordings.json") && !existsSync(join(root, id))) {
+        writing.resolve();
+        await release.promise;
+        await original(from, to);
+        committed.resolve();
+
+        return;
+      }
+
+      return original(from, to);
+    });
+
+    onTestFinished(() => adapter.mockRestore());
+    const deleting = first.runtime.runFork(service.remove(id));
+
+    try {
+      await writing.promise;
+      // Request cancellation while the filesystem still owns an unfinished write.
+      first.runtime.runFork(Fiber.interrupt(deleting));
+    } finally {
+      release.resolve();
+      await committed.promise;
+      await first.runtime.runPromise(Fiber.await(deleting));
+      adapter.mockRestore();
+    }
+
+    // Another inventory save must not put the deleted row back, including after restart.
+    await first.recordings.protect(ids[1]!, true);
+    expect((await first.recordings.list()).map((each) => each.id)).not.toContain(id);
+    await first.quit();
+    const second = await app(dataDir);
+    onTestFinished(second.quit);
+    expect((await second.recordings.list()).map((each) => each.id)).not.toContain(id);
+  });
+
   it("starts a scheduled recording while retention waits on a stalled recording drive", async () => {
     const { dataDir, root } = await seeded(2);
     const provider = await fakeProvider({ live: true, maxConnections: 2 });
