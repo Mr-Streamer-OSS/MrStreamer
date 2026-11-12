@@ -5919,19 +5919,20 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
   });
 
-  it("keeps a programme's time while its retry answers past its end", async () => {
+  it("keeps a programme retry ahead of a refreshed guide hold past its end", async () => {
     // Every stream breaks off before a packet; the second only once the test lets it.
     let opened = 0;
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
     const { promise: gate, resolve: open } = Promise.withResolvers<void>();
 
-    const { recordings, listing, programmePlan, clockTo } = await scheduling({
-      streams: (_source, out) => {
-        if (++opened !== 2) return void out.destroy();
-        arrived();
-        void gate.then(() => out.destroy());
-      },
-    });
+    const { provider, guide, subscriptionId, recordings, listing, programmePlan, clockTo } =
+      await scheduling({
+        streams: (_source, out) => {
+          if (++opened !== 2) return void out.destroy();
+          arrived();
+          void gate.then(() => out.destroy());
+        },
+      });
 
     onTestFinished(() => open());
     const { next } = await listing();
@@ -5945,6 +5946,13 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       next: { start: next.start, stop: next.stop },
       status: { kind: "retrying", why: "stream" },
     };
+
+    provider.serveGuide(
+      fakeGuide(provider.catalogue, TEN_PAST).replaceAll(next.title, "Another show"),
+    );
+    await guide.refresh(subscriptionId);
+    await recordings.check();
+    expect(await recordings.schedules()).toMatchObject([trying]);
 
     await clockTo(next.stop + MINUTE);
     expect(await recordings.schedules()).toMatchObject([trying]);

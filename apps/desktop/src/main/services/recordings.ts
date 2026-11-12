@@ -2277,22 +2277,22 @@ function make(deps: RecordingsDeps) {
             { start: record.scheduled?.from ?? record.start, stop: record.stop },
           );
 
-        // A start still answering stands on its own time, past its stop too, as that time stood
-        // before it. Else a time on now that it recorded, stopped or cut short, or a change
-        // settled, records no more: the one after it is next.
+        // A stream/disk retry keeps its own time and reason until its answer, even if a guide
+        // or channel refresh holds the schedule meanwhile.
         const answering = startsOf.get(schedule.id);
-        const next = answering?.occurrence ?? nextPending(schedule, now);
+
+        if (answering?.before === "stream" || answering?.before === "disk")
+          return as({ kind: "retrying", why: answering.before }, answering.occurrence);
+
+        // A time on now that it recorded, stopped or cut short, or a change settled, records no
+        // more: the one after it is next.
+        const next = nextPending(schedule, now);
 
         if (hold) return as(hold, next);
 
         if (!next) return as({ kind: "planned" }, next);
         const { subscriptionId } = plan.channel;
-
-        const reason = answering
-          ? answering.before
-          : next.start <= now
-            ? why.get(occurrenceKey(schedule.id, next))
-            : undefined;
+        const reason = next.start <= now ? why.get(occurrenceKey(schedule.id, next)) : undefined;
 
         if (reason === "busy")
           return as({ kind: "waiting", holders: yield* holdersNow(subscriptionId) }, next);
