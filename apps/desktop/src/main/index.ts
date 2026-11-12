@@ -1397,13 +1397,15 @@ async function start(): Promise<void> {
       ...customListHandlers({ customLists }),
       ...collectionsHandlers({
         collections,
-        current: Effect.fail(
-          new Failed({
-            error: {
-              kind: "unexpected",
-              detail: t("Collection admission is required; retry the request."),
-            },
-          }),
+        // Made when it fails, so it reads in the interface language of that moment.
+        current: Effect.failSync(
+          () =>
+            new Failed({
+              error: {
+                kind: "unexpected",
+                detail: t("Collection admission is required; retry the request."),
+              },
+            }),
         ),
       }),
       ...downloadHandlers({

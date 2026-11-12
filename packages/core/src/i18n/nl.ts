@@ -1257,6 +1257,8 @@ export const nl: Translation = {
     "Het abonnement veranderde tijdens het laden van de zenders.",
   "The subscription changed while loading titles.":
     "Het abonnement veranderde tijdens het laden van de titels.",
+  "The subscription's titles have not loaded yet.":
+    "De titels van het abonnement zijn nog niet geladen.",
   "Subtitle service: {reason}.": "Ondertiteldienst: {reason}.",
   "Subtitle request ended. Try again while this file plays.":
     "Het ondertitelverzoek is beëindigd. Probeer het opnieuw terwijl dit bestand speelt.",

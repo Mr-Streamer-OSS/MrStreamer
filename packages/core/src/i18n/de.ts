@@ -1267,6 +1267,8 @@ export const de: Translation = {
     "Das Abonnement hat sich beim Laden der Sender geändert.",
   "The subscription changed while loading titles.":
     "Das Abonnement hat sich beim Laden der Titel geändert.",
+  "The subscription's titles have not loaded yet.":
+    "Die Titel des Abonnements sind noch nicht geladen.",
   "Subtitle service: {reason}.": "Untertiteldienst: {reason}.",
   "Subtitle request ended. Try again while this file plays.":
     "Die Untertitelanfrage wurde beendet. Versuch es erneut, während diese Datei läuft.",
