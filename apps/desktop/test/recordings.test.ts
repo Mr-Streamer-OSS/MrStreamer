@@ -1006,7 +1006,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     await new Promise((resolve) => setTimeout(resolve, 2100));
     await recordings.check();
     const [ended] = await recordings.list();
-    expect(ended).toMatchObject({ status: { kind: "missing" }, unsaved: true });
+    expect(ended).toMatchObject({ status: { kind: "partial", cut: "stream" }, unsaved: true });
 
     await rm(manifest, { recursive: true });
     await rename(`${manifest}.saved`, manifest);
@@ -1074,7 +1074,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         ([first]) => first?.status.kind === "partial" && first.unsaved === true,
       );
 
-      expect(ended).toMatchObject({ status: { kind: "missing" }, unsaved: true });
+      expect(ended).toMatchObject({ status: { kind: "partial", cut: "stream" }, unsaved: true });
 
       if (how === "stopped")
         await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
