@@ -11,6 +11,8 @@ This is the repo's control skill. The installed task skill owns the implementati
 
 Before adding or keeping a test, name the user-visible failure or public contract it protects, its unique protection and whether a cheaper existing check covers it. Keep the minimum representative public behavior that survives an internal refactor. Use the compiler, type checks and linters for structure. Skip or remove checks without useful evidence; preserve distinct safety and failure boundaries.
 
+Before the first launch of a built-app evidence run for a ticket, read [Evidence runs](references/evidence-runs.md).
+
 For launching or rebuilding a desktop verification session, read [Launch](references/launch.md).
 
 For desktop preflight or diagnosing session identity, read [Doctor](references/doctor.md).

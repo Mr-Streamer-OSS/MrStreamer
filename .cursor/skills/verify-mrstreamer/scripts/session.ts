@@ -34,15 +34,27 @@ export function injectedFailure(scenario: string) {
     throw new Error(`Intentionally failed required scenario: ${scenario}`);
 }
 
+/**
+ * This checkout's Electron executable. An install from pnpm's store can leave the package without
+ * its download (no `path.txt` or `dist`), so that fails with the command that downloads it.
+ */
 export async function electronExecutable() {
   const desktop = fileURLToPath(new URL("../../../../apps/desktop/", import.meta.url));
   const require = createRequire(join(desktop, "package.json"));
   const directory = dirname(require.resolve("electron/package.json"));
-  const binary = (await readFile(join(directory, "path.txt"), "utf8")).trim();
-  const executable = join(directory, "dist", binary);
-  await access(executable);
 
-  return executable;
+  try {
+    const binary = (await readFile(join(directory, "path.txt"), "utf8")).trim();
+    const executable = join(directory, "dist", binary);
+    await access(executable);
+
+    return executable;
+  } catch (error) {
+    throw new Error(
+      `Electron's binary is not downloaded in ${directory}. Run: node ${join(directory, "install.js")}`,
+      { cause: error },
+    );
+  }
 }
 
 /** Ask the OS for an unused loopback port. Ownership is checked again against Electron's arguments. */
