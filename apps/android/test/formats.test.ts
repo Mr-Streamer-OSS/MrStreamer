@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { startFormats } from "./formats-server.ts";
 
 let fixture: Awaited<ReturnType<typeof startFormats>>;
@@ -128,6 +129,8 @@ test("public series episodes and archives serve silent provenance bytes and reta
     try {
       return await run();
     } catch (error) {
+      // Let the fixture observe a peer close queued with the client's rejection.
+      await nextTurn();
       throw new Error(
         `${name} failed, started at ${Math.round(started)}ms, ${Math.round(started - settled)}ms after the previous step\n${JSON.stringify(fixture.diagnostics.slice(-30))}`,
         { cause: error },

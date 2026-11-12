@@ -102,13 +102,18 @@ interface Diagnostic {
   /** Awaiting the upstream answer, or relaying its body. */
   readonly phase?: "upstream" | "body" | undefined;
   readonly expected?: number | null | undefined;
-  readonly queued?: number | undefined;
+  /** Body bytes accepted by res.write, including a write still waiting for drain. */
+  readonly accepted?: number | undefined;
+  /** Body bytes whose write callback succeeded; this does not prove peer receipt. */
+  readonly flushed?: number | undefined;
+  /** Node's writable buffer at observation time, which may be empty after destruction. */
   readonly unflushed?: number | undefined;
   readonly by?:
     "finished" | "teardown" | "handler" | "socket timeout" | "peer or unknown" | undefined;
   readonly hadError?: boolean | undefined;
   readonly requests?: number | undefined;
   readonly bytesRead?: number | undefined;
+  /** Socket total accepted for writing, including HTTP framing, not peer receipt. */
   readonly bytesWritten?: number | undefined;
   readonly error?: DescribedError | undefined;
 }
@@ -471,6 +476,8 @@ export async function startFormats(options: {
       connection: connection?.id,
       phase: "upstream" as "upstream" | "body",
       expected: null as number | null,
+      accepted: 0,
+      flushed: 0,
     };
 
     note("request", {
@@ -488,10 +495,7 @@ export async function startFormats(options: {
           ? "finished"
           : closing
             ? "teardown"
-            : connection?.endedBy === "handler"
-              ? "handler"
-              : "peer or unknown",
-        queued: details.bytes,
+            : (connection?.endedBy ?? "peer or unknown"),
         unflushed: res.writableLength,
       });
     });
@@ -527,8 +531,10 @@ export async function startFormats(options: {
       if (archive && upstream.ok) {
         const channel = panel.catalogue.channels.find((row) => row.streamId === Number(archive[1]));
         await upstream.body?.cancel();
-        upstream = channel?.fixture
-          ? new Response(new Uint8Array(bytes(join(desktop, channel.fixture))), {
+        const body = channel?.fixture ? bytes(join(desktop, channel.fixture)) : null;
+        trace.expected = body?.length ?? null;
+        upstream = body
+          ? new Response(new Uint8Array(body), {
               headers: { "Content-Type": "video/mp2t" },
             })
           : new Response(null, { status: 404 });
@@ -544,7 +550,8 @@ export async function startFormats(options: {
       res.writeHead(upstream.status);
       trace.phase = "body";
       const length = upstream.headers.get("content-length");
-      trace.expected = length === null ? null : Number(length);
+
+      if (length !== null) trace.expected = Number(length);
 
       if (!upstream.body) return void res.end();
 
@@ -572,7 +579,14 @@ export async function startFormats(options: {
               signal: abort.signal,
             });
 
-          if (!res.write(part)) await once(res, "drain", { signal: abort.signal });
+          const flowing = res.write(part, (error) => {
+            if (!error) trace.flushed += part.length;
+          });
+
+          // A false return still accepted this chunk, even if close arrives before drain.
+          trace.accepted += part.length;
+
+          if (!flowing) await once(res, "drain", { signal: abort.signal });
           offset += part.length;
           details.bytes += part.length;
         }
