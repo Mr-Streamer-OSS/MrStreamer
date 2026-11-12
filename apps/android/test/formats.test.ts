@@ -119,9 +119,9 @@ test("invalid complete control commands preserve conditions and event history", 
 });
 
 test("public series episodes and archives serve silent provenance bytes and retain auth failures", async () => {
-  // Hosted runs failed here with a bare `fetch failed`/`read ECONNRESET` (#885). Each network
-  // step names itself on failure, with the time since the previous step (peak() blocks this
-  // process, servers included) and the fixture's recent in-memory transport diagnosis.
+  // #885 hit an idle-socket race after a synchronous byte assertion blocked this process,
+  // fixture included. The fixture now leaves idle expiry to clients; keep each network
+  // step named on failure with its timing and the fixture's transport diagnosis.
   let settled = performance.now();
 
   const step = async <T>(name: string, run: () => Promise<T>) => {
@@ -201,10 +201,10 @@ test("public series episodes and archives serve silent provenance bytes and reta
 }, 30000);
 
 test("a request right after this process stalls past the keep-alive idle window reaches the fixture", async () => {
-  // Hosted shard 3 (#885) resumed from the poll phase after a response body, then blocked this
-  // thread, fixture included, for 6 s. Node 24.22's fetch wrote the next request on the idle
-  // kept-alive connection in the check phase, before the fixture's expired idle timer closed
-  // it in the timers phase, and read ECONNRESET.
+  // Reproduce the mechanism consistent with hosted shard 3 (#885): after a response body,
+  // block this thread, fixture included, for 6 s. On Node 24.22.2, fetch then reuses an idle
+  // connection before the fixture's overdue timer closes it, causing read ECONNRESET.
+  // The hosted log records both idle closes, but not which connection fetch reused.
   const channels = `${fixture.url}/player_api.php?username=fixture&password=fixture-pass&action=get_live_streams`;
   await (await fetch(channels)).arrayBuffer();
   // Resume from an I/O callback, as after the hosted body, then block as its toEqual did.
