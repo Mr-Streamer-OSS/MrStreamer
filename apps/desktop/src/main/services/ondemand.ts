@@ -231,7 +231,7 @@ export class OnDemand extends Context.Service<
      * Whether a subscription's lists should be fetched again: missing, or older than `maxAge`.
      * Never for an unmapped playlist, which has Live TV only.
      */
-    isStale(subscriptionId: string, maxAge: Duration.Input): Effect.Effect<boolean>;
+    isStale(subscriptionId: string, maxAge: Duration.Input): Effect.Effect<boolean, Failed>;
     search(
       query: string,
     ): Effect.Effect<
@@ -1800,7 +1800,7 @@ function make(deps: OnDemandDeps) {
             worked.worked.importRevision !== worked.subscription.importRevision ||
             now - fetchedAt > Duration.toMillis(maxAge)
           );
-        }),
+        }).pipe(Effect.tap(() => stillAdmitted)),
 
       rows: (kind: TitleKind, tab: RowTab, like?: OwnedId) =>
         loaded(

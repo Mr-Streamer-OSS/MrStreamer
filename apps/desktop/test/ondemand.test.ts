@@ -783,6 +783,26 @@ describe("movies and series", { timeout: 20_000 }, () => {
     });
   });
 
+  it("refuses a freshness read after the viewer's admission ends", async () => {
+    const { runtime, subscriptionId } = await onDemandApp();
+    const onDemand = await runtime.runPromise(OnDemand);
+    const settings = await runtime.runPromise(Settings);
+
+    await expect(
+      runtime.runPromise(
+        onDemand.isStale(subscriptionId, "1 hour").pipe(
+          Effect.provideService(AdmittedSettings, {
+            owner: { id: DEFAULT_PROFILE_ID, revision: 1 },
+            settings,
+            current: () => false,
+          }),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Viewing profile changed; retry this catalogue read." },
+    });
+  });
+
   it("keeps a refresh refused for an ended admission off the lists, which the next read still fetches", async () => {
     const { runtime, onDemand: household, subscriptionId } = await onDemandApp();
     const onDemand = await runtime.runPromise(OnDemand);

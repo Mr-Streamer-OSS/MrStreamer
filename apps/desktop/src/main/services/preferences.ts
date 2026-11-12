@@ -737,7 +737,7 @@ export const profileChanged = new Failed({
   error: { kind: "unexpected", detail: PROFILE_CHANGED },
 });
 
-/** Checked again at worker entry because source preparation may outlive the admission. */
+/** True outside an admitted request, or while its viewer is still the one admitted. */
 export const admissionCurrent = (admitted: Option.Option<AdmittedSettings["Service"]>) =>
   admitted._tag === "None" || admitted.value.current();
 
