@@ -4,6 +4,7 @@
 // logo and notice in the app, data cached no longer than six months, and JustWatch named beside
 // streaming services.
 import { type } from "arktype";
+import { defined } from "../defined.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 
 /** What the app keeps about one film or series. */
@@ -196,15 +197,15 @@ const About = lazy(() =>
     "runtime?": "number | null",
     "episode_run_time?": "number[]",
     "belongs_to_collection?": type({ id: "number", name: "string" }).or("null"),
-    "created_by?": type({ id: "number", name: "string" }).array(),
+    "created_by?": type({ "id?": "number", name: "string" }).array(),
     "credits?": type({
       "cast?": type({
-        id: "number",
+        "id?": "number",
         name: "string",
         "character?": "string | null",
         "profile_path?": "string | null",
       }).array(),
-      "crew?": type({ id: "number", name: "string", "job?": "string | null" }).array(),
+      "crew?": type({ "id?": "number", name: "string", "job?": "string | null" }).array(),
     }),
   }),
 );
@@ -420,7 +421,11 @@ export function tmdb(options: TmdbOptions) {
           : (body.credits?.crew ?? []).filter((person) => person.job === "Director");
 
       const directorCredits = [
-        ...new Map(credited.map(({ id, name }) => [id, { id, name }])).values(),
+        ...new Map(
+          credited.flatMap(({ id, name }) =>
+            id === undefined ? [] : [[id, { id, name }] as const],
+          ),
+        ).values(),
       ];
 
       return {
@@ -432,12 +437,12 @@ export function tmdb(options: TmdbOptions) {
         genres: (body.genres ?? []).map((genre) => genre.id),
         runtime: body.runtime || body.episode_run_time?.[0] || null,
         cast: (body.credits?.cast ?? []).slice(0, CAST_SHOWN).map((person) => ({
-          id: person.id,
+          ...defined({ id: person.id }),
           name: person.name,
           character: person.character?.trim() || null,
           profile: person.profile_path ?? null,
         })),
-        directors: [...new Set(directorCredits.map((person) => person.name))],
+        directors: [...new Set(credited.map((person) => person.name))],
         directorCredits,
         collection: body.belongs_to_collection ?? null,
       };

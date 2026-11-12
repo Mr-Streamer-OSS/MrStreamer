@@ -114,7 +114,7 @@ interface SheetPlace {
   readonly returnTo: string | null;
   readonly onReturn: (tile: HTMLElement | null) => void;
   /** Opens a person's or franchise's titles from its link, named `label`, in place of these. */
-  readonly onLink: (link: RelatedLink, label: string) => void;
+  readonly onLink: (link: RelatedLink, label: string, anchor: string) => void;
 }
 
 /** Which version plays, and how the arrow beside Play offers the others. */
@@ -253,29 +253,30 @@ export function DetailsView({
   // Opened, the list starts at its top. Left by Back, the details show as they stood, with the
   // keyboard on the link, or on the sheet when the link has gone.
   const linkedBefore = useRef(linked);
+  const pendingLinkReturn = useRef(linked);
   useEffect(() => {
     const left = linkedBefore.current;
     linkedBefore.current = linked;
     const sheet = scroller.current;
 
-    if (!sheet || left === linked) return;
+    if (!sheet) return;
 
     if (linked) {
-      sheet.scrollTop = 0;
+      if (left !== linked) sheet.scrollTop = 0;
+      pendingLinkReturn.current = linked;
 
       return;
     }
 
-    if (!left) return;
+    const returning = pendingLinkReturn.current;
 
-    sheet.scrollTop = left.scroll;
-
-    const link = sheet.querySelector<HTMLElement>(
-      `[data-link="${left.link.kind}:${left.link.id}"]`,
-    );
-
+    if (!returning || details.isPending || !ready) return;
+    pendingLinkReturn.current = null;
+    sheet.scrollTop = returning.scroll;
+    const link = sheet.querySelector<HTMLElement>(`[data-link="${returning.anchor}"]`);
     (link ?? sheet.closest<HTMLElement>('[role="dialog"]'))?.focus({ preventScroll: true });
-  }, [linked]);
+    link?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [linked, details.isPending, details.data, ready]);
 
   const place: SheetPlace = {
     season,
@@ -299,7 +300,8 @@ export function DetailsView({
       tile.focus({ preventScroll: true });
       tile.scrollIntoView({ block: "nearest", inline: "nearest" });
     },
-    onLink: (link, label) => openLinked({ link, label, scroll: scroller.current?.scrollTop ?? 0 }),
+    onLink: (link, label, anchor) =>
+      openLinked({ link, label, anchor, scroll: scroller.current?.scrollTop ?? 0 }),
   };
 
   return (
@@ -434,6 +436,7 @@ function Content({
       <Credits details={details} onLink={place.onLink} />
       {details.kind === "movie" && details.franchise && (
         <LinkButton
+          anchor="franchise"
           link={{ kind: "franchise", id: details.franchise.tmdbId }}
           onLink={place.onLink}
           label={details.franchise.name}
@@ -518,18 +521,20 @@ function Header({
 function Credits({ details, onLink }: { details: TitleDetails; onLink: SheetPlace["onLink"] }) {
   const cast = details.cast.slice(0, 8);
 
-  const makers = (
-    details.directorCredits ?? details.directors.map((name) => ({ name, tmdbId: undefined }))
-  ).slice(0, 2);
+  const makers = details.directors.slice(0, 2).map((name) => ({
+    name,
+    tmdbId: details.directorCredits?.find((credit) => credit.name === name)?.tmdbId,
+  }));
 
   if (cast.length === 0 && makers.length === 0) return null;
 
   return (
     // Padded so a link's focus ring shows inside the row that scrolls.
     <div className="-mx-1 mt-5 flex gap-5 overflow-x-auto p-1">
-      {cast.map((person) => (
+      {cast.map((person, index) => (
         <LinkButton
           key={`${person.name}:${person.role ?? ""}`}
+          anchor={`cast:${index}`}
           link={person.tmdbId === undefined ? null : { kind: "person", id: person.tmdbId }}
           onLink={onLink}
           label={person.name}
@@ -543,9 +548,10 @@ function Credits({ details, onLink }: { details: TitleDetails; onLink: SheetPlac
           <div className="text-muted-foreground">
             {details.kind === "movie" ? t("Directed by") : t("Created by")}
           </div>
-          {makers.map(({ name, tmdbId }) => (
+          {makers.map(({ name, tmdbId }, index) => (
             <LinkButton
               key={tmdbId ?? name}
+              anchor={`maker:${index}`}
               link={tmdbId === undefined ? null : { kind: "person", id: tmdbId }}
               onLink={onLink}
               label={name}
@@ -567,12 +573,14 @@ function Credits({ details, onLink }: { details: TitleDetails; onLink: SheetPlac
  * Back to give the keyboard to, or the same content as plain text when TMDB gave no id.
  */
 function LinkButton({
+  anchor,
   link,
   onLink,
   label,
   className,
   children,
 }: {
+  anchor: string;
   link: RelatedLink | null;
   onLink: SheetPlace["onLink"];
   label: string;
@@ -584,8 +592,8 @@ function LinkButton({
   return (
     <button
       type="button"
-      data-link={`${link.kind}:${link.id}`}
-      onClick={() => onLink(link, label)}
+      data-link={`${anchor}:${link.kind}:${link.id}`}
+      onClick={() => onLink(link, label, `${anchor}:${link.kind}:${link.id}`)}
       className={cn(
         "group rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-white",
         className,
@@ -615,7 +623,10 @@ function CastMember({ person }: { person: Person }) {
             className="size-full object-cover"
           />
         ) : (
-          <span className="grid size-full place-items-center text-sm font-semibold text-white/80">
+          <span
+            aria-hidden
+            className="grid size-full place-items-center text-sm font-semibold text-white/80"
+          >
             {initials(person.name)}
           </span>
         )}

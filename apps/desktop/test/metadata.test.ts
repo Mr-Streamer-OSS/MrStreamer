@@ -1109,3 +1109,44 @@ describe("TMDB's progress to the UI", { timeout: 30_000 }, () => {
     }
   });
 });
+
+describe("TMDB title credits", () => {
+  it.each(["movie", "tv"] as const)(
+    "keeps %s details and unlinked names when a credit has no id",
+    async (kind) => {
+      const client = tmdbClient({
+        key: "test-key",
+        fetch: async () =>
+          Response.json({
+            overview: "A retained story.",
+            created_by: [{ name: "Unknown Creator" }, { id: 8, name: "Known Creator" }],
+            credits: {
+              cast: [
+                { name: "Unknown Actor", character: "Pilot" },
+                { id: 7, name: "Known Actor" },
+              ],
+              crew: [
+                { name: "Unknown Director", job: "Director" },
+                { id: 9, name: "Known Director", job: "Director" },
+              ],
+            },
+          }),
+      });
+
+      const about = await client.about(kind, "1", "en");
+      expect(about.overview).toBe("A retained story.");
+      expect(about.cast.map(({ name, id }) => ({ name, id }))).toEqual([
+        { name: "Unknown Actor", id: undefined },
+        { name: "Known Actor", id: 7 },
+      ]);
+      expect(about.directors).toEqual(
+        kind === "movie"
+          ? ["Unknown Director", "Known Director"]
+          : ["Unknown Creator", "Known Creator"],
+      );
+      expect(about.directorCredits).toEqual(
+        kind === "movie" ? [{ id: 9, name: "Known Director" }] : [{ id: 8, name: "Known Creator" }],
+      );
+    },
+  );
+});

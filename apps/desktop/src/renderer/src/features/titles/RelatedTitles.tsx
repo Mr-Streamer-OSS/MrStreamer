@@ -174,7 +174,10 @@ export function LinkedTitles({
                   title={title}
                   line={lineOf(title)}
                   onOpen={() =>
-                    openRelated({ kind: title.kind, ...ownedId(title) }, here(title.key))
+                    openRelated(
+                      { kind: title.kind, ...ownedId(title), asked: true },
+                      here(title.key),
+                    )
                   }
                 />
               </li>

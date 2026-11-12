@@ -460,6 +460,7 @@ function make(deps: OnDemandDeps) {
     const seasons = new Map<string, Timed<readonly EpisodeAbout[] | null>>();
     /** TMDB's titles of a person or franchise, by link and language; null where it has none. */
     const linkedAnswers = new Map<string, Timed<TmdbTitles | null>>();
+    const linkedFlights = new Map<string, Fiber.Fiber<TmdbTitles | null, Failed>>();
     const seasonFlights = new Map<string, Flight<readonly EpisodeAbout[] | null | undefined>>();
     const reconfigured = new WeakSet<Fiber.Fiber<unknown, unknown>>();
     /** A forgotten source cannot start new work while Roster still holds its saved login. */
@@ -1864,12 +1865,30 @@ function make(deps: OnDemandDeps) {
           const answer =
             kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS)
               ? kept.value
-              : yield* askLinked(link, viewer).pipe(
-                  Effect.tap((value) =>
-                    Effect.sync(() => keep(linkedAnswers, key, { at: now, value }, LINKED_KEPT)),
-                  ),
+              : yield* Effect.uninterruptibleMask((restore) =>
+                  Effect.gen(function* () {
+                    let fiber = linkedFlights.get(key);
+
+                    if (!fiber) {
+                      fiber = yield* Effect.forkIn(
+                        restore(askLinked(link, viewer)).pipe(
+                          Effect.tap((value) =>
+                            Effect.sync(() =>
+                              keep(linkedAnswers, key, { at: now, value }, LINKED_KEPT),
+                            ),
+                          ),
+                          Effect.ensuring(Effect.sync(() => linkedFlights.delete(key))),
+                        ),
+                        scope,
+                      );
+                      linkedFlights.set(key, fiber);
+                    }
+
+                    return yield* restore(Fiber.join(fiber));
+                  }),
+                ).pipe(
                   Effect.catch((failure) =>
-                    kept && younger(kept.at, now, TMDB_EXPIRE_MS)
+                    kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_EXPIRE_MS)
                       ? Effect.succeed(kept.value)
                       : Effect.fail(failure),
                   ),

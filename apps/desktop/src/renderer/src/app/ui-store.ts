@@ -69,6 +69,8 @@ export interface DetailsPlace {
  * with the keyboard on the link.
  */
 export interface LinkedView {
+  /** The exact credit button, including its role and position among duplicate people. */
+  readonly anchor: string;
   readonly link: RelatedLink;
   readonly label: string;
   readonly scroll: number;

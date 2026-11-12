@@ -817,6 +817,10 @@ describe("people and film franchises a title links to", { timeout: 20_000 }, () 
     await expect(a.service.linked({ kind: "person", id: 1 })).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "TMDB refused the key. Check it in Settings." },
     });
+    await a.time(NOW + 2 * DAY);
+    await expect(a.service.linked({ kind: "person", id: 404 })).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
     // What TMDB said stays usable while it fails, until it would have expired.
     await a.time(NOW + 150 * DAY);
     expect(named(await a.service.linked({ kind: "franchise", id: 10 }))).toEqual(saga);
@@ -827,6 +831,28 @@ describe("people and film franchises a title links to", { timeout: 20_000 }, () 
 
     a.remote!.refuse(false);
     expect((await a.service.linked({ kind: "person", id: 1 })).name).toBe("Alan Actor");
+  });
+
+  it("shares simultaneous linked reads and lets a failed read be retried", async () => {
+    const a = await app({ metadata: true });
+    await a.service.refresh(a.subscriptionId);
+    const link = { kind: "person", id: 1 } as const;
+    const answers = await Promise.all([a.service.linked(link), a.service.linked(link)]);
+    expect(answers[0]).toEqual(answers[1]);
+    expect(answers[0]?.name).toBe("Alan Actor");
+    expect(a.remote!.linkedRequests()).toEqual(["person/1"]);
+
+    a.remote!.refuse(true);
+    const missing = { kind: "person", id: 2 } as const;
+
+    const failures = await Promise.allSettled([
+      a.service.linked(missing),
+      a.service.linked(missing),
+    ]);
+
+    expect(failures.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    a.remote!.refuse(false);
+    expect((await a.service.linked(missing)).name).toBe("Grace Director");
   });
 
   it("fails with what to do without a TMDB key", async () => {

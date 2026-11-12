@@ -1011,7 +1011,7 @@ describe("a person's or franchise's titles", () => {
         { name: "Alan Actor", role: "Pilot", photoUrl: null, tmdbId: 7 },
         { name: "Cal Crew", role: "Deckhand", photoUrl: null },
       ],
-      directors: ["Dana Director"],
+      directors: ["Dana Director", "Una Unlinked"],
       directorCredits: [{ tmdbId: 8, name: "Dana Director" }],
     };
     ipc.answer("ondemand.linked", ({ link }) =>
@@ -1029,6 +1029,8 @@ describe("a person's or franchise's titles", () => {
     expect(sheet()?.textContent).toContain("Cal Crew");
     expect(linkTo("Cal Crew")).toBeUndefined();
     expect(linkTo("Dana Director")).toBeDefined();
+    expect(sheet()?.textContent).toContain("Una Unlinked");
+    expect(linkTo("Una Unlinked")).toBeUndefined();
 
     scroller()!.scrollTop = 120;
     await press(linkTo("Alan Actor"));
@@ -1038,7 +1040,17 @@ describe("a person's or franchise's titles", () => {
     // A person's titles mix movies and series, and say which is a series.
     expect(listedTile("Canyon Hours")?.textContent).toContain("2024 · Series");
 
-    // Meridian Dawn opens the version listed first, of its two.
+    ipc.always("viewing.progress", [
+      {
+        title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "c2" },
+        position: 100,
+        duration: 3600,
+        finished: false,
+        at: 10,
+        since: 1,
+      },
+    ]);
+    // Meridian Dawn opens the version listed first, even with progress on the other.
     await press(listedTile("Meridian Dawn"));
     await showing("Meridian Dawn");
     expect(ipc.argsOf("ondemand.details").at(-1)?.version).toEqual(ownedOf(meridian));
@@ -1056,6 +1068,51 @@ describe("a person's or franchise's titles", () => {
     expect(sheet()).toBeNull();
     expect(document.activeElement).toBe(opener);
   });
+
+  it.each([false, true])(
+    "Back restores the director link and scroll after Settings remount (loading: %s)",
+    async (loading) => {
+      credits = {
+        cast: [{ name: "Alan Actor", role: "Pilot", photoUrl: null, tmdbId: 7 }],
+        directors: ["Alan Actor"],
+        directorCredits: [{ tmdbId: 7, name: "Alan Actor" }],
+      };
+      ipc.always("ondemand.linked", { name: "Alan Actor", titles: [meridian] });
+      const client = await window_();
+      await press(await onPage("Details"));
+      await showing("Night Harbour");
+
+      const director = () =>
+        [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+          (button) => button.textContent?.trim() === "Alan Actor",
+        );
+
+      scroller()!.scrollTop = 180;
+      await press(director());
+      await listing("Alan Actor", "1 in your subscriptions");
+      let held: ReturnType<typeof ipc.hold<"ondemand.details">> | undefined;
+
+      if (loading) {
+        await key(",", { ctrlKey: true, metaKey: true });
+        await settle();
+        held = ipc.hold("ondemand.details");
+        client.removeQueries({ queryKey: ["ondemand", "details"] });
+        await press(
+          [
+            ...document.querySelectorAll<HTMLButtonElement>('[data-view="settings"] header button'),
+          ].find((button) => button.textContent?.trim() === "Back"),
+        );
+        await listing("Alan Actor", "1 in your subscriptions");
+      }
+
+      await press(back());
+
+      if (held) await act(async () => held.resolve(detailsOf("a")));
+      await showing("Night Harbour");
+      expect(document.activeElement).toBe(director());
+      expect(scroller()?.scrollTop).toBe(180);
+    },
+  );
 
   it("says when a franchise has none in the subscriptions, or TMDB didn't answer, with Try again", async () => {
     credits = { franchise: { tmdbId: 9, name: "Harbour Collection" } };
