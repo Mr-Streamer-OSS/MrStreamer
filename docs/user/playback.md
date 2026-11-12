@@ -24,7 +24,7 @@ Most channels play directly. For the rest, Mr. Streamer converts only what the p
 | HEVC (H.265) video on macOS                                        | Plays directly, including 10-bit and 4K                                       |
 | HEVC video on Windows or Linux without a hardware decoder          | The picture is converted to H.264; 4K is reduced to 1080p                     |
 | MPEG-2 video                                                       | The picture is converted to H.264 and deinterlaced                            |
-| Interlaced H.264 video, common in European HD broadcasts           | The picture is converted and deinterlaced, at the same frame rate             |
+| Interlaced H.264 video in MPEG-TS channels                         | The picture is converted and deinterlaced, at the same frame rate             |
 | A picture the player can't decode because the broadcast is damaged | Mr. Streamer retries once with the picture re-encoded, which hides the damage |
 | Several sound tracks                                               | The one in the language you picked last plays, else the channel's first       |
 | DVB subtitles                                                      | Drawn over the picture                                                        |
@@ -145,7 +145,7 @@ _What doesn't work yet, or works differently._
 - Closed captions come from the CEA-608 data most broadcasts carry. A channel or file that sends captions only in the newer CEA-708 form shows none.
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
-- Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
+- Interlaced HLS channels that play directly, and interlaced movies, episodes and recordings played as titles, aren't deinterlaced; fast motion can show fine horizontal lines.
 - Sound delay only holds sound back; it can't play sound before the picture.
 - After the first sound delay or leveling, sound takes Mr. Streamer's own route until you restart it, also once you reset them. That route can add a small delay; leveling adds a little more while enabled.
 - On a TV, a movie or episode plays at normal speed with the stream's own picture and sound, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
