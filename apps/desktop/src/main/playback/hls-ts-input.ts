@@ -1,7 +1,7 @@
 // A demand-driven clear muxed MPEG-TS HLS reader. Playback supplies authenticated HTTP and owns
 // cancellation. This owner resolves playlists, orders segments and exposes every new layout.
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
-import { createInspector, type StreamLayout } from "./inspect.ts";
+import { createInspector, H264_CODECS, type StreamLayout } from "./inspect.ts";
 
 export const PLAYLIST_BYTES = 4 * 1024 * 1024;
 const PREFIX_BYTES = 2 * 1024 * 1024;
@@ -404,7 +404,10 @@ export async function openHlsTsInput(
         const found = inspector.push(next.value);
         layout = found?.layout ?? layout;
         signature = found?.signature ?? signature;
-        settled = found?.open.length === 0;
+        // HLS conversion already accepts either H.264 form; a missing SPS must not reject it.
+        settled =
+          found?.open.every((candidates) => candidates.every((codec) => H264_CODECS.has(codec))) ??
+          false;
 
         if (found && (!initial || settled) && size >= 32 * 1024) break;
 

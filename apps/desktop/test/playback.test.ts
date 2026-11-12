@@ -4,6 +4,9 @@ import {
   type RecordingExtent,
   type RecordingFile,
 } from "../src/main/playback/file-source.ts";
+import { openHlsTsInput } from "../src/main/playback/hls-ts-input.ts";
+import { createInspector } from "../src/main/playback/inspect.ts";
+import { inspectStart } from "../src/main/playback/live-start.ts";
 import { spawnSync } from "node:child_process";
 import {
   appendFile,
@@ -688,6 +691,39 @@ describe("playback", () => {
         { codec_name: "h264", avg_frame_rate: "25/1" },
         { codec_name: "aac", avg_frame_rate: "0/0" },
       ]);
+
+      const audioPackets = (input: Buffer) => {
+        const run = spawnSync(
+          FFPROBE,
+          [
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_packets",
+            "-show_data_hash",
+            "sha256",
+            "-show_entries",
+            "packet=data_hash",
+            "-of",
+            "csv=p=0",
+            "pipe:0",
+          ],
+          { input, encoding: "utf8" },
+        );
+
+        expect(run.status, run.stderr).toBe(0);
+
+        return run.stdout
+          .trim()
+          .split("\n")
+          .filter((line) => line.startsWith("SHA256:"))
+          .map((line) => line.split(",")[0]);
+      };
+
+      const sourcePackets = audioPackets(fixture("h264-interlaced.mpegts"));
+      expect(sourcePackets.length).toBeGreaterThan(0);
+      expect(audioPackets(received)).toEqual(sourcePackets);
       await playback.dispose();
     });
 
@@ -3335,4 +3371,103 @@ describe("pane transitions and observations", () => {
     expect(await service.paneCapacity(channel)).toEqual({ eligible: true, limit: 2, used: 0 });
     expect(provider.streamRequests()).toBe(0);
   });
+});
+
+/** A mid-GOP join with an SPS arriving after 900 KB of non-header video payload. */
+function lateSequenceHeader(header = true) {
+  const source = fixture("h264-interlaced.mpegts");
+  const prefix: Buffer[] = [];
+  let video: Buffer | undefined;
+
+  for (let at = 0; at < source.length; at += 188) {
+    const packet = source.subarray(at, at + 188);
+    const pid = ((packet[1]! & 31) << 8) | packet[2]!;
+
+    if (pid === 256) {
+      video = packet;
+      break;
+    }
+
+    prefix.push(packet);
+  }
+
+  if (!video) throw new Error("Fixture has no video PES");
+  const filler = Buffer.from(video);
+  const offset = 4 + (((filler[3]! >> 4) & 3) === 3 ? 1 + filler[4]! : 0);
+  // Keep the first PES header, but no sequence header or accidental start codes.
+  const first = Buffer.from(filler);
+  first.fill(0x55, offset + 9 + first[offset + 8]!);
+  filler[1] = filler[1]! & ~64;
+  filler.fill(0x55, offset);
+
+  const audio: Buffer[] = [];
+
+  for (let at = 0; at < source.length; at += 188) {
+    const packet = source.subarray(at, at + 188);
+
+    if ((((packet[1]! & 31) << 8) | packet[2]!) === 257) audio.push(packet);
+  }
+
+  return Buffer.concat([
+    ...prefix,
+    ...audio,
+    first,
+    ...Array.from({ length: 5100 }, () => filler),
+    ...(header ? [source] : []),
+  ]);
+}
+
+it("inspects a mid-GOP join in bounded time and finds a late sequence header", () => {
+  for (const header of [false, true]) {
+    const input = lateSequenceHeader(header);
+    const inspector = createInspector();
+    const began = performance.now();
+    let found;
+
+    for (let at = 0; at < input.length; at += 1316)
+      found = inspector.push(input.subarray(at, at + 1316)) ?? found;
+    expect(found?.layout.video?.codec).toBe(header ? "h264-interlaced" : "h264");
+    expect(performance.now() - began).toBeLessThan(1000);
+  }
+});
+
+it("reports the H.264 family without claiming its unresolved field treatment", async () => {
+  const input = lateSequenceHeader(false);
+
+  const start = await inspectStart(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(input);
+        controller.close();
+      },
+    }).getReader(),
+    new Set(["h264", "aac"]),
+  );
+
+  expect(start.diagnostic.diagnostic_video_codec).toBe("h264");
+  expect(start.diagnostic.diagnostic_reason).toBe("inspection_undetermined");
+});
+
+it("accepts converted HLS whose first segment has no H.264 sequence header", async () => {
+  const input = lateSequenceHeader(false);
+
+  const reader = await openHlsTsInput(
+    "https://fixture.test/list.m3u8",
+    async (address) =>
+      new Response(
+        address.endsWith("m3u8")
+          ? "#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment.ts\n#EXT-X-ENDLIST\n"
+          : input,
+      ),
+    new AbortController().signal,
+    false,
+    null,
+  );
+
+  try {
+    expect(reader.firstLayout.video?.codec).toBe("h264");
+    expect(reader.prefix.length).toBeGreaterThan(0);
+  } finally {
+    await reader.close();
+  }
 });

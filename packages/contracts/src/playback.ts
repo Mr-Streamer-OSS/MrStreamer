@@ -35,8 +35,8 @@ export type StreamFormat = "mpegts" | "hls";
 export const CODECS = [
   "h264",
   /**
-   * H.264 whose sequence allows field pictures, as interlaced broadcasts send. A browser decodes
-   * it but shows both fields in one picture, so moving edges comb; the app's player leaves it out.
+   * H.264 whose sequence allows field pictures, including sequences with progressive pictures.
+   * Interlaced pictures can comb in a browser, so the app's window converts this variant.
    */
   "h264-interlaced",
   "hevc",
@@ -201,3 +201,10 @@ export interface LiveTimeline {
   readonly cursor: number;
   readonly expired: boolean;
 }
+
+/**
+ * The first profile every receiver is taken to decode: H.264 with AAC. No hardware has proved
+ * more yet, so the rest converts. Interlaced H.264 goes as it is, as it did before the app's own
+ * player had it deinterlaced; whether a receiver deinterlaces it is unproven too.
+ */
+export const RECEIVER_DECODERS: readonly Codec[] = ["h264", "h264-interlaced", "aac"];

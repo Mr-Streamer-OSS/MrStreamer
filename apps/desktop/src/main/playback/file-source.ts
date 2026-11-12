@@ -427,7 +427,8 @@ export function indexRecording(path: string, source: RecordingFile): RecordingFi
             tables = { from: at, ready: false };
           }
 
-          const inspected = inspector.push(packet);
+          // Indexing needs the declared codec family, not field/bit-depth refinement.
+          const inspected = tables?.ready ? null : inspector.push(packet);
 
           if (inspected) {
             // A new table can carry the program on, as when a provider adds a sound track. Its

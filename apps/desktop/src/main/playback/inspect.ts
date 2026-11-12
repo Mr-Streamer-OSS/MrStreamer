@@ -1,7 +1,7 @@
 // Reads the start of an MPEG-TS stream to learn which tracks it carries, before any byte reaches
 // the player. The program tables name each track's format, language and, for teletext and DVB
 // subtitles, their pages; for MPEG audio, H.264, HEVC and AAC the first frame header adds what the
-// tables leave open: MP2 or MP3, interlaced or progressive, 8 or 10-bit, the channel layout.
+// tables leave open: MP2 or MP3, H.264 field capability, HEVC bit depth, the channel layout.
 import type { Codec } from "@mrstreamer/contracts/playback";
 import { bitReader, unescape } from "@mrstreamer/core/bitstream";
 
@@ -78,6 +78,7 @@ export function createInspector() {
   let table: ProgramTable | null = null;
   /** Payload collected from the first PES packet of each pending track. */
   const payloads = new Map<number, Uint8Array>();
+  const videos = new Map<number, ReturnType<typeof videoInspector>>();
 
   function inspection(): Inspection | null {
     if (!table || pmtPid === null) return null;
@@ -127,19 +128,35 @@ export function createInspector() {
       const track = table.tracks.find((entry) => entry.pid === pid);
 
       if (!track?.pending) return;
-      const collected = payloads.get(pid);
+      let codec: Codec | null;
+      let exhausted: boolean;
 
-      if (!collected && !start) return;
-      const joined = collected ? concat(collected, payload) : payload;
-      payloads.set(pid, joined);
-      const codec = examine(track.pending, pesData(joined));
+      if (track.pending === "h264" || track.pending === "hevc") {
+        let scanner = videos.get(pid);
 
-      if (codec) {
-        track.codec = codec;
+        if (!scanner) {
+          if (!start) return;
+          scanner = videoInspector(track.pending);
+          videos.set(pid, scanner);
+        }
+
+        codec = scanner.push(payload, start);
+        exhausted = scanner.bytes >= 1024 * 1024;
+      } else {
+        const collected = payloads.get(pid);
+
+        if (!collected && !start) return;
+        const joined = collected ? concat(collected, payload) : payload;
+        payloads.set(pid, joined);
+        codec = examine(track.pending, pesData(joined));
+        exhausted = joined.length > 64 * 1024;
+      }
+
+      if (codec || exhausted) {
+        track.codec = codec ?? fallback(track.pending);
         track.pending = null;
-      } else if (joined.length > (track.kind === "video" ? 1024 : 64) * 1024) {
-        track.codec = fallback(track.pending);
-        track.pending = null;
+        payloads.delete(pid);
+        videos.delete(pid);
       }
     }
   }
@@ -179,6 +196,59 @@ export function createInspector() {
     /** True once enough data has passed to be sure it is not MPEG-TS, such as a radio stream. */
     get notTransportStream(): boolean {
       return !aligned && unaligned > 32 * 1024;
+    },
+  };
+}
+
+/** Scan each elementary byte once, retaining only a bounded sequence header and split PES header. */
+function videoInspector(kind: "h264" | "hevc") {
+  let bytes = 0;
+  let zeros = 0;
+  let header = false;
+  let nal: number[] = [];
+  let pes: number[] | null = null;
+
+  return {
+    get bytes() {
+      return bytes;
+    },
+    push(payload: Uint8Array, start: boolean): Codec | null {
+      if (start) pes = [];
+
+      for (const byte of payload) {
+        if (++bytes > 1024 * 1024) break;
+
+        if (pes) {
+          pes.push(byte);
+
+          if (pes.length >= 9 && pes.length >= 9 + pes[8]!) pes = null;
+          continue;
+        }
+
+        if (byte === 1 && zeros >= 2) {
+          const codec = nal.length ? examine(kind, Uint8Array.from([0, 0, 1, ...nal])) : null;
+
+          if (codec) return codec;
+          header = true;
+          nal = [];
+          zeros = 0;
+          continue;
+        }
+
+        zeros = byte === 0 ? zeros + 1 : 0;
+
+        if (header) {
+          header = false;
+          const target = kind === "h264" ? (byte & 31) === 7 : ((byte >> 1) & 63) === 33;
+
+          if (target) nal.push(byte);
+        } else if (nal.length > 0 && nal.length < 1024) nal.push(byte);
+      }
+
+      if (nal.length === 0) return null;
+
+      // A 1 KB cap bounds malformed scaling lists; a later SPS can still settle the track.
+      return examine(kind, Uint8Array.from([0, 0, 1, ...nal]));
     },
   };
 }

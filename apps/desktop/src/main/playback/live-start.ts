@@ -3,7 +3,7 @@ import type { PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import type { Codec, StreamFailure } from "@mrstreamer/contracts/playback";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { createCleanStart } from "./clean-start.ts";
-import { createInspector, type Inspection, type StreamLayout } from "./inspect.ts";
+import { createInspector, H264_CODECS, type Inspection, type StreamLayout } from "./inspect.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 export type Opened =
@@ -79,19 +79,38 @@ export async function inspectStart(
   let latest: Inspection | null = null;
   let pending: Promise<ReadResult> | null = null;
 
-  const facts = (): PlaybackDiagnostic => {
-    const unresolved = latest?.open.flat() ?? [];
-    // Inspection's conservative codec guesses must never be reported as observed codecs.
-    const guessed = unresolved.length > 0 ? ("unknown" as const) : undefined;
+  const needsInspection = (candidates: readonly Codec[]) => {
+    const decoded = candidates.filter((codec) => decoders.has(codec)).length;
 
-    return {
-      ...defined({
-        diagnostic_video_codec: guessed,
-        diagnostic_audio_codec: guessed,
-        diagnostic_reason:
-          !latest || unresolved.length > 0 ? ("inspection_undetermined" as const) : undefined,
-      }),
-    };
+    return decoded !== 0 && decoded !== candidates.length;
+  };
+
+  const facts = (): PlaybackDiagnostic => {
+    const unresolved = latest?.open.filter(needsInspection) ?? [];
+
+    const layout = latest?.layout;
+
+    const videoOpen = latest?.open.some((candidates) =>
+      candidates.some((codec) => codec === layout?.video?.codec),
+    );
+
+    const audioOpen = latest?.open.some((candidates) =>
+      layout?.audio.some((track) => candidates.some((codec) => codec === track.codec)),
+    );
+
+    // Both H.264 variants have the same diagnostic family, even before field treatment settles.
+    const h264 = latest?.layout.video && H264_CODECS.has(latest.layout.video.codec);
+
+    return defined({
+      diagnostic_video_codec: h264
+        ? ("h264" as const)
+        : videoOpen
+          ? ("unknown" as const)
+          : undefined,
+      diagnostic_audio_codec: audioOpen ? ("unknown" as const) : undefined,
+      diagnostic_reason:
+        !latest || unresolved.length > 0 ? ("inspection_undetermined" as const) : undefined,
+    });
   };
 
   const deadline = Date.now() + INSPECT_LIMIT.ms;
@@ -115,11 +134,7 @@ export async function inspectStart(
     size += result.value.length;
     latest = inspector.push(result.value) ?? latest;
 
-    const settled = latest?.open.every((candidates) => {
-      const decoded = candidates.filter((codec) => decoders.has(codec)).length;
-
-      return decoded === 0 || decoded === candidates.length;
-    });
+    const settled = latest?.open.every((candidates) => !needsInspection(candidates));
 
     if (latest && settled)
       return { layout: latest.layout, diagnostic: facts(), head, pending: null };

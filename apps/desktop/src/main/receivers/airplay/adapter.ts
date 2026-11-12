@@ -1,3 +1,4 @@
+import { RECEIVER_DECODERS } from "@mrstreamer/contracts/playback";
 // AirPlay, on macOS. Electron can't AirPlay a stream, so a small helper program does: an AVPlayer
 // that plays the address the output service hands over on the receiver the viewer picks in the
 // system's own list (apps/desktop/native/airplay). This adapter starts the helper on first use,
@@ -12,7 +13,6 @@
 import type { Receiver } from "@mrstreamer/contracts/output";
 import { withoutAddresses } from "@mrstreamer/core/provider";
 import {
-  RECEIVER_DECODERS,
   ReceiverFailed,
   type AdapterEvent,
   type Connection,

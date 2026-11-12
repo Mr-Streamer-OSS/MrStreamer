@@ -138,6 +138,16 @@ ffmpeg -f lavfi -i smptebars=size=128x72:rate=25 -f lavfi -i sine=frequency=440:
   <codecs> -f mpegts <name>.mpegts
 ```
 
+The moving-bar interlaced clip uses this complete command instead of the bars above. It combines 50 source pictures per second into 25 field-paired frames:
+
+```sh
+ffmpeg -f lavfi -i "color=gray:size=128x72:rate=50,geq=lum='if(between(X,mod(N*8,128),mod(N*8,128)+23)*between(Y,8,63),235,128)':cb=128:cr=128" \
+  -f lavfi -i sine=frequency=440:sample_rate=48000 -t 3 \
+  -vf tinterlace=mode=interleave_top,setfield=tff -c:v libx264 -preset medium -crf 18 \
+  -pix_fmt yuv420p -flags +ildct+ilme -x264-params tff=1 -c:a aac -b:a 32k \
+  -f mpegts apps/desktop/test/fixtures/h264-interlaced.mpegts
+```
+
 | Clip                                | Codecs                                                                                                                                                                                                  |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `h264-aac`                          | `-c:v libx264 -preset medium -crf 30 -pix_fmt yuv420p -g 25 -c:a aac -b:a 32k -ac 2`                                                                                                                    |

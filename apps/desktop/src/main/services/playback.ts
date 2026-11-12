@@ -1,3 +1,4 @@
+import { RECEIVER_DECODERS } from "@mrstreamer/contracts/playback";
 import type { TrackChoice } from "@mrstreamer/contracts/preferences";
 import { AdmittedKids, allowsApproval } from "./profile-policy.ts";
 import {
@@ -213,7 +214,6 @@ import {
   type ReceiverLan,
   type ReceiverTools,
 } from "../playback/receiver-delivery.ts";
-import { RECEIVER_DECODERS } from "../receivers/adapter.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 /** The ffprobe fields conversion reads; unrelated stream fields remain forward compatible. */

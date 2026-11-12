@@ -1,3 +1,4 @@
+import { RECEIVER_DECODERS } from "@mrstreamer/contracts/playback";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
 // One connected Cast receiver: the channel to it, the media app started on it, and the load that
@@ -9,7 +10,6 @@ import { type } from "arktype";
 // any other number belongs to an earlier load, or to another sender, and is dropped.
 import { setTimeout as sleep } from "node:timers/promises";
 import {
-  RECEIVER_DECODERS,
   ReceiverFailed,
   type AdapterEvent,
   type Connection,
