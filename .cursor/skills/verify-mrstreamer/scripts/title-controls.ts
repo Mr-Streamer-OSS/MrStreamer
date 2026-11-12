@@ -86,8 +86,14 @@ export async function titleControlsScenario(d: Driver): Promise<void> {
     "The skip buttons don't name the saved step",
   );
   const before = await media();
+  const seekAt = Date.now();
   await d.key("ArrowRight", 39);
-  await d.wait(async () => (await media()).position >= before.position + 28);
+  await d.wait(async () => {
+    const { position } = await media();
+    const elapsed = (Date.now() - seekAt) / 1000;
+
+    return position >= before.position + 28 && position <= before.position + 32 + elapsed;
+  }, 5000);
   d.observed["right"] = { before, after: await media() };
 
   // The time before the scrubber takes 0:05.

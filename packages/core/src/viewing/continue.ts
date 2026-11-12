@@ -63,7 +63,9 @@ export function parseClock(text: string): number | null {
 
   if (later.some((part) => part.length !== 2 || Number(part) >= 60)) return null;
 
-  return Number(hours ?? 0) * 3600 + Number(minutes ?? 0) * 60 + Number(seconds);
+  const total = Number(hours ?? 0) * 3600 + Number(minutes ?? 0) * 60 + Number(seconds);
+
+  return Number.isSafeInteger(total) ? total : null;
 }
 
 /** Where a title starts: where it stopped, a few seconds back, or the beginning. */

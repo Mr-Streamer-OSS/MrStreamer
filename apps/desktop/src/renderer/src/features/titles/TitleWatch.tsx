@@ -30,7 +30,7 @@ import {
   RotateCw,
   SkipForward,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
 import { nextEpisode } from "@mrstreamer/core/ondemand/details";
@@ -131,6 +131,7 @@ export function TitleWatch() {
   const failure = phase.kind === "failed" ? phase : null;
   const closed = useClosed(failure);
   const [menu, setMenu] = useState<TitleMenu>(null);
+  const onTimeOpen = useCallback((open: boolean) => setMenu(open ? "time" : null), []);
   // The title plays on a receiver on the network, or did until its connection broke.
   const remote = useTitlePlayer((state) => state.shows !== null);
   useTitleSession();
@@ -393,10 +394,7 @@ export function TitleWatch() {
             <div className="truncate text-2xl font-semibold tracking-tight">{now.name}</div>
             {now.detail && <div className="truncate text-sm text-foreground/85">{now.detail}</div>}
           </div>
-          <Scrubber
-            timeOpen={menu === "time"}
-            onTimeOpen={(open) => setMenu(open ? "time" : null)}
-          />
+          <Scrubber timeOpen={menu === "time"} onTimeOpen={onTimeOpen} />
           <div className="mt-3 flex items-center gap-2">
             <Skip by={-1} />
             <PlayPause />
@@ -590,6 +588,9 @@ function GoToTime({
   const [invalid, setInvalid] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const label = t("Go to time");
+
+  // The end screen, mini player or an unknown length can remove the field without blurring it.
+  useEffect(() => () => onOpen(false), [onOpen]);
 
   const close = (focusButton: boolean) => {
     setInvalid(false);
