@@ -93,7 +93,7 @@ function make() {
     const store = yield* SeriesFollowsStore;
     const preferences = viewingPreferences(yield* Settings);
     const changes = yield* PubSub.unbounded<ActiveProfile | null>();
-    // One check at a time, so two refreshes close together never read one change twice.
+    // Episode reads are serialized; catalogue classification must not wait behind provider reads.
     const checking = yield* Semaphore.make(1);
     /**
      * The fetch of its lists each follow's last failed read was under, by version: the lists also
@@ -265,7 +265,11 @@ function make() {
               Effect.gen(function* () {
                 let changed = false;
 
-                for (const { follow, source, series } of follows) {
+                const current = (yield* saving).filter((source) =>
+                  loaded.some((each) => each.subscriptionId === source.id),
+                );
+
+                for (const { follow, source, series } of yield* followsOf(current)) {
                   const title = titleFor(series);
 
                   if (!title) continue;

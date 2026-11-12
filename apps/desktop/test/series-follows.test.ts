@@ -250,6 +250,65 @@ describe("followed series", { timeout: 20_000 }, () => {
     },
   );
 
+  it("does not fail a queued follow after its subscription is edited", async () => {
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
+    const original = globalThis.fetch;
+    let holding = false;
+
+    const interception = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (holding && String(input).includes("get_series_info")) {
+        holding = false;
+        arrive();
+        await gate;
+      }
+
+      return original(input, init);
+    });
+
+    try {
+      const app = await followsApp();
+      const viewer = await app.admitted();
+      await viewer.follow(FILES);
+      await viewer.showAdults(true);
+      relist(app.provider, { [FILES]: (s) => withEpisode(s, 800_012) });
+      await app.refresh();
+      await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toHaveLength(1));
+      const otherProvider = await fakeProvider();
+      relist(otherProvider, { [FILES]: (s) => ({ ...s, name: "Queued original" }) });
+      const other = await app.subscriptions.add(demoLogin(otherProvider));
+      await app.onDemand.refresh(other.id);
+      const admission = await app.runtime.runPromise(app.sessions.admit);
+      const otherSeries = { subscriptionId: other.id, id: String(FILES) };
+
+      const run = <A, E>(effect: Effect.Effect<A, E>) =>
+        app.runtime.runPromise(admission.run(effect) as Effect.Effect<A, unknown>);
+
+      await run(admission.services.follows.follow(otherSeries, true));
+      holding = true;
+      relist(app.provider, { [FILES]: (s) => withEpisode(withEpisode(s, 800_012), 800_013, 120) });
+      await app.refresh();
+      await arrived;
+      relist(otherProvider, { [FILES]: (s) => ({ ...withEpisode(s, 800_012), adult: true }) });
+      await app.onDemand.refresh(other.id);
+      await vi.waitFor(async () =>
+        expect((await run(admission.services.follows.state(otherSeries)))?.title?.adult).toBe(true),
+      );
+      await app.subscriptions.update(other.id, { secret: "demo" });
+      release();
+      await vi.waitFor(async () => expect(news(await viewer.state(FILES))).toHaveLength(2));
+      await vi.waitFor(async () =>
+        expect(news(await run(admission.services.follows.state(otherSeries)))).toHaveLength(1),
+      );
+      expect((await run(admission.services.follows.state(otherSeries)))?.lastCheck.failed).toBe(
+        false,
+      );
+    } finally {
+      release();
+      interception.mockRestore();
+    }
+  });
+
   it("reconciles and announces other sources after a subscription edit during a catalogue read", async () => {
     const app = await followsApp();
     const viewer = await app.admitted();
