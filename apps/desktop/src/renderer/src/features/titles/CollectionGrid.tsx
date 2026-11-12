@@ -324,8 +324,8 @@ function controlOf(scroller: HTMLElement, index: number, part: number): HTMLElem
  * keeps the focus and the Tab stop. `takeFocus` asks the selected tile to take the focus once it
  * is drawn, unless the focus went to another control first; `onFocusTaken` says it did. `settled`
  * is false while a page of the list is still being read, as a refresh reads them one at a time.
- * `reset` withholds scroll restoration and clears its offset during a privacy refresh; an empty
- * unread list clamps selection to its first position without losing focus handoff.
+ * `reset` clears selection and scroll together while privacy data is unread, without losing
+ * the mounted grid's focus handoff.
  * `kept` brings the selection and the scroll back as the grid stood when it went, the selection
  * by its key, and keeps them again as it goes.
  */
@@ -387,18 +387,20 @@ export function Grid<T>({
     index: kept?.from?.index ?? 0,
   }));
 
-  const found = locate(chosen, total, itemAt, keyOf);
+  const selection = reset ? { key: null, index: 0 } : chosen;
+  const found = locate(selection, total, itemAt, keyOf);
 
   // A title the loaded pages lack keeps its key while a page is still being read: a refresh
   // answers them one at a time, and a restored position can need a page not yet requested. Meanwhile it
   // shows no ring, takes no focus and opens nothing. Once every page answered, a title still
   // missing counts as gone, and what now stands at its position takes its place. One that moved
   // past the pages loaded so far isn't looked for beyond them.
-  const pending = found === null && (!settled || (chosen.index < total && !itemAt(chosen.index)));
+  const pending =
+    found === null && (!settled || (selection.index < total && !itemAt(selection.index)));
 
-  const selected = found ?? Math.min(chosen.index, Math.max(total - 1, 0));
+  const selected = found ?? Math.min(selection.index, Math.max(total - 1, 0));
   const selectedItem = itemAt(selected);
-  const selectedKey = pending || !selectedItem ? chosen.key : keyOf(selectedItem);
+  const selectedKey = pending || !selectedItem ? selection.key : keyOf(selectedItem);
 
   // Kept where it was found, so the next render needn't look for it again.
   if (selected !== chosen.index || selectedKey !== chosen.key)

@@ -442,6 +442,8 @@ it("keeps the privacy-reset selection and scroll together after returning", asyn
     const page = await movies();
     stop = syncOnDemand(page.client);
     await until(() => expect(selectedPoster()).toBe("Arrival, 2020"));
+    await press("End");
+    await until(() => expect(selectedPoster()).toBe("Dune, 2020"));
     const scroller = document.querySelector('[role="list"]')!.parentElement!;
     await act(async () => {
       scroller.scrollTop = 700;
@@ -471,4 +473,38 @@ it("keeps the privacy-reset selection and scroll together after returning", asyn
       else Reflect.deleteProperty(HTMLElement.prototype, property);
     }
   }
+});
+
+it("keeps the recovered New page's scroll after a failed read", async () => {
+  setBrowsing("movie", (place) => ({ ...place, tab: "new" }));
+  ipc.always("subscription.list", [{ ...SAVED, kind: "xtream" }]);
+  ipc.refuse("ondemand.rows", { kind: "unexpected", detail: "Rows unavailable" });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(queries.subscriptions().queryKey, [{ ...SAVED, kind: "xtream" }]);
+  const page = queryView(client);
+  unmount = page.unmount;
+  await page.render(createElement(TitlesPage, { kind: "movie", active: true }));
+  await until(() => expect(page.container.textContent).toContain("Rows unavailable"));
+
+  const rows = Array.from({ length: 30 }, (_, index) => ({
+    id: `genre:${index}` as const,
+    name: `Genre ${index}`,
+    total: 0,
+    titles: [],
+  }));
+
+  ipc.always("ondemand.rows", rows);
+  await act(async () =>
+    client.refetchQueries({ queryKey: queries.rows("movie", "new", null).queryKey }),
+  );
+  await until(() => expect(page.container.textContent).toContain("Genre 29"));
+  const scroller = page.container.querySelector<HTMLElement>(".overflow-y-auto")!;
+  await act(async () => {
+    scroller.scrollTop = 350;
+    scroller.dispatchEvent(new Event("scroll"));
+  });
+  await page.render(null);
+  expect(useUi.getState().browsing.movie.spots.tab?.top).toBe(350);
+  await page.render(createElement(TitlesPage, { kind: "movie", active: true }));
+  await until(() => expect(page.container.textContent).toContain("Genre 29"));
 });

@@ -557,12 +557,8 @@ function Rows({
       from: kept.from?.top ?? null,
       keep: (top) => kept.keep({ key: null, index: 0, top }),
     },
-    !rows.isPending && measured,
+    rows.data !== undefined && measured,
   );
-
-  if (rows.error) {
-    return <p className="px-10 text-sm text-destructive">{describeError(appError(rows.error))}</p>;
-  }
 
   const featured = tab === "for-you" ? featuredOf(kind, rows.data ?? []) : null;
 
@@ -573,6 +569,9 @@ function Rows({
 
   return (
     <div ref={box} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
+      {rows.error && (
+        <p className="text-sm text-destructive">{describeError(appError(rows.error))}</p>
+      )}
       {featured && <Featured title={featured} resume={resume ?? null} />}
       <div className="space-y-9">
         {tab === "for-you" && mine.length > 0 && (
