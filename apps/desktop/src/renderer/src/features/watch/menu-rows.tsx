@@ -64,8 +64,17 @@ export function Step({
 }
 
 /**
+ * A setting's row: its label, then its control on the menu's right edge. When a long label or
+ * large text leaves no room beside it, the control moves below the label, still on the right.
+ */
+export const settingRow = "flex flex-wrap items-center justify-end gap-x-3 gap-y-1 py-1";
+
+/** The label of a `settingRow`, which fills what its control leaves. */
+export const settingLabel = "flex-auto";
+
+/**
  * A setting with a few values side by side. Only the chosen one is an item, so Up and Down go from
- * row to row, and Left and Right pick within it.
+ * row to row, and Left and Right pick within it. Values that still don't fit go to a next line.
  */
 export function Segments<V extends string>({
   label,
@@ -93,9 +102,14 @@ export function Segments<V extends string>({
   };
 
   return (
-    <div className="flex items-center gap-3 py-1">
-      <span className="flex-1">{label}</span>
-      <div role="radiogroup" aria-label={label} className="flex gap-1" onKeyDown={onKeyDown}>
+    <div className={settingRow}>
+      <span className={settingLabel}>{label}</span>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="flex flex-wrap justify-end gap-1"
+        onKeyDown={onKeyDown}
+      >
         {options.map((option) => (
           <button
             key={option.value}
@@ -108,7 +122,7 @@ export function Segments<V extends string>({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onPick(option.value)}
             className={cn(
-              "min-w-8 rounded-full px-2.5 py-1 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "min-w-8 rounded-full px-2 py-1 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-ring",
               option.value === value
                 ? "bg-white text-black"
                 : "text-foreground/80 hover:bg-white/8",

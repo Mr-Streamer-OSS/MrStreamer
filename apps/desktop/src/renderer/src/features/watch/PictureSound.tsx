@@ -22,7 +22,14 @@ import {
   useAdjustmentsRefusal,
   usePlaybackAdjustments,
 } from "../../player/adjustments.ts";
-import { Segments, Step, TextButton, type Segment } from "./menu-rows.tsx";
+import {
+  Segments,
+  Step,
+  TextButton,
+  settingLabel,
+  settingRow,
+  type Segment,
+} from "./menu-rows.tsx";
 import { Menu, MenuNote } from "./TrackMenus.tsx";
 
 /** One press of − or +. */
@@ -203,7 +210,7 @@ function Stepper({
     <div
       role="group"
       aria-label={label}
-      className="flex items-center gap-3 py-1"
+      className={settingRow}
       data-item
       tabIndex={-1}
       onFocus={(event) => {
@@ -217,10 +224,13 @@ function Stepper({
         buttons[event.key === "ArrowLeft" ? 0 : 1]?.focus();
       }}
     >
-      <span className="flex-1">{label}</span>
+      <span className={settingLabel}>{label}</span>
       <div className="flex items-center gap-1">
         {less}
-        <span aria-live="polite" className="w-16 text-center text-[0.8125rem] tabular-nums">
+        <span
+          aria-live="polite"
+          className="w-16 text-center text-[0.8125rem] whitespace-nowrap tabular-nums"
+        >
           {value}
         </span>
         {more}

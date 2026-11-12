@@ -83,6 +83,26 @@ const ADJUSTED: PlaybackAdjustments = {
 const button = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
 
+/**
+ * The open Picture and sound panel's rows whose control passes the row's right edge, whose value
+ * breaks onto a second line, or that make the menu scroll sideways: none in any language or text
+ * size. Evaluate it with the panel open, as the journey does in English.
+ */
+export const PANEL_OVERFLOW = `(() => {
+  const dialog = document.querySelector("[role=dialog]");
+  if (!dialog) return ["no open menu"];
+  const over = dialog.scrollWidth > dialog.clientWidth ? ["menu scrolls sideways"] : [];
+  for (const control of dialog.querySelectorAll("[role=radio], [role=group] button")) {
+    const row = control.closest("[role=group]") ?? control.closest("[role=radiogroup]").parentElement;
+    const edge = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight);
+    if (control.getBoundingClientRect().right > edge + 0.5) over.push(control.getAttribute("aria-label"));
+  }
+  for (const value of dialog.querySelectorAll("[role=group] [aria-live]"))
+    if (value.getBoundingClientRect().height > parseFloat(getComputedStyle(value).lineHeight) * 1.5)
+      over.push(value.textContent);
+  return over;
+})()`;
+
 /** Chromium's Web Audio events, as the window's DevTools session reports them. */
 type Listen = (event: string, listener: (params: Json | undefined) => void) => void;
 
@@ -480,6 +500,10 @@ export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
     await pick("Leveling", "On");
     await pick("Crop", ADJUSTED.crop);
     await stepTo("Zoom", "Zoom In", `${ADJUSTED.zoom}%`);
+    const overflow = await d.evaluate<string[]>(PANEL_OVERFLOW);
+
+    if (overflow.length > 0)
+      throw new Error(`Picture and sound rows overflow: ${overflow.join(", ")}`);
     await d.capture("picture-sound-panel");
     await d.key("Escape", 27);
     await d.wait(async () => !(await d.exists("document.querySelector('[role=dialog]')")));
