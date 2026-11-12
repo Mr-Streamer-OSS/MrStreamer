@@ -318,6 +318,7 @@ export function TitleWatch() {
       >
         <Picture
           active
+          adjusted
           fit="contain"
           className="absolute inset-0"
           onClick={() => titlePlayer.togglePause()}
@@ -366,6 +367,7 @@ export function TitleWatch() {
       {/* In a window the picture starts below the bar, so the bar never draws on it. */}
       <Picture
         active
+        adjusted
         fit="contain"
         className="absolute inset-x-0 bottom-0"
         style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}

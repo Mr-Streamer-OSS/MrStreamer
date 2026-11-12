@@ -4,6 +4,7 @@ import { lazy } from "@mrstreamer/contracts/lazy";
 import type { PESPrivateData } from "mpegts.js/d.ts/src/demux/pes-private-data";
 import type { AnalyticsPlaybackState, PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import { observeMediaPlayback } from "./analytics.ts";
+import { attachSound } from "./sound.ts";
 // Playback engines behind one interface, so the rest of the UI only ever talks to `Engine`. The
 // main process delivers each stream in codecs these engines decode; see src/main/playback.
 import type { default as Hls, ErrorData } from "hls.js";
@@ -697,6 +698,8 @@ export function nativeEngine(
   failure?: PlaybackFailureSelector,
 ): Engine {
   const life = lifecycle(video, () => {}, ends, failure);
+  // The local proxy allows any origin; without asking, Web Audio would hear only silence.
+  video.crossOrigin = "anonymous";
   video.src = url;
   void video.play().catch(() => {});
 
@@ -740,6 +743,8 @@ function lifecycle(
   failure?: PlaybackFailureSelector,
 ) {
   const observation = observeMediaPlayback(video);
+  // Every engine sounds as the viewer's adjustments say (see sound.ts).
+  const releaseSound = attachSound(video);
   let settled = false;
   let finished = false;
   let destroyed = false;
@@ -916,6 +921,7 @@ function lifecycle(
         video.pause();
         video.removeAttribute("src");
         video.load();
+        releaseSound();
       },
     },
   };

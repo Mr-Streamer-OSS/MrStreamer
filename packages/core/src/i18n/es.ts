@@ -1206,6 +1206,7 @@ export const es: Translation = {
   "on the TV": "en la TV",
   "over AirPlay": "por AirPlay",
   "Preview waits while {receiver} plays": "La vista previa espera mientras {receiver} reproduce",
+  "{receiver} plays the stream as sent": "{receiver} reproduce la emisión tal como llega",
   "Preview waits while {receiver} is connected":
     "La vista previa espera mientras {receiver} está conectado",
   "This system cannot play MPEG-TS live streams.":

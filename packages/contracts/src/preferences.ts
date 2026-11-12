@@ -13,6 +13,47 @@ export const MultiviewLayout = lazy(() =>
   }).onDeepUndeclaredKey("reject"),
 );
 
+/** Picture shapes, as width:height, a viewer can give the picture or cut it to. */
+export const PICTURE_RATIOS = ["16:9", "4:3", "21:9"] as const;
+
+export type PictureRatio = (typeof PICTURE_RATIOS)[number];
+
+/** The longest the sound can wait behind the picture. */
+export const SOUND_DELAY_MAX_MS = 2000;
+
+/** Zoom in whole percent of the fitted picture. */
+export const PICTURE_ZOOM = { min: 100, max: 300 } as const;
+
+/**
+ * Picture and sound adjustments for local playback. Sound can only wait: a player can hold sound
+ * back behind the picture, never play it before the picture has arrived.
+ */
+export const PlaybackAdjustments = lazy(() =>
+  type({
+    /** Milliseconds the sound plays after the picture, to fix sound that runs ahead. */
+    soundDelayMs: `0 <= number.integer <= ${SOUND_DELAY_MAX_MS}`,
+    /** Quiet passages are raised and loud ones lowered, never past full scale. */
+    leveling: "boolean",
+    /** The shape the whole picture is shown at: as the stream says, or a ratio of `PICTURE_RATIOS`. */
+    aspect: type.enumerated("source", ...PICTURE_RATIOS),
+    /** Cuts the picture to a ratio of `PICTURE_RATIOS` around its centre, as for black bars. */
+    crop: type.enumerated("none", ...PICTURE_RATIOS),
+    /** Percent the fitted picture is enlarged around its centre; what leaves the window is cut. */
+    zoom: `${PICTURE_ZOOM.min} <= number.integer <= ${PICTURE_ZOOM.max}`,
+  }),
+);
+
+export type PlaybackAdjustments = Infer<typeof PlaybackAdjustments>;
+
+/** The stream's own timing, loudness and picture: what Reset restores. */
+export const DEFAULT_PLAYBACK_ADJUSTMENTS: PlaybackAdjustments = {
+  soundDelayMs: 0,
+  leveling: false,
+  aspect: "source",
+  crop: "none",
+  zoom: PICTURE_ZOOM.min,
+};
+
 /**
  * Viewing preferences that survive restarts and hold whichever subscription plays. What the
  * viewer left one subscription at is `SubscriptionPreferences`. Favourites and recently watched
@@ -81,6 +122,12 @@ export const Preferences = lazy(() =>
      * Standard when absent. A new density needs a new key, as for `subtitleLook`.
      */
     "guideDensity?": "'compact' | 'standard' | 'roomy'",
+    /**
+     * How this computer plays sound and fits the picture, for every channel, title and download
+     * that plays here. Receivers keep their own. `DEFAULT_PLAYBACK_ADJUSTMENTS` when absent. A new
+     * choice needs a new key, as for `subtitleLook`.
+     */
+    "playbackAdjustments?": PlaybackAdjustments(),
   }),
 );
 

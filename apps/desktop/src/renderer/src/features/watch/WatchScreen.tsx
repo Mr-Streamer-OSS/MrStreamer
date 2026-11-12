@@ -487,6 +487,7 @@ export function WatchScreen() {
       >
         <Picture
           active
+          adjusted
           fit="contain"
           className="absolute inset-0"
           onClick={wake}
@@ -565,6 +566,7 @@ export function WatchScreen() {
         <>
           <Picture
             active
+            adjusted
             fit="contain"
             className="absolute inset-x-0 bottom-0"
             style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}

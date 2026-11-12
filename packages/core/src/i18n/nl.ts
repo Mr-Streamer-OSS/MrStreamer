@@ -1131,6 +1131,7 @@ export const nl: Translation = {
   "on the TV": "op de tv",
   "over AirPlay": "via AirPlay",
   "Preview waits while {receiver} plays": "Voorbeeld wacht terwijl {receiver} speelt",
+  "{receiver} plays the stream as sent": "{receiver} speelt de stream zoals die binnenkomt",
   "Preview waits while {receiver} is connected": "Voorbeeld wacht terwijl {receiver} verbonden is",
   "This system cannot play MPEG-TS live streams.":
     "Dit systeem kan geen MPEG-TS-livestreams afspelen.",

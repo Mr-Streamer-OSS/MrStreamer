@@ -17,6 +17,7 @@ import {
 import { syncPreferences } from "./lib/preferences.ts";
 import { syncReminders } from "./lib/reminders.ts";
 import { player } from "./player/player.ts";
+import { hydratePlaybackAdjustments } from "./player/adjustments.ts";
 import { closeTitleSheets } from "./app/ui-store.ts";
 import "./styles.css";
 
@@ -26,7 +27,10 @@ const client = new QueryClient({
 
 const stopPreferences = syncPreferences(
   client,
-  (preferences) => player.hydrate(preferences),
+  (preferences) => {
+    player.hydrate(preferences);
+    hydratePlaybackAdjustments(preferences);
+  },
   closeTitleSheets,
 );
 

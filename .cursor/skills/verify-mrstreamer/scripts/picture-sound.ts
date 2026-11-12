@@ -1,0 +1,397 @@
+// Run with xvfb-run -a pnpm verify:desktop picture-sound. Plays a direct and a converted channel
+// and a title with two sound tracks through the window, first as the stream comes and then after
+// a restart with saved picture and sound adjustments. Chromium's Web Audio domain shows the route
+// sound takes, never the player's store or IPC. The same window renders synthetic signals through
+// the exact sound chain the player uses, offline, for timing, clipping, latency and cost.
+import { spawn } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
+import type { Writable } from "node:stream";
+import type { FakeChannel } from "../../../../apps/desktop/test/fake-provider.ts";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Json } from "../../../../packages/contracts/src/json.ts";
+import {
+  DEFAULT_PLAYBACK_ADJUSTMENTS,
+  type PlaybackAdjustments,
+} from "../../../../packages/contracts/src/preferences.ts";
+import { pictureBox } from "../../../../apps/desktop/src/renderer/src/player/picture-fit.ts";
+import type { Driver } from "./language.ts";
+
+const root = fileURLToPath(new URL("../../../../", import.meta.url));
+const desktop = join(root, "apps/desktop");
+const chainSource = join(desktop, "src/renderer/src/player/sound.ts");
+
+/**
+ * A constant-rate live encode for each fixture channel, so playback can be watched keeping pace:
+ * a 16:9 picture with a 440 Hz tone, in AAC, which plays as sent, or in MP2 on the MP2 channel,
+ * which the app converts.
+ */
+export function pictureSoundStreams(channel: FakeChannel, out: Writable, signal: AbortSignal) {
+  if (!channel.fixture) return out.end();
+  const audio = channel.name.includes("MP2") ? "mp2" : "aac";
+
+  const encoder = spawn(
+    process.env["MR_STREAMER_FFMPEG"] || "ffmpeg",
+    [
+      "-v",
+      "error",
+      "-re",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=640x360:rate=25",
+      "-re",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-g",
+      "25",
+      "-b:v",
+      "400k",
+      "-c:a",
+      audio,
+      "-b:a",
+      "128k",
+      "-f",
+      "mpegts",
+      "pipe:1",
+    ],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+
+  encoder.once("error", (error) => out.destroy(error));
+  encoder.stdout.pipe(out);
+  signal.addEventListener("abort", () => encoder.kill(), { once: true });
+}
+
+/** What the scenario saves before its second start: every adjustment away from its default. */
+const ADJUSTED: PlaybackAdjustments = {
+  soundDelayMs: 200,
+  leveling: true,
+  aspect: "source",
+  crop: "4:3",
+  zoom: 150,
+};
+
+const button = (selector: string, text: string) =>
+  `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
+/** Chromium's Web Audio events, as the window's DevTools session reports them. */
+type Listen = (event: string, listener: (params: Json | undefined) => void) => void;
+
+type AudioGraph = {
+  contexts: { id: string; type: string; sampleRate: number }[];
+  nodes: string[];
+  connections: number;
+};
+
+/** The part of Vite's build options this bundle uses; Vite is the desktop app's dependency. */
+type ChainBuild = {
+  configFile: false;
+  logLevel: "silent";
+  build: {
+    write: false;
+    minify: false;
+    lib: { entry: string; formats: ["iife"]; name: string };
+  };
+};
+
+type Built = { output: { code: string }[] };
+
+/** The exact chain module, bundled as the renderer bundles it, for the window to run. */
+async function bundledChain(): Promise<string> {
+  const vite = (await import(createRequire(join(desktop, "package.json")).resolve("vite"))) as {
+    build(config: ChainBuild): Promise<Built | Built[]>;
+  };
+
+  const built = await vite.build({
+    configFile: false,
+    logLevel: "silent",
+    build: {
+      write: false,
+      minify: false,
+      lib: { entry: chainSource, formats: ["iife"], name: "__mrStreamerSound" },
+    },
+  });
+
+  return (Array.isArray(built) ? built[0]! : built).output[0]!.code;
+}
+
+/** Offline renders of synthetic signals through `soundChain`, in the window's own Chromium. */
+const MEASURE = `(async () => {
+  const { soundChain } = globalThis.__mrStreamerSound;
+  const rate = 48000;
+  const render = async (seconds, channels, fill, adjustments, outputs = channels) => {
+    const context = new OfflineAudioContext(outputs, Math.round(seconds * rate), rate);
+    const buffer = context.createBuffer(channels, context.length, rate);
+    for (let c = 0; c < channels; c++) fill(buffer.getChannelData(c), c);
+    const source = new AudioBufferSourceNode(context, { buffer, channelCount: channels });
+    const chain = soundChain(context, source);
+    chain.set(adjustments);
+    chain.output.connect(context.destination);
+    source.start(0);
+    const began = performance.now();
+    const out = await context.startRendering();
+    return { out, ms: performance.now() - began };
+  };
+  const at = 0.5 * rate;
+  const impulse = (data) => { data[at] = 1; };
+  const onset = (data) => data.findIndex((x) => Math.abs(x) > 0.001);
+  const timing = [];
+  for (const leveling of [false, true])
+    for (const soundDelayMs of [0, 40, 200, 2000]) {
+      const { out } = await render(3, 2, impulse, { soundDelayMs, leveling });
+      const index = onset(out.getChannelData(0));
+      timing.push({ soundDelayMs, leveling, measuredMs: index < 0 ? null : (index - at) / (rate / 1000) });
+    }
+  // Quiet speech level, then full scale, then sudden full-scale bursts after silence.
+  const program = (data) => {
+    for (let i = 0; i < data.length; i++) {
+      const t = i / rate, tone = Math.sin(2 * Math.PI * 220 * t);
+      data[i] = t < 4 ? 0.01 * tone : t < 8 ? tone : (Math.floor(t * 4) % 2 ? Math.sign(tone) : 0);
+    }
+  };
+  const rms = (data, from, to) => {
+    let sum = 0;
+    for (let i = from * rate; i < to * rate; i++) sum += data[i] * data[i];
+    return 20 * Math.log10(Math.sqrt(sum / ((to - from) * rate)));
+  };
+  const levels = [];
+  for (const leveling of [false, true]) {
+    const { out } = await render(12, 2, program, { soundDelayMs: 0, leveling });
+    const data = out.getChannelData(0);
+    let peak = 0, atFullScale = 0;
+    for (const x of data) { peak = Math.max(peak, Math.abs(x)); if (Math.abs(x) >= 1) atFullScale++; }
+    levels.push({ leveling, peak, samplesAtOrAboveFullScale: atFullScale,
+      quietDb: rms(data, 1, 4), loudDb: rms(data, 5, 8), quietToLoudDb: rms(data, 5, 8) - rms(data, 1, 4) });
+  }
+  // Six channels, each with its own impulse: which still carry sound after the chain.
+  const channels = [];
+  for (const leveling of [false, true]) {
+    const { out } = await render(1, 6, (data, c) => { data[at / 2 + c * 100] = 1; }, { soundDelayMs: 40, leveling }, 6);
+    channels.push({ leveling, carrying: [...Array(6).keys()].filter((c) => onset(out.getChannelData(c)) >= 0).length });
+  }
+  const cost = [];
+  for (const leveling of [false, true]) {
+    const { ms } = await render(60, 2, program, { soundDelayMs: 200, leveling });
+    cost.push({ leveling, secondsRendered: 60, renderMs: ms, timesRealtime: 60000 / ms });
+  }
+  return { sampleRate: rate, timing, levels, channels, cost };
+})()`;
+
+/**
+ * Chromium's Web Audio graph and the picture, after a channel, a title and its downloaded copy
+ * started playing.
+ */
+export async function pictureSoundScenario(d: Driver, listen: () => Listen) {
+  d.observed["pictureSoundLimits"] = [
+    "Linux Xvfb development build, muted output; Web Audio graphs and offline renders prove routing, timing and level, not audible sound",
+    "No native macOS or Windows, physical speakers, surround device, Bluetooth or receiver checks",
+    "Adjustments saved in preferences.json between starts; the controls that set them belong to the player UI",
+  ];
+  const graph: AudioGraph = { contexts: [], nodes: [], connections: 0 };
+
+  const watchAudio = async () => {
+    graph.contexts = [];
+    graph.nodes = [];
+    graph.connections = 0;
+    const on = listen();
+    on("WebAudio.contextCreated", (params) => {
+      const context = (
+        params as { context: { contextId: string; contextType: string; sampleRate: number } }
+      ).context;
+
+      graph.contexts.push({
+        id: context.contextId,
+        type: context.contextType,
+        sampleRate: context.sampleRate,
+      });
+    });
+    on("WebAudio.audioNodeCreated", (params) => {
+      graph.nodes.push((params as { node: { nodeType: string } }).node.nodeType);
+    });
+    on("WebAudio.nodesConnected", () => {
+      graph.connections++;
+    });
+    await d.send("WebAudio.enable");
+  };
+
+  const live = async () => {
+    const [context] = graph.contexts.filter((each) => each.type === "realtime");
+
+    if (!context) return null;
+
+    const reply = (await d.send("WebAudio.getRealtimeData", { contextId: context.id })) as {
+      realtimeData: Record<string, number>;
+    };
+
+    return reply.realtimeData;
+  };
+
+  /** The video against the box `picture-fit.ts` gives its frame in the picture's area. */
+  const picture = () =>
+    d.evaluate<{
+      frame: { width: number; height: number };
+      area: { width: number; height: number };
+      box: { left: number; top: number; width: number; height: number };
+      time: number;
+      frames: number;
+      paused: boolean;
+    }>(`(() => {
+      const v = document.querySelector('video'), area = v.parentElement.getBoundingClientRect(), box = v.getBoundingClientRect();
+      return { frame: { width: v.videoWidth, height: v.videoHeight }, area: { width: area.width, height: area.height },
+        box: { left: box.left - area.left, top: box.top - area.top, width: box.width, height: box.height },
+        time: v.currentTime, frames: v.getVideoPlaybackQuality().totalVideoFrames, paused: v.paused };
+    })()`);
+
+  const playing = async (name: string, adjustments: PlaybackAdjustments | null) => {
+    const before = await picture();
+    await d.wait(async () => {
+      const now = await picture();
+
+      return (
+        !now.paused &&
+        now.frame.width > 0 &&
+        now.frames > before.frames + 10 &&
+        now.time > before.time + 1
+      );
+    }, 60_000);
+    const now = await picture();
+    const expected = adjustments ? pictureBox(now.frame, now.area, adjustments) : null;
+
+    const placed =
+      expected === null ||
+      (["left", "top", "width", "height"] as const).every(
+        (side) => Math.abs(now.box[side] - expected[side]) < 1,
+      );
+
+    if (!placed)
+      throw new Error(
+        `${name}: picture at ${JSON.stringify(now.box)}, expected ${JSON.stringify(expected)}`,
+      );
+    // The element's clock keeps pace with the wall clock while sound takes its route.
+    const began = Date.now();
+    await d.wait(async () => (await picture()).time > now.time + 6, 30_000);
+
+    const paced = {
+      mediaSeconds: (await picture()).time - now.time,
+      wallSeconds: (Date.now() - began) / 1000,
+    };
+
+    d.observed[name] = {
+      picture: now,
+      expected: expected && { ...expected },
+      paced,
+      graph: {
+        contexts: [...graph.contexts],
+        nodes: [...graph.nodes],
+        connections: graph.connections,
+      },
+      realtime: await live(),
+    };
+    await d.capture(name);
+  };
+
+  // The player hides its bar while it plays untouched; a viewer moves the pointer first.
+  let moves = 0;
+
+  const wake = async () => {
+    for (const x of [300, 340])
+      await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x + moves++, y: 500 });
+  };
+
+  const channel = async (name: string, stage: string, adjustments: PlaybackAdjustments | null) => {
+    // From Watch, Back first: its bar hides while the picture plays.
+    if (await d.exists("document.querySelector('[data-live-timeline]')")) {
+      await wake();
+      await d.key("Escape", 27);
+      await d.wait(async () => !(await d.exists("document.querySelector('[data-live-timeline]')")));
+    }
+
+    await d.click("Open Search", "document.querySelector('button[aria-label=\"Search\"]')");
+    await d.send("Input.insertText", { text: name });
+    await d.wait(() =>
+      d.exists("document.querySelector('[aria-label=\"Search results\"] [aria-selected=true]')"),
+    );
+    await d.key("Enter", 13);
+    await playing(stage, adjustments);
+  };
+
+  const title = async (stage: string, adjustments: PlaybackAdjustments | null) => {
+    await wake();
+    await d.key("Escape", 27);
+    await d.click("Open Movies", button("header button", "Movies"));
+    await d.click("Open All movies", button("nav button", "All movies"));
+    await d.click(
+      "Open the two-track movie",
+      "[...document.querySelectorAll('button[title]')].find(b => b.title.includes('Two sound tracks'))",
+    );
+    await d.click("Play the movie", button('[role="dialog"] button', "Play"));
+    await d.wait(() => d.exists("document.querySelector('[data-view=title] video')"), 60_000);
+    await playing(stage, adjustments);
+    await d.evaluate(
+      "document.querySelector('[data-view=title]').dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))",
+    );
+    await d.click(
+      "Open Sound",
+      "document.querySelector('[data-view=title] button[aria-label=Sound]')",
+    );
+    await d.click(
+      "Switch to the Spanish sound track",
+      "[...document.querySelectorAll('button[data-item]')].find(b => b.textContent.includes('Español'))",
+    );
+    await playing(`${stage}-switched-track`, adjustments);
+  };
+
+  // As the stream comes: Chromium plays the element itself, with no Web Audio at all.
+  await watchAudio();
+  await channel("H.264 + AAC", "direct-unadjusted", null);
+
+  if (graph.contexts.length > 0) throw new Error("Unadjusted playback opened Web Audio.");
+  await d.quit();
+
+  const path = join(d.profile, "preferences.json");
+  const saved = JSON.parse(await readFile(path, "utf8")) as Record<string, Json>;
+  await writeFile(path, JSON.stringify({ ...saved, playbackAdjustments: ADJUSTED }));
+  d.action(`Save adjustments ${JSON.stringify(ADJUSTED)} before the next start`);
+  await d.launch();
+  await watchAudio();
+  await channel("H.264 + AAC", "direct-adjusted", ADJUSTED);
+  await channel("H.264 + MP2", "converted-adjusted", ADJUSTED);
+  await title("title-adjusted", ADJUSTED);
+  // The downloaded copy, which plays from this computer's file. Back from the title is its details.
+  await wake();
+  await d.key("Escape", 27);
+  await d.click("Download the movie", button('[role="dialog"] button', "Download"));
+  await d.wait(() => d.exists(button('[role="dialog"] button', "Watch offline")), 120_000);
+  await d.click("Watch offline", button('[role="dialog"] button', "Watch offline"));
+  await d.wait(() => d.exists("document.querySelector('[data-view=title] video')"), 60_000);
+  await playing("offline-adjusted", ADJUSTED);
+  const sources = graph.nodes.filter((node) => node === "MediaElementAudioSource").length;
+
+  if (graph.contexts.length !== 1 || sources !== 1)
+    throw new Error(`Expected one context and one routed element, saw ${JSON.stringify(graph)}`);
+
+  // Reset, saved: the next start plays as the stream comes again, with no route at all.
+  await d.quit();
+  await writeFile(
+    path,
+    JSON.stringify({ ...saved, playbackAdjustments: DEFAULT_PLAYBACK_ADJUSTMENTS }),
+  );
+  d.action("Save the defaults Reset restores before the next start");
+  await d.launch();
+  await watchAudio();
+  await channel("H.264 + AAC", "direct-after-reset", null);
+
+  if (graph.contexts.length > 0) throw new Error("Playback after Reset opened Web Audio.");
+
+  d.action("Render synthetic signals through the bundled sound chain in the window");
+  await d.evaluate(await bundledChain());
+  d.observed["soundMeasurements"] = await d.evaluate<Json>(MEASURE);
+}

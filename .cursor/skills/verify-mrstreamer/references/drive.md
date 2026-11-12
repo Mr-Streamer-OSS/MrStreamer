@@ -7,6 +7,7 @@ pnpm verify:desktop remove-during-guide
 pnpm verify:desktop moved-guide
 pnpm verify:desktop live-tv
 pnpm verify:desktop live-names
+pnpm verify:desktop picture-sound
 pnpm verify:desktop guides
 pnpm verify:desktop guide-labels
 pnpm verify:desktop catch-up

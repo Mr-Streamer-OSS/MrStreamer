@@ -1,7 +1,12 @@
 // Where the picture shows. Single/title views share a video; a pane supplies its own. Each renders a
 // <Picture>, and the active one holds the element. Moving it uses moveBefore,
 // which keeps a playing element playing, so changing views never interrupts the stream.
+//
+// An `adjusted` Picture, where the viewer watches, shows the picture at the viewer's aspect, crop
+// and zoom (see adjustments.ts); previews and panes show it as the stream does.
 import { useLayoutEffect, useRef, type HTMLAttributes } from "react";
+import { usePlaybackAdjustments } from "./adjustments.ts";
+import { pictureBox, pictureUnchanged, type PictureAdjustments } from "./picture-fit.ts";
 import { usePlayerVideo } from "./player.ts";
 import { subtitleLayerFor } from "./subtitles.ts";
 
@@ -35,23 +40,85 @@ function move(parent: Element, node: Element): void {
   parent.append(node);
 }
 
+/** The styles an adjusted picture sets on the video, cleared when it leaves. */
+const PLACED = ["position", "left", "top", "width", "height", "max-width", "max-height"] as const;
+
 /**
- * A place for the picture. While `active`, the video fills this element, scaled to `fit`. Only one
- * Picture per video should be active at a time; the one activated last holds that element.
+ * Draws `video` in `container` at `adjustments`, again whenever either changes size. Returns the
+ * function that puts it back at `fit`.
+ */
+function place(
+  video: HTMLVideoElement,
+  container: HTMLElement,
+  adjustments: PictureAdjustments,
+  fit: "contain" | "cover",
+): () => void {
+  const layout = () => {
+    const box = pictureBox(
+      { width: video.videoWidth, height: video.videoHeight },
+      { width: container.clientWidth, height: container.clientHeight },
+      adjustments,
+    );
+
+    if (!box) {
+      for (const property of PLACED) video.style.removeProperty(property);
+      video.style.objectFit = fit;
+
+      return;
+    }
+
+    Object.assign(video.style, {
+      position: "absolute",
+      left: `${box.left}px`,
+      top: `${box.top}px`,
+      width: `${box.width}px`,
+      height: `${box.height}px`,
+      maxWidth: "none",
+      maxHeight: "none",
+      objectFit: "fill",
+    });
+  };
+
+  layout();
+  const resized = new ResizeObserver(layout);
+  resized.observe(container);
+  // A stream's picture size is known once its first frame is, and can change mid-stream.
+  video.addEventListener("resize", layout);
+
+  return () => {
+    resized.disconnect();
+    video.removeEventListener("resize", layout);
+
+    for (const property of PLACED) video.style.removeProperty(property);
+    video.style.objectFit = fit;
+  };
+}
+
+/**
+ * A place for the picture. While `active`, the video fills this element, scaled to `fit`, or with
+ * `adjusted` as the viewer's picture adjustments say. Only one Picture per video should be active
+ * at a time; the one activated last holds that element.
  */
 export function Picture({
   active,
+  adjusted = false,
   fit,
   video: suppliedVideo,
+  style,
   ...props
 }: HTMLAttributes<HTMLDivElement> & {
   active: boolean;
+  adjusted?: boolean;
   fit: "contain" | "cover";
   video?: HTMLVideoElement;
 }) {
   const selectedVideo = usePlayerVideo();
   const video = suppliedVideo ?? selectedVideo;
   const box = useRef<HTMLDivElement>(null);
+  const aspect = usePlaybackAdjustments((state) => state.adjustments.aspect);
+  const crop = usePlaybackAdjustments((state) => state.adjustments.crop);
+  const zoom = usePlaybackAdjustments((state) => state.adjustments.zoom);
+  const placed = adjusted && !pictureUnchanged({ aspect, crop, zoom });
   useLayoutEffect(() => {
     const container = box.current;
 
@@ -69,6 +136,14 @@ export function Picture({
       move(parkingSpot(), subtitleLayer);
     };
   }, [active, fit, video]);
+  useLayoutEffect(() => {
+    const container = box.current;
 
-  return <div ref={box} {...props} />;
+    if (!active || !placed || !container) return;
+
+    return place(video, container, { aspect, crop, zoom }, fit);
+  }, [active, placed, fit, video, aspect, crop, zoom]);
+
+  // A zoomed or cropped picture is cut by this element.
+  return <div ref={box} style={placed ? { ...style, overflow: "hidden" } : style} {...props} />;
 }

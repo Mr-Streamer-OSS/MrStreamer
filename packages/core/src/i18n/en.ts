@@ -1109,6 +1109,7 @@ export const en = {
   "on the TV": "on the TV",
   "over AirPlay": "over AirPlay",
   "Preview waits while {receiver} plays": "Preview waits while {receiver} plays",
+  "{receiver} plays the stream as sent": "{receiver} plays the stream as sent",
   "Preview waits while {receiver} is connected": "Preview waits while {receiver} is connected",
   "This system cannot play MPEG-TS live streams.": "This system cannot play MPEG-TS live streams.",
   "The provider ended the stream.": "The provider ended the stream.",
