@@ -58,8 +58,10 @@ import { queries } from "../../lib/queries.ts";
 import { reminderAt, useReminders } from "../../lib/reminders.ts";
 import { useOutput } from "../../player/output.ts";
 import { archiveHolds } from "@mrstreamer/core/catchup";
+import { useKeptScroll, type Kept } from "../../lib/use-kept-scroll.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
+import type { ChannelSpot, GuideSpot } from "../../app/ui-store.ts";
 import { SchedulePanel } from "../recordings/SchedulePanel.tsx";
 import {
   basisOfProgramme,
@@ -139,7 +141,9 @@ const NO_GUIDE: RowGuide = { pages: [], covered: "", programmes: [], known: [] }
 
 /**
  * One list's channels by time. Give each list, and each search of it, its own grid by key: the
- * cursor and the scroll position belong to the list they were made in.
+ * cursor and the scroll position belong to the list they were made in. `restore` brings back the
+ * cursor, the moment at the left edge and how far down the grid was, as it stood when it went,
+ * and keeps them again as it goes. Without it, the grid opens on the playing channel at now.
  */
 export function GuideGrid({
   channels,
@@ -148,6 +152,7 @@ export function GuideGrid({
   onWatch,
   onPlayArchive,
   onKeys,
+  restore,
   ref,
 }: {
   channels: readonly LiveChannel[];
@@ -161,6 +166,7 @@ export function GuideGrid({
   onPlayArchive: (channel: LiveChannel, programme: Programme) => void;
   /** The grid took the keys from the lists: the focus went into it, or a programme was picked. */
   onKeys: () => void;
+  restore?: Kept<GuideSpot>;
   ref?: Ref<GridKeys>;
 }) {
   const rem = useRem();
@@ -224,6 +230,11 @@ export function GuideGrid({
   // The cursor starts on the playing channel at now, and keeps to its channel when the list
   // changes under it.
   const [cursor, setCursor] = useState<Cursor>(() => {
+    if (restore?.from) {
+      const { index, channel, at } = restore.from;
+
+      return { index, channel, at, asked: 0 };
+    }
     const index = Math.max(
       channels.findIndex((channel) => ownedKey(channel) === playingKey),
       0,
@@ -289,7 +300,21 @@ export function GuideGrid({
   // drawn around it.
   const geometry = useRef({ origin, end, msPx, columnPx, minute, rem });
   geometry.current = { origin, end, msPx, columnPx, minute, rem };
-  const leftAt = useRef<number | null>(null);
+  const leftAt = useRef<number | null>(restore?.from?.left ?? null);
+  const place = useRef<ChannelSpot & { at: number }>(cursor);
+  place.current = {
+    index,
+    channel: channels[index] ? ownedId(channels[index]) : cursor.channel,
+    at: cursor.at,
+  };
+  useKeptScroll(
+    scroller,
+    restore && {
+      from: restore.from && { key: null, index: restore.from.index, top: restore.from.top },
+      keep: ({ top }) =>
+        restore.keep({ ...place.current, left: leftAt.current ?? geometry.current.minute, top }),
+    },
+  );
   const [drawn, setDrawn] = useState<Span>({ start: 0, stop: 0 });
   const [day, setDay] = useState(0);
   // The titles of programmes that began left of the view move into it, as far as leaves room for
@@ -548,8 +573,9 @@ export function GuideGrid({
     [],
   );
 
-  // The grid opens on the playing channel, once its channels are in.
+  // The grid opens on the playing channel, once its channels are in, unless it was kept.
   useEffect(() => {
+    if (restore?.from) return;
     let initial = index;
 
     if (channels.length && cursor.channel === null && cursor.asked === 0) {

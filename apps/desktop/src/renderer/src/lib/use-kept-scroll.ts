@@ -2,10 +2,12 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { Spot } from "../app/ui-store.ts";
 
 /** Where a list stood when it was drawn last, and where to keep where it stands as it goes. */
-export interface KeptSpot {
-  readonly from: Spot | null;
-  readonly keep: (spot: Spot) => void;
+export interface Kept<Place> {
+  readonly from: Place | null;
+  readonly keep: (place: Place) => void;
 }
+
+export type KeptSpot = Kept<Spot>;
 
 /** The viewer moving the list first: their place wins over the one kept. */
 const TAKEN = ["wheel", "pointerdown", "keydown", "touchstart"] as const;

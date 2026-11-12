@@ -119,13 +119,28 @@ export interface TitlesPlace {
   readonly spots: { readonly tab: SurfaceSpot | null; readonly collection: SurfaceSpot | null };
 }
 
-/** Where Live TV stood in the list on show, `UiState.list`; another list starts over. */
+/** A channel the keys were on, and the row it was at. */
+export interface ChannelSpot {
+  readonly channel: OwnedId | null;
+  readonly index: number;
+}
+
+/** Where the guide stood: its cursor's channel and moment, the moment at its left edge and how far down it was. */
+export interface GuideSpot extends ChannelSpot {
+  readonly at: number;
+  readonly left: number;
+  readonly top: number;
+}
+
+/**
+ * Where Live TV stood in the list on show, `UiState.list`; another list starts over. The rows'
+ * and the guide's places are for the search they showed (`surface`).
+ */
 export interface LivePlace {
   readonly search: string;
-  /** The selected row, by its channel's `ownedKey`. */
-  readonly rows: Spot | null;
-  /** The guide's cursor, by its channel's `ownedKey`, and the moment at its left edge. */
-  readonly guide: (Spot & { readonly at: number }) | null;
+  readonly selected: ChannelSpot | null;
+  readonly rows: SurfaceSpot | null;
+  readonly guide: (GuideSpot & { readonly surface: string }) | null;
 }
 
 /** What Recordings shows beside its side: a list of its own, or one group by its key. */
@@ -139,7 +154,7 @@ export type RecordingsShelf =
 export interface Browsing {
   readonly movie: TitlesPlace;
   readonly series: TitlesPlace;
-  readonly live: LivePlace | null;
+  readonly live: LivePlace;
   readonly recordings: {
     readonly shelf: RecordingsShelf;
     readonly query: string;
@@ -161,7 +176,7 @@ const TITLES_START: TitlesPlace = {
 const BROWSING_START: Browsing = {
   movie: TITLES_START,
   series: TITLES_START,
-  live: null,
+  live: { search: "", selected: null, rows: null, guide: null },
   recordings: { shelf: "overview", query: "", top: 0 },
   downloads: { top: 0 },
 };
@@ -175,17 +190,20 @@ export function setBrowsing<P extends keyof Browsing>(
 }
 
 /**
- * `setBrowsing` for the account and profile on show now, for what a page keeps as it goes: once
- * they have changed, as a page drawn for the last profile unmounts after the switch, it changes
- * nothing.
+ * `setBrowsing` for the account and profile on show now, and for Live TV the list on show too,
+ * for what a page keeps as it goes: once they have changed, as a page drawn for the last profile
+ * unmounts after the switch, or the rows of the last list as another opens, it changes nothing.
  */
 export function browsingNow<P extends keyof Browsing>(
   page: P,
 ): (change: (place: Browsing[P]) => Browsing[P]) => void {
-  const { account } = useUi.getState();
+  const { account, list } = useUi.getState();
 
   return (change) => {
-    if (useUi.getState().account === account) setBrowsing(page, change);
+    const now = useUi.getState();
+
+    if (now.account === account && (page !== "live" || sameList(now.list, list)))
+      setBrowsing(page, change);
   };
 }
 
@@ -269,8 +287,8 @@ export const useUi = create<UiState>(() => ({
 
 // Live TV's place belongs to the list it was in: another list starts at its top.
 useUi.subscribe((state, previous) => {
-  if (state.list !== previous.list && state.browsing.live && !sameList(state.list, previous.list))
-    useUi.setState({ browsing: { ...state.browsing, live: null } });
+  if (state.list !== previous.list && !sameList(state.list, previous.list))
+    useUi.setState({ browsing: { ...state.browsing, live: BROWSING_START.live } });
 });
 
 // Settings over a title holds the countdown to its next episode, so nothing starts behind it.
@@ -482,9 +500,9 @@ export function leaveSubscription(id: string): void {
       ...browsing,
       movie: withoutSource(browsing.movie, id),
       series: withoutSource(browsing.series, id),
-      live: browsing.live && {
+      live: {
         ...browsing.live,
-        rows: ofSubscription(browsing.live.rows, id) ? null : browsing.live.rows,
+        selected: ofSubscription(browsing.live.selected, id) ? null : browsing.live.selected,
         guide: ofSubscription(browsing.live.guide, id) ? null : browsing.live.guide,
       },
     },
@@ -501,9 +519,8 @@ function withoutSource(place: TitlesPlace, id: string): TitlesPlace {
   return { ...place, filters: kept.length ? { ...rest, sourceIds: kept } : rest };
 }
 
-/** Whether a Live TV spot is on a channel of the subscription, by the `ownedKey` it keeps. */
-function ofSubscription(spot: Spot | null, id: string): boolean {
-  return spot?.key?.startsWith(`${id}:`) === true;
+function ofSubscription(spot: ChannelSpot | null, id: string): boolean {
+  return spot?.channel?.subscriptionId === id;
 }
 
 /**

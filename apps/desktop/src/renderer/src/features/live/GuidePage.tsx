@@ -55,7 +55,14 @@ import type { LiveView } from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
-import { openView, openWatch, sameList, useUi } from "../../app/ui-store.ts";
+import {
+  browsingNow,
+  openView,
+  openWatch,
+  sameList,
+  useUi,
+  type ChannelSpot,
+} from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
@@ -236,10 +243,14 @@ export function GuidePage({ active }: { active: boolean }) {
     showList({ kind: "custom", id });
   });
 
+  // Where the page stood when the viewer last left it, for this list (`Browsing`), and where to
+  // keep it, bound to this profile and list.
+  const place = useUi((state) => state.browsing.live);
   // What the field holds belongs to the list it was typed in: another list starts without a
   // search, unless the search itself moved there.
   const key = listKey(list);
-  const [typed, setTyped] = useState({ key, text: "" });
+  const keep = useMemo(() => browsingNow("live"), [key]);
+  const [typed, setTyped] = useState(() => ({ key, text: place.search }));
 
   if (typed.key !== key) setTyped({ key, text: "" });
   const text = typed.key === key ? typed.text : "";
@@ -323,10 +334,7 @@ export function GuidePage({ active }: { active: boolean }) {
     index: number;
     channel: OwnedId | null;
     searchKey?: string | undefined;
-  }>({
-    index: 0,
-    channel: null,
-  });
+  }>(() => place.selected ?? { index: 0, channel: null });
 
   const byKey =
     searchRows && chosen.searchKey
@@ -346,6 +354,22 @@ export function GuidePage({ active }: { active: boolean }) {
         0,
       )
     : Math.min(kept === -1 ? chosen.index : kept, Math.max(rows.length - 1, 0));
+
+  // As the page goes it keeps the search and the selected row, for the list on show then.
+  const leaving = useRef({ keep, text, selected: chosen as ChannelSpot });
+  const selectedRow = rows[selected];
+  leaving.current = {
+    keep,
+    text,
+    selected: { index: selected, channel: selectedRow ? ownedId(selectedRow) : chosen.channel },
+  };
+  useEffect(
+    () => () => {
+      const { keep, text, selected } = leaving.current;
+      keep((live) => ({ ...live, search: text, selected }));
+    },
+    [],
+  );
 
   const page = useRef<HTMLDivElement>(null);
   const reorderButton = useRef<HTMLButtonElement>(null);
@@ -398,10 +422,11 @@ export function GuidePage({ active }: { active: boolean }) {
     setLiveView(liveView === "grid" ? "list" : "grid");
   };
 
-  // A new list, or another search of it, selects its playing channel, or its first.
+  // A new list, or another search of it, selects its playing channel, or its first. A selection
+  // kept from the last visit is already this list's and search's.
   const loaded = listed !== undefined;
   const selectionScope = `${key}\n${text}`;
-  const initializedSelection = useRef<string | null>(null);
+  const initializedSelection = useRef<string | null>(place.selected ? selectionScope : null);
   useEffect(() => {
     if (!loaded || initializedSelection.current === selectionScope) return;
     initializedSelection.current = selectionScope;
@@ -1052,6 +1077,11 @@ export function GuidePage({ active }: { active: boolean }) {
                         if (canUseSearch()) watchLive(channel);
                       }}
                       onKeys={() => setFocus("channels")}
+                      restore={{
+                        from: place.guide?.surface === search.query ? place.guide : null,
+                        keep: (spot) =>
+                          keep((live) => ({ ...live, guide: { ...spot, surface: search.query } })),
+                      }}
                       onPlayArchive={(channel, programme) => {
                         if (!canUseSearch()) return;
                         player.playArchive(channel, programme);
@@ -1062,6 +1092,11 @@ export function GuidePage({ active }: { active: boolean }) {
                     <ChannelTable
                       categories={categoryMap}
                       key={`${key}\n${search.query}`}
+                      restore={{
+                        from: place.rows?.surface === search.query ? place.rows : null,
+                        keep: (spot) =>
+                          keep((live) => ({ ...live, rows: { ...spot, surface: search.query } })),
+                      }}
                       channels={rows}
                       searchRows={searchRows}
                       searchFocus={searchFocus}

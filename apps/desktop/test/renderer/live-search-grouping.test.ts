@@ -189,6 +189,8 @@ async function page(
   useUi.setState({
     view: "live",
     list,
+    // Each test starts where a new window does, not where the last one left Live TV.
+    browsing: useUi.getInitialState().browsing,
     watching: false,
     playingTitle: false,
     searchOpen: kind === "palette",

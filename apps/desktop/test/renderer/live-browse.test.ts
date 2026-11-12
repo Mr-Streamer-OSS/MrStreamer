@@ -61,7 +61,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
   ipc.answer("liveBrowse.remember", (selection) => selection);
-  useUi.setState({ list: { kind: "all" } });
+  // Each test starts where a new window does, not where the last one left Live TV.
+  useUi.setState({ list: { kind: "all" }, browsing: useUi.getInitialState().browsing });
 });
 
 afterEach(() => {

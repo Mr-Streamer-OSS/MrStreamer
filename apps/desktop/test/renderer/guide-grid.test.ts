@@ -15,7 +15,7 @@ import type { Reminder, ReminderList } from "@mrstreamer/contracts/reminders";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
-import { useUi } from "../../src/renderer/src/app/ui-store.ts";
+import { leaveSubscription, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { queries, syncGuideUpdates } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
@@ -176,6 +176,8 @@ async function gridPage(
     watching: false,
     searchOpen: false,
     searchFrom: "",
+    // Each test starts where a new window does, not where the last one left Live TV.
+    browsing: useUi.getInitialState().browsing,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queries.categories().queryKey, [
@@ -218,6 +220,14 @@ async function gridPage(
   return {
     client,
     grid,
+    /** Leaves Live TV for another page and comes back, as a view switch does. */
+    back: async () => {
+      await mounted.render(null);
+      await mounted.render(createElement(GuidePage, { active: true }));
+    },
+    /** Leaves Live TV for another page, `enter` coming back. */
+    leave: () => mounted.render(null),
+    enter: () => mounted.render(createElement(GuidePage, { active: true })),
     /** The cell the grid names as its active one, by its accessible name. */
     active: () => {
       const id = grid()?.getAttribute("aria-activedescendant");
@@ -292,6 +302,12 @@ async function gridPage(
 }
 
 const THREE = [channel("1", "One"), channel("2", "Two"), channel("3", "Three")];
+
+/** The list's rows that show the keyboard's selection ring, by channel name. */
+const ringed = () =>
+  [...document.querySelectorAll<HTMLElement>(".ring-2.ring-white\\/70")].map((row) =>
+    row.textContent?.includes("Two") ? "Two" : row.textContent?.includes("Three") ? "Three" : "One",
+  );
 
 describe("the guide grid", () => {
   it("switches from the list with Guide and back with List, and with G", async () => {
@@ -682,6 +698,62 @@ describe("the guide grid", () => {
     await act(async () => (document.activeElement as HTMLElement).blur());
     await page.press("ArrowDown");
     expect(page.details()).toBe(shown);
+  });
+
+  it("comes back to its cursor and the hours in view from another page", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+    for (let step = 0; step < 6; step++) await page.press("ArrowRight");
+    await page.press("ArrowDown");
+    const left = page.grid()!.scrollLeft;
+    const later = page.selected();
+    expect(later).toMatch(/^Two /);
+    expect(later).not.toBe(titleAt("2", Date.now()));
+    expect(left).toBeGreaterThan(0);
+
+    await page.back();
+
+    await ready(() => expect(page.selected()).toBe(later));
+    expect(page.grid()!.scrollLeft).toBe(left);
+    await page.press("ArrowDown");
+    expect(page.details()).toContain("No programme information");
+  });
+
+  it("comes back to the list's search and its selected row from another page", async () => {
+    const page = await gridPage(THREE, "list");
+    await ready(() => expect(document.body.textContent).toContain("Three"));
+    await page.press("ArrowDown");
+    await page.press("ArrowDown");
+    await ready(() => expect(ringed()).toEqual(["Three"]));
+
+    await page.back();
+
+    await ready(() => expect(ringed()).toEqual(["Three"]));
+    const searchField = () => document.querySelector<HTMLInputElement>('input[aria-label^="Search"]');
+    const field = searchField()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "Tw");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.back();
+    expect(searchField()?.value).toBe("Tw");
+  });
+
+  it("starts at the playing channel at now once the subscription of its cursor is removed", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+    const now = page.selected();
+    await page.press("ArrowRight");
+    await page.press("ArrowDown");
+    await page.scrollAcross(2000);
+    expect(page.selected()).not.toBe(now);
+
+    // Settings removes it while another page shows.
+    await page.leave();
+    await act(async () => leaveSubscription(SUBSCRIPTION));
+    await page.enter();
+
+    await ready(() => expect(page.selected()).toBe(now));
   });
 
   it("keeps the cursor on its channel when the list changes under it", async () => {
