@@ -773,6 +773,9 @@ function make(deps: OnDemandDeps) {
           const status = statuses[index];
           const token = tokens[index]!;
 
+          // Lists that never loaded give nothing to trust yet; nothing about them changed.
+          if (!token.loaded && (!status || status.fetchedAt === null)) return yield* notLoaded;
+
           if (
             !status ||
             status.fetchedAt === null ||
@@ -2135,6 +2138,14 @@ export const subscriptionChanged = (): AppError => ({
 
 const switched = Effect.failSync(() => new Failed({ error: subscriptionChanged() }));
 const overtaken = Effect.failSync(() => new Overtaken({ error: subscriptionChanged() }));
+
+/** What a catalogue read fails with before its lists first load, in the language of the moment. */
+const notLoaded = Effect.failSync(
+  () =>
+    new Failed({
+      error: { kind: "unexpected", detail: t("The subscription's titles have not loaded yet.") },
+    }),
+);
 
 /** Keeps `value` as the most recently used, dropping the least recently used beyond `limit`. */
 function keep<V>(map: Map<string, V>, key: string, value: V, limit: number): void {

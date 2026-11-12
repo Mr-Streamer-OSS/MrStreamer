@@ -1334,6 +1334,8 @@ export const es: Translation = {
     "La suscripción cambió mientras se cargaban los canales.",
   "The subscription changed while loading titles.":
     "La suscripción cambió mientras se cargaban los títulos.",
+  "The subscription's titles have not loaded yet.":
+    "Los títulos de la suscripción aún no se han cargado.",
   "Subtitle service: {reason}.": "Servicio de subtítulos: {reason}.",
   "Subtitle request ended. Try again while this file plays.":
     "La solicitud de subtítulos terminó. Inténtalo de nuevo mientras se reproduce este archivo.",
