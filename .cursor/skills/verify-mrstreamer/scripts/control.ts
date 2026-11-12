@@ -716,6 +716,7 @@ async function run(
           return 'it is outside the window';
         }
         if (!target.isConnected) return 'it left the page';
+        if (after.width === 0 || after.height === 0) return 'it is hidden';
         if (!['x', 'y', 'width', 'height'].every(key => Math.abs(before[key] - after[key]) < 0.5))
           return 'it is moving';
         const hit = document.elementFromPoint(after.x + after.width / 2, after.y + after.height / 2);
@@ -758,22 +759,25 @@ async function run(
 
       const keys = held.map((each) => HELD[each]);
       action(`Press ${[...keys, name === " " ? "Space" : name].join("+")} (focus: ${focus})`);
-      const modifiers = held.reduce((sum, each) => sum | MODIFIERS[each], 0);
+
+      const modifiers = defined({
+        modifiers: held.reduce((sum, each) => sum | MODIFIERS[each], 0) || undefined,
+      });
+
       const native = name === "Enter" || name === " ";
+
       await send("Input.dispatchKeyEvent", {
         type: native ? "keyDown" : "rawKeyDown",
         key: name,
         windowsVirtualKeyCode: code,
-        ...defined({
-          text: native ? (name === "Enter" ? "\r" : " ") : undefined,
-          modifiers: modifiers || undefined,
-        }),
+        ...modifiers,
+        ...defined({ text: native ? (name === "Enter" ? "\r" : " ") : undefined }),
       });
       await send("Input.dispatchKeyEvent", {
         type: "keyUp",
         key: name,
         windowsVirtualKeyCode: code,
-        ...defined({ modifiers: modifiers || undefined }),
+        ...modifiers,
       });
     };
 
