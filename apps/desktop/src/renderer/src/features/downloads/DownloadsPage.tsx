@@ -127,8 +127,8 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   const [kept] = useState(() => useUi.getState().browsing.downloads.top);
   const keep = useMemo(() => browsingNow("downloads"), []);
   useKeptScroll(scroller, {
-    from: { key: null, index: 0, top: kept },
-    keep: ({ top }) => keep(() => ({ top })),
+    from: kept,
+    keep: (top) => keep(() => ({ top })),
   });
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [outcome, setOutcome] = useState<Outcome | null>(null);

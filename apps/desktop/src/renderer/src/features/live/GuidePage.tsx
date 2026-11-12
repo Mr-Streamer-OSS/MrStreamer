@@ -357,7 +357,10 @@ export function GuidePage({ active }: { active: boolean }) {
   const leavingNow = {
     keep,
     text,
-    selected: { index: selected, channel: selectedRow ? ownedId(selectedRow) : chosen.channel },
+    selected:
+      listed !== undefined && selectedRow
+        ? { index: selected, channel: ownedId(selectedRow) }
+        : null,
   };
 
   const leaving = useRef(leavingNow);
@@ -425,7 +428,11 @@ export function GuidePage({ active }: { active: boolean }) {
   // kept from the last visit is already this list's and search's.
   const loaded = listed !== undefined;
   const selectionScope = `${key}\n${text}`;
-  const initializedSelection = useRef<string | null>(place.selected ? selectionScope : null);
+
+  const initializedSelection = useRef<string | null>(
+    place.selected?.channel ? selectionScope : null,
+  );
+
   useEffect(() => {
     if (!loaded || initializedSelection.current === selectionScope) return;
     initializedSelection.current = selectionScope;
@@ -830,7 +837,7 @@ export function GuidePage({ active }: { active: boolean }) {
       <WindowBar className="bg-black" />
       {(viewError ?? densityError) && (
         <p role="alert" className="px-9 py-2 text-sm text-destructive">
-          {t("Guide")}: {viewError ?? densityError}
+          {t("Guide")}: {[viewError, densityError].filter(Boolean).join("; ")}
         </p>
       )}
       {notice ? (
@@ -1079,8 +1086,13 @@ export function GuidePage({ active }: { active: boolean }) {
                       onKeys={() => setFocus("channels")}
                       density={density}
                       restore={{
-                        from: place.guide?.surface === search.query ? place.guide : null,
+                        from:
+                          place.guide?.channel && place.guide.surface === search.query
+                            ? place.guide
+                            : null,
                         keep: (spot) =>
+                          loaded &&
+                          spot.channel &&
                           keep((live) => ({ ...live, guide: { ...spot, surface: search.query } })),
                       }}
                       onPlayArchive={(channel, programme) => {
@@ -1096,6 +1108,7 @@ export function GuidePage({ active }: { active: boolean }) {
                       restore={{
                         from: place.rows?.surface === search.query ? place.rows : null,
                         keep: (spot) =>
+                          loaded &&
                           keep((live) => ({ ...live, rows: { ...spot, surface: search.query } })),
                       }}
                       channels={rows}

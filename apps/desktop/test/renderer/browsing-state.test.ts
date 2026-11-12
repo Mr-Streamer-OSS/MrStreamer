@@ -66,7 +66,7 @@ beforeEach(() => {
   ipc.always("subscription.list", [playlist]);
   ipc.always("ondemand.status", { lists: [], metadata: null });
   ipc.always("ondemand.filterOptions", { qualities: [], languages: [], verified: [], files: 0 });
-  ipc.always("ondemand.collection", { name: "All", titles: films, total: films.length });
+  ipc.answer("ondemand.collection", () => ({ name: "All", titles: films, total: films.length }));
 });
 
 afterEach(() => {
@@ -95,6 +95,7 @@ async function shown(page: () => ReactElement) {
 
   return {
     container: mounted.container,
+    client,
     async leave() {
       await mounted.render(null);
     },
@@ -112,6 +113,24 @@ const button = (container: HTMLElement, text: string) =>
   [...container.querySelectorAll("button")].find((each) => each.textContent === text);
 
 describe("Movies", () => {
+  it("restores a deep poster after the collection cache is evicted", async () => {
+    const titles = Array.from({ length: 500 }, (_, index) => film(String(index), `Film ${index}`));
+    ipc.answer("ondemand.collection", ({ offset, limit }) => ({
+      name: "All",
+      titles: titles.slice(offset, offset + limit),
+      total: 500,
+    }));
+    setBrowsing("movie", (place) => ({ ...place, tab: "all" }));
+    const page = await movies();
+    await until(() => expect(selectedPoster()).toBe("Film 0, 2020"));
+    await press("End");
+    await until(() => expect(selectedPoster()).toBe("Film 499, 2020"));
+    await page.leave();
+    page.client.removeQueries({ queryKey: ["ondemand", "collection"] });
+    await page.back();
+    await until(() => expect(selectedPoster()).toBe("Film 499, 2020"));
+  });
+
   it("starts another profile on its tab, without the collection the last one had open", async () => {
     const page = await movies();
     await act(async () => openCollection("movie", "genre:Drama"));
@@ -196,6 +215,26 @@ describe("Movies", () => {
         sourceIds: [SUBSCRIPTION],
       }),
     );
+  });
+
+  it("resets the mounted tab's selection and clears search when adult policy changes", async () => {
+    await movies();
+    await press("ArrowDown");
+    await press("ArrowDown");
+    expect(selectedPoster()).toBe("Contact, 2020");
+    await act(async () => closeTitleSheets());
+    await until(() => expect(selectedPoster()).toBe("Arrival, 2020"));
+    await act(async () => setBrowsing("movie", (place) => ({ ...place, query: "Contact" })));
+    await act(async () => closeTitleSheets());
+    expect(useUi.getState().browsing.movie.query).toBe("");
+  });
+
+  it("leaves a More like collection when its subscription is removed", async () => {
+    const page = await movies();
+    await act(async () => openCollection("movie", `like:${SUBSCRIPTION}:0`));
+    await until(() => expect(button(page.container, "Back")).toBeDefined());
+    await act(async () => leaveSubscription(SUBSCRIPTION));
+    await until(() => expect(button(page.container, "Back")).toBeUndefined());
   });
 
   it("goes back to its tab when Settings hides titles for adults", async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { Spot } from "../app/ui-store.ts";
 
-/** Where a list stood when it was drawn last, and where to keep where it stands as it goes. */
+/** Where a surface stood last, and where to keep it as it goes. */
 export interface Kept<Place> {
   readonly from: Place | null;
   readonly keep: (place: Place) => void;
@@ -9,52 +9,66 @@ export interface Kept<Place> {
 
 export type KeptSpot = Kept<Spot>;
 
-/** The viewer moving the list first: their place wins over the one kept. */
-const TAKEN = ["wheel", "pointerdown", "keydown", "touchstart"] as const;
+const TAKEN = ["wheel", "pointerdown", "touchstart"] as const;
 
-/**
- * Scrolls `ref`'s element back to `kept.from.top` and hands `kept.keep` where it stands, with
- * the selection `at` names, as it unmounts. Content that is drawn late, as rows that load or a
- * grid that measures its width first, is waited for: the scroll is set again as the element and
- * its content change until it reaches the place, or the viewer scrolls, clicks or types in it.
+/** Restores an offset as content arrives. Viewer input wins, including global navigation keys.
+ * Until restoration finishes, leaving preserves the requested offset rather than an empty list's zero.
  */
 export function useKeptScroll(
   ref: RefObject<HTMLElement | null>,
-  kept: KeptSpot | undefined,
-  at: () => Pick<Spot, "key" | "index"> = () => ({ key: null, index: 0 }),
+  kept: Kept<number> | undefined,
 ): void {
-  const top = useRef(kept?.from?.top ?? 0);
-  const latest = useRef({ kept, at });
-  latest.current = { kept, at };
+  const top = useRef(kept?.from ?? 0);
+  const latest = useRef(kept);
+  latest.current = kept;
+  const restoring = useRef(false);
 
   useLayoutEffect(() => {
     const element = ref.current;
-    const target = latest.current.kept?.from?.top ?? 0;
+    const target = latest.current?.from ?? 0;
 
     if (!element || target <= 0) return;
+    restoring.current = true;
+    let applied = element.scrollTop;
     const resized = new ResizeObserver(() => apply());
     const changed = new MutationObserver(() => apply());
 
     function finish() {
+      restoring.current = false;
+      top.current = element!.scrollTop;
       resized.disconnect();
       changed.disconnect();
 
       for (const type of TAKEN) element!.removeEventListener(type, finish);
+      window.removeEventListener("keydown", finish, true);
+      element!.removeEventListener("scroll", moved);
+    }
+
+    function moved() {
+      if (Math.abs(element!.scrollTop - applied) >= 1) finish();
     }
 
     function apply() {
       element!.scrollTop = target;
-      top.current = element!.scrollTop;
+      applied = element!.scrollTop;
 
-      if (Math.abs(element!.scrollTop - target) < 1) finish();
+      // A measured overflowing list has its extent even if the saved offset is now beyond it.
+      if (Math.abs(applied - target) < 1 || element!.scrollHeight > element!.clientHeight) finish();
     }
 
     for (const type of TAKEN) element.addEventListener(type, finish, { passive: true });
+    window.addEventListener("keydown", finish, true);
+    element.addEventListener("scroll", moved, { passive: true });
     resized.observe(element);
     changed.observe(element, { childList: true, subtree: true, attributes: true });
     apply();
 
-    return finish;
+    return () => {
+      const pending = restoring.current;
+      finish();
+
+      if (pending) top.current = target;
+    };
   }, [ref]);
 
   useEffect(() => {
@@ -63,14 +77,14 @@ export function useKeptScroll(
     if (!element) return;
 
     const onScroll = () => {
-      top.current = element.scrollTop;
+      if (!restoring.current) top.current = element.scrollTop;
     };
 
     element.addEventListener("scroll", onScroll, { passive: true });
 
     return () => {
       element.removeEventListener("scroll", onScroll);
-      latest.current.kept?.keep({ ...latest.current.at(), top: top.current });
+      latest.current?.keep(top.current);
     };
   }, [ref]);
 }

@@ -93,7 +93,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   const { filters } = place;
   const onFilters = (next: TitleFilters) => go({ filters: next });
   // Bound to the profile the page was drawn for, so it keeps nothing once another is on show.
-  const keep = useMemo(() => browsingNow(kind), [kind]);
+  const keep = useMemo(() => browsingNow(kind), [kind, place.reset]);
 
   /** Where a layer of the page stood as it went, while it shows the same `surface` again. */
   const kept = (layer: "tab" | "collection", surface: string): KeptSpot => {
@@ -191,7 +191,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   const failure = failed[0]?.failure ?? null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div key={place.reset} className="flex h-full flex-col">
       <WindowBar
         className="bg-black"
         {...(place.collection ? { onBack: () => go({ collection: null }) } : {})}
@@ -544,7 +544,13 @@ function Rows({
     [fitted],
   );
 
-  useKeptScroll(scroller, kept);
+  useKeptScroll(
+    scroller,
+    kept && {
+      from: kept.from?.top ?? null,
+      keep: (top) => kept.keep({ key: null, index: 0, top }),
+    },
+  );
   const stills = fit(STILL_REM);
   const posters = fit(POSTER_REM);
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
@@ -699,7 +705,13 @@ function Tiles({
   kept: KeptSpot;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
-  useKeptScroll(scroller, kept);
+  useKeptScroll(
+    scroller,
+    kept && {
+      from: kept.from?.top ?? null,
+      keep: (top) => kept.keep({ key: null, index: 0, top }),
+    },
+  );
   const tiles = useQuery(queries.tiles(kind, of));
   const status = useQuery(queries.onDemandStatus());
   const metadata = status.data?.metadata;

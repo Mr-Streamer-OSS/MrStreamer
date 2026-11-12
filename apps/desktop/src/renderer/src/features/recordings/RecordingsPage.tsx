@@ -109,8 +109,8 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
   const leaving = useRef({ shelf, query });
   leaving.current = { shelf, query };
   useKeptScroll(scroller, {
-    from: { key: null, index: 0, top: kept.top },
-    keep: ({ top }) => keep(() => ({ ...leaving.current, top })),
+    from: kept.top,
+    keep: (top) => keep(() => ({ ...leaving.current, top })),
   });
   // Standing alone, what was recorded: nothing records or is scheduled without a subscription.
   const recordings = (list.data ?? []).filter((each) => !standalone || !isLive(each));

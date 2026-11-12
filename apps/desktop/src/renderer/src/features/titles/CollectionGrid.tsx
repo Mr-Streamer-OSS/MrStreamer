@@ -169,7 +169,7 @@ export function CollectionGrid({
       )}
       {listed.error ? (
         <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>
-      ) : listed.total === 0 ? (
+      ) : listed.total === null ? null : listed.total === 0 ? (
         filters && Object.keys(filters).length > 0 ? (
           <FilterEmpty filters={filters} />
         ) : (
@@ -178,7 +178,7 @@ export function CollectionGrid({
       ) : (
         <Grid
           key={`${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`}
-          total={listed.total ?? 0}
+          total={listed.total}
           itemAt={listed.titleAt}
           keyOf={titleKey}
           onVisible={listed.load}
@@ -367,11 +367,11 @@ export function Grid<T>({
 
   const found = locate(chosen, total, itemAt, keyOf);
   // A title the loaded pages lack keeps its key while a page is still being read: a refresh
-  // answers them one at a time, and the title can be in none of them for a moment. Meanwhile it
+  // answers them one at a time, and a restored position can need a page not yet requested. Meanwhile it
   // shows no ring, takes no focus and opens nothing. Once every page answered, a title still
   // missing counts as gone, and what now stands at its position takes its place. One that moved
   // past the pages loaded so far isn't looked for beyond them.
-  const pending = found === null && !settled;
+  const pending = found === null && (!settled || (chosen.index < total && !itemAt(chosen.index)));
   const selected = found ?? Math.min(chosen.index, Math.max(total - 1, 0));
   const selectedItem = itemAt(selected);
   const selectedKey = pending || !selectedItem ? chosen.key : keyOf(selectedItem);
@@ -381,7 +381,10 @@ export function Grid<T>({
     setChosen({ key: selectedKey, index: selected });
   const at = useRef<Chosen>(chosen);
   at.current = { key: selectedKey, index: selected };
-  useKeptScroll(box, kept, () => at.current);
+  useKeptScroll(
+    box,
+    kept && { from: kept.from?.top ?? null, keep: (top) => kept.keep({ ...at.current, top }) },
+  );
   const selectedRow = Math.floor(selected / columns);
 
   // The rows in view and their overscan, without the selected row drawn beside them.

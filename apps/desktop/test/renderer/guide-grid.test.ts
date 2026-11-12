@@ -769,6 +769,44 @@ describe("the guide grid", () => {
     await ready(() => expect(page.selected()).toBe(now));
   });
 
+  it.each([new Date(2026, 2, 28, 12), new Date(2026, 9, 24, 12)])(
+    "steps by a local calendar day across DST from %s",
+    async (date) => {
+      const original = Date.now();
+      vi.setSystemTime(date);
+
+      try {
+        const page = await gridPage(THREE);
+        await ready(() => expect(page.grid()).not.toBeNull());
+        await page.leave();
+        const before = useUi.getState().browsing.live.guide!.left;
+        await page.enter();
+        await ready(() => expect(labelled("Day after")).toBeDefined());
+        await act(async () => labelled("Day after")!.click());
+        await page.leave();
+        const expected = new Date(before);
+        expected.setDate(expected.getDate() + 1);
+        expect(useUi.getState().browsing.live.guide!.left).toBe(
+          before + (expected.getTime() - new Date(before).getTime()),
+        );
+      } finally {
+        vi.setSystemTime(original);
+      }
+    },
+  );
+
+  it("shows both view and density save failures", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.grid()).not.toBeNull());
+    ipc.refuse("preferences.update", { kind: "unexpected", detail: "View save failed" });
+    await page.click("List");
+    await ready(() => expect(document.body.textContent).toContain("View save failed"));
+    ipc.refuse("preferences.update", { kind: "unexpected", detail: "Density save failed" });
+    await act(async () => labelled("More hours")!.click());
+    await ready(() => expect(document.body.textContent).toContain("Density save failed"));
+    expect(document.body.textContent).toContain("View save failed");
+  });
+
   it("goes a day ahead and back at the same time of day with Day after and Day before", async () => {
     const page = await gridPage(THREE);
     await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
@@ -956,6 +994,27 @@ it("keeps an exact grid channel through a pending filter and selects the first w
   await ready(() => expect(page.rows()).toEqual(["Three", "One"]));
   await page.press("Enter");
   expect(player.state().channel?.id).toBe("3");
+});
+
+it("does not keep a default selection when leaving before a provider answers", async () => {
+  const page = await gridPage(THREE);
+  await ready(() => expect(page.rows()).toContain("Two"));
+  await page.press("ArrowDown");
+  await page.press("Enter");
+  expect(player.state().channel?.id).toBe("2");
+  const held = ipc.hold("library.browse", (query) => query.filters.browseTopics.includes("news"));
+  await act(async () =>
+    useUi.setState({ watching: false, list: { kind: "topic", topic: "news" } }),
+  );
+  await ready(() => expect(page.rows()).toEqual([]));
+  await page.leave();
+  expect(useUi.getState().browsing.live.selected).toBeNull();
+  ipc.answer("library.browse", () => browseResult(THREE));
+  await act(async () => held.resolve(browseResult(THREE)));
+  await page.enter();
+  await ready(() => expect(page.rows()).toContain("Two"));
+  await page.press("Enter");
+  expect(player.state().channel?.id).toBe("2");
 });
 
 it("opens a newly read list on the playing channel", async () => {

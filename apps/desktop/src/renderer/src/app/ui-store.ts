@@ -104,6 +104,8 @@ export type TitlesTab =
 
 /** Where Movies or Series was. */
 export interface TitlesPlace {
+  /** Invalidates mounted surfaces and late writes after a policy reset. */
+  readonly reset: number;
   readonly tab: TitlesTab;
   /** A collection opened over the tab, with how the viewer sorted it; null in its own order. */
   readonly collection: CollectionId | null;
@@ -169,6 +171,7 @@ export interface Browsing {
 }
 
 const TITLES_START: TitlesPlace = {
+  reset: 0,
   tab: "for-you",
   collection: null,
   collectionSort: null,
@@ -202,12 +205,17 @@ export function setBrowsing<P extends keyof Browsing>(
 export function browsingNow<P extends keyof Browsing>(
   page: P,
 ): (change: (place: Browsing[P]) => Browsing[P]) => void {
-  const { account, list } = useUi.getState();
+  const { account, list, browsing } = useUi.getState();
+  const titlesPage = page === "movie" ? "movie" : page === "series" ? "series" : null;
 
   return (change) => {
     const now = useUi.getState();
 
-    if (now.account === account && (page !== "live" || sameList(now.list, list)))
+    if (
+      now.account === account &&
+      (page !== "live" || sameList(now.list, list)) &&
+      (titlesPage === null || now.browsing[titlesPage].reset === browsing[titlesPage].reset)
+    )
       setBrowsing(page, change);
   };
 }
@@ -518,10 +526,20 @@ export function leaveSubscription(id: string): void {
 function withoutSource(place: TitlesPlace, id: string): TitlesPlace {
   const { sourceIds, ...rest } = place.filters;
 
-  if (!sourceIds?.includes(id)) return place;
-  const kept = sourceIds.filter((each) => each !== id);
+  const kept = sourceIds?.filter((each) => each !== id);
+  const removedCollection = place.collection?.startsWith(`like:${id}:`);
 
-  return { ...place, filters: kept.length ? { ...rest, sourceIds: kept } : rest };
+  return {
+    ...place,
+    filters: sourceIds?.includes(id)
+      ? kept?.length
+        ? { ...rest, sourceIds: kept }
+        : rest
+      : place.filters,
+    collection: removedCollection ? null : place.collection,
+    collectionSort: removedCollection ? null : place.collectionSort,
+    spots: removedCollection ? { ...place.spots, collection: null } : place.spots,
+  };
 }
 
 function ofSubscription(spot: ChannelSpot | null, id: string): boolean {
@@ -549,6 +567,8 @@ export function closeTitleSheets(): void {
 function tabOnly(place: TitlesPlace): TitlesPlace {
   return {
     ...place,
+    reset: place.reset + 1,
+    query: "",
     tab: place.tab === "adult" ? "for-you" : place.tab,
     collection: null,
     collectionSort: null,

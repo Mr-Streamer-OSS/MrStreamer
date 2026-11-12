@@ -200,7 +200,13 @@ export function ChannelTable({
   restore?: KeptSpot;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
-  useKeptScroll(scroller, restore);
+  useKeptScroll(
+    scroller,
+    restore && {
+      from: restore.from?.top ?? null,
+      keep: (top) => restore.keep({ key: null, index: 0, top }),
+    },
+  );
   const asked = useRef(searchFocus);
   const focusedRow = useRef<HTMLElement | null>(null);
   const [listMenuOpen, setListMenuOpen] = useState(false);

@@ -58,7 +58,7 @@ import { comingTime, endOfDay, pastTime, progressOf, timeLeft } from "../../lib/
 import { queries } from "../../lib/queries.ts";
 import { reminderAt, useReminders } from "../../lib/reminders.ts";
 import { useOutput } from "../../player/output.ts";
-import { archiveHolds, DAY_MS } from "@mrstreamer/core/catchup";
+import { archiveHolds } from "@mrstreamer/core/catchup";
 import type { GuideDensity } from "@mrstreamer/contracts/preferences";
 import { useKeptScroll, type Kept } from "../../lib/use-kept-scroll.ts";
 import { useRem } from "../../lib/use-rem.ts";
@@ -311,8 +311,8 @@ export function GuideGrid({
   useKeptScroll(
     scroller,
     restore && {
-      from: restore.from && { key: null, index: restore.from.index, top: restore.from.top },
-      keep: ({ top }) =>
+      from: restore.from?.top ?? null,
+      keep: (top) =>
         restore.keep({ ...place.current, left: leftAt.current ?? geometry.current.minute, top }),
     },
   );
@@ -698,7 +698,15 @@ export function GuideGrid({
             msPx={msPx}
             columnPx={columnPx}
             onNow={() => scrollTo(nowAt())}
-            onDay={(days) => scrollTo((leftAt.current ?? minute) + days * DAY_MS)}
+            onDay={(days) => {
+              // Local calendar arithmetic preserves wall time across DST. Date advances a
+              // missing spring time through the gap and chooses the earlier repeated time.
+              const at = leftAt.current ?? minute;
+              const date = new Date(at);
+              const start = date.getTime();
+              date.setDate(date.getDate() + days);
+              scrollTo(at + (date.getTime() - start));
+            }}
             earlier={drawn.start > origin}
             later={drawn.stop < end}
           />
