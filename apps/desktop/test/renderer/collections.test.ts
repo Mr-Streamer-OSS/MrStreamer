@@ -2063,16 +2063,12 @@ describe("a smart collection in the Collections tab", () => {
       view.unmount();
     };
 
+    const unwatched = { kind: "movie", filters: { watched: "unwatched" } } as const;
+    // A viewing event reads again the collections a Watched rule picks, as the column shows them.
+    ipc.always("collections.list", [{ id: "s0", name: "Short films", total: 2, rules: unwatched }]);
     await view.render(createElement(CollectionsPage, { kind: "movie", active: true }));
     await poster("Dune Road, Movie, 2021");
-    ipc.always("collections.list", [
-      {
-        id: "s0",
-        name: "Short films",
-        total: 0,
-        rules: { kind: "movie", filters: { watched: "unwatched" } },
-      },
-    ]);
+    ipc.always("collections.list", [{ id: "s0", name: "Short films", total: 0, rules: unwatched }]);
     ipc.always("collections.page", { total: 0, members: [] });
     const beforeWrong = ipc.argsOf("collections.page").length;
     await act(async () =>

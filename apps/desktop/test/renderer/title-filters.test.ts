@@ -680,6 +680,29 @@ it("cancels an obsolete watched-filter read on a viewing event without a catalog
   }
 });
 
+it("reads a grid again on a viewing event only while a Watched rule picks it", async () => {
+  const page = await mount();
+  const stop = syncViewing(page.client);
+
+  try {
+    await page.until(() => expect(page.container.textContent).toContain("10"));
+    const unfiltered = ipc.argsOf("ondemand.collection").length;
+    await act(async () => ipc.emit("viewing.changed", { sequence: 1 }));
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(ipc.argsOf("ondemand.collection")).toHaveLength(unfiltered);
+
+    await page.click("Unwatched", "Watched");
+    await page.until(() =>
+      expect(ipc.argsOf("ondemand.collection").at(-1)?.filters).toEqual({ watched: "unwatched" }),
+    );
+    const filtered = ipc.argsOf("ondemand.collection").length;
+    await act(async () => ipc.emit("viewing.changed", { sequence: 2 }));
+    await page.until(() => expect(ipc.argsOf("ondemand.collection")).toHaveLength(filtered + 1));
+  } finally {
+    stop();
+  }
+});
+
 it("announces a collection's count when filtering changes it", async () => {
   const page = await mount();
   await act(async () => openCollection("movie", "genre:Drama"));

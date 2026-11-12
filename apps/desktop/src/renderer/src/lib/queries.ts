@@ -35,8 +35,9 @@ import {
 } from "@mrstreamer/contracts/subscription";
 import type { TitleFilter, Viewing } from "@mrstreamer/contracts/viewing";
 import type { WatchlistSort } from "@mrstreamer/contracts/watchlist";
-import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
+import { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { invalidateDetailsCatalogue } from "../app/ui-store.ts";
+import { collectionQueries } from "../features/collections/collections.ts";
 import { player } from "../player/player.ts";
 import { hostOf } from "./format.ts";
 import {
@@ -986,13 +987,30 @@ export function syncViewing(client: QueryClient): () => void {
     const owner = profileOwner();
     const cached = client.getQueryData(queries.viewing().queryKey);
 
-    // Progress also changes watched discovery rules and saved smart membership/counts.
+    // Progress changes what a Watched rule picks: discovery grids and searches filtered by it, and
+    // saved smart membership/counts while a saved collection may have one. Until the column is
+    // read and current, any saved collection may. Decided once, as the event arrives.
+    const saved = client.getQueryState(collectionQueries.list().queryKey);
+
+    const smartWatched =
+      !saved?.data ||
+      saved.isInvalidated ||
+      saved.fetchStatus !== "idle" ||
+      saved.data.some((list) => list.rules?.filters.watched);
+
     // Cancel obsolete first reads before invalidating, including preview grids and searches.
     const watched = {
-      predicate: (query) =>
-        query.queryKey[0] === "collections" ||
-        (query.queryKey[0] === "ondemand" &&
-          ["collection", "searchKind"].includes(String(query.queryKey[1]))),
+      predicate: ({ queryKey }) => {
+        // Chosen filters end a discovery key (see `queries.collection` and `titleSearchIn`).
+        const filters = queryKey.at(-1);
+
+        return queryKey[0] === "collections"
+          ? smartWatched
+          : queryKey[0] === "ondemand" &&
+              ["collection", "searchKind"].includes(String(queryKey[1])) &&
+              TitleFilters().allows(filters) &&
+              filters.watched !== undefined;
+      },
     } satisfies QueryFilters;
 
     void client.cancelQueries(watched).then(() => {
