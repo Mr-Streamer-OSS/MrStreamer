@@ -716,13 +716,17 @@ function make(deps: RecordingsDeps) {
     const unsavedStops = new Set<string>();
     /** How many times in a row each recording's capture ended quickly, by id. */
     const quickEnds = new Map<string, number>();
+    /** Recordings whose folders went, left out of the write deleting their records (see deleteRecord). */
+    const dropping = new Set<string>();
 
     const saveInventory = Effect.tryPromise({
       try: async () => {
         // One not read yet (see unseen) is kept as it was, its gap not guessed.
         const kept = [
-          ...[...records.values()].map((record) =>
-            isLive(record) ? (unseen.get(record.id) ?? record) : record,
+          ...[...records.values()].flatMap((record) =>
+            dropping.has(record.id)
+              ? []
+              : [isLive(record) ? (unseen.get(record.id) ?? record) : record],
           ),
           ...beginning.values(),
         ];
@@ -2810,13 +2814,21 @@ function make(deps: RecordingsDeps) {
               error: { kind: "unexpected", detail: t("The recording couldn't be deleted.") },
             }),
         });
-        records.delete(id);
         recordingFiles.delete(id);
-        const written = yield* Effect.result(save);
+        missing.add(id);
+
+        // Listed, as missing, until a write without it is kept: only that write leaves it out.
+        const written = yield* Effect.result(
+          writing(
+            Effect.sync(() => dropping.add(id)).pipe(
+              Effect.andThen(saveInventory),
+              Effect.tap(() => Effect.sync(() => records.delete(id))),
+              Effect.ensuring(Effect.sync(() => dropping.delete(id))),
+            ),
+          ),
+        );
 
         if (written._tag === "Failure") {
-          records.set(id, record);
-          missing.add(id);
           yield* publish;
 
           return yield* written.failure;
