@@ -2186,7 +2186,7 @@ describe("a smart collection in the Collections tab", () => {
     await poster("Dune Road, Movie, 2021");
   });
 
-  it("is left out of the picks' Add to collection and offers no Remove", async () => {
+  it("is left out of the picks' Add to collection, as a withheld one is, and offers no Remove", async () => {
     smartMain();
     ipc.answer("collections.list", () => [
       {
@@ -2201,6 +2201,7 @@ describe("a smart collection in the Collections tab", () => {
         total: 0,
         rules: { kind: "movie", filters: { runtime: { min: 7200 } } },
       },
+      { id: "w0", name: "Late night", total: 0, withheld: { filters: {}, problems: [] } },
       { id: "c0", name: "Weekend films", total: 0 },
     ]);
     await mountTab();
@@ -2293,30 +2294,6 @@ describe("a smart collection in the Collections tab", () => {
     expect(ipc.argsOf("collections.change")).toEqual([
       { kind: "rules", id: "s0", rules: { kind: "movie", filters: { rating: { min: 7 } } } },
     ]);
-  });
-
-  it("leaves a withheld collection out of the picks' Add to collection", async () => {
-    smartMain();
-    ipc.answer("collections.list", () => [
-      {
-        id: "s0",
-        name: "Short films",
-        total: 2,
-        rules: { kind: "movie", filters: { runtime: { max: 5399 } } },
-      },
-      { id: "w0", name: "Late night", total: 0, withheld: { filters: {}, problems: [] } },
-      { id: "c0", name: "Weekend films", total: 0 },
-    ]);
-    await mountTab();
-    await poster("Kite Season, Movie, 2022");
-    await pick("Kite Season");
-    await act(async () => button("Add to collection").click());
-    await vi.waitFor(() => expect(button("Weekend films")).toBeTruthy());
-    expect(
-      [
-        ...document.querySelectorAll("[role=menu][aria-label='Add to collection'] [role=menuitem]"),
-      ].map((each) => each.textContent),
-    ).toEqual(["Weekend films"]);
   });
 });
 

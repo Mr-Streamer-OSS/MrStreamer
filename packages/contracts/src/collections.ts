@@ -90,12 +90,12 @@ export function savedRules(
   const kind = TITLE_KINDS.find((kind) => kind === saved.kind);
   const known = TitleFilters().keyof();
   const entries = Object.entries(saved.filters);
-  const readable = entries.filter(([filter, value]) => StrictFilters().allows({ [filter]: value }));
+  const fits = ([filter, value]: [string, unknown]) => StrictFilters().allows({ [filter]: value });
 
   const problems: WithheldRulesProblem[] = [
     ...(kind ? [] : [{ reason: "unknown-kind" } as const]),
     ...entries.flatMap(([filter, value]) =>
-      known.allows(filter) && !StrictFilters().allows({ [filter]: value })
+      known.allows(filter) && !fits([filter, value])
         ? [{ reason: "invalid-filter", filter } as const]
         : [],
     ),
@@ -110,7 +110,7 @@ export function savedRules(
     withheld: {
       ...(kind && { kind }),
       // Filters are checked one by one, so those passing alone pass together.
-      filters: StrictFilters().assert(Object.fromEntries(readable)),
+      filters: StrictFilters().assert(Object.fromEntries(entries.filter(fits))),
       problems,
     },
   };
