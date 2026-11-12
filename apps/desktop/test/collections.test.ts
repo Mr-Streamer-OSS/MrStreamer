@@ -19,6 +19,8 @@ import { Database } from "../src/main/platform/database.ts";
 import { profileDirectory } from "../src/main/platform/profile-store.ts";
 import { makeCollections, type CollectionVisibility } from "../src/main/services/collections.ts";
 import type { CollectionTitle } from "@mrstreamer/contracts/collections";
+import { ipcInputs } from "@mrstreamer/contracts/ipc";
+import { type } from "arktype";
 
 const owner = { id: "default", revision: 1 };
 
@@ -502,17 +504,39 @@ it("persists smart rules, refreshes exact admitted membership and preserves manu
 });
 
 it.each([
-  ["an unknown filter value", JSON.stringify({ kind: "movie", filters: { quality: "8k" } })],
-  ["unreadable JSON", '{"kind":"movie"'],
-  ["an unknown filter", JSON.stringify({ kind: "movie", filters: { quality: "4k", cast: ["A"] } })],
-  ["no filters", JSON.stringify({ kind: "movie", filters: {} })],
+  [
+    "an unknown filter value",
+    JSON.stringify({ kind: "movie", filters: { quality: "8k", language: "en" } }),
+    {
+      kind: "movie",
+      filters: { language: "en" },
+      problems: [{ reason: "invalid-filter", filter: "quality" }],
+    },
+  ],
+  ["unreadable JSON", '{"kind":"movie"', { filters: {}, problems: [{ reason: "unreadable" }] }],
+  [
+    "an unknown filter",
+    JSON.stringify({ kind: "movie", filters: { quality: "4k", cast: ["A"] } }),
+    { kind: "movie", filters: { quality: "4k" }, problems: [{ reason: "unknown-parts" }] },
+  ],
+  [
+    "an unknown kind",
+    JSON.stringify({ kind: "podcast", filters: { quality: "4k" } }),
+    { filters: { quality: "4k" }, problems: [{ reason: "unknown-kind" }] },
+  ],
+  [
+    "no filters",
+    JSON.stringify({ kind: "series", filters: {} }),
+    { kind: "series", filters: {}, problems: [{ reason: "no-filters" }] },
+  ],
   [
     "a reversed range",
     JSON.stringify({ kind: "movie", filters: { year: { min: 2020, max: 1990 } } }),
+    { kind: "movie", filters: {}, problems: [{ reason: "invalid-filter", filter: "year" }] },
   ],
 ])(
-  "withholds a smart collection whose stored rules hold %s, keeping its bytes and other collections usable",
-  async (_, stored) => {
+  "withholds a smart collection whose stored rules hold %s until a valid replacement, keeping its bytes and other collections usable",
+  async (_, stored, withheld) => {
     const { open } = fixture();
     const a = await open();
     await seed(a.service, a.context);
@@ -526,42 +550,67 @@ it.each([
       ["newer", [movie, other]],
     ]);
 
-    expect(await run(a.service.list({ ...a.context, smart }))).toEqual([
+    const admitted = { ...a.context, catalogue: [movie, other], smart };
+
+    expect(await run(a.service.list(admitted))).toEqual([
       { id: "one", name: "one", total: 3 },
       { id: "smart", name: "Smart", rules, total: 1 },
+      { id: "newer", name: "Newer", withheld, total: 0 },
     ]);
+    expect(await run(a.service.page(admitted, "newer"))).toEqual({ total: 0, members: [] });
     await run(a.service.change(a.context, { kind: "rename", id: "one", name: "Films" }));
 
     for (const change of [
-      { kind: "create", id: "newer", name: "Newer", rules },
-      { kind: "delete", id: "newer" },
-      { kind: "rules", id: "newer", rules },
       { kind: "member", id: "newer", title: movie, present: true },
+      { kind: "order-members", id: "newer", titles: [] },
+      { kind: "rules", id: "newer", rules: { kind: "movie", filters: {} } },
     ] as const)
-      expect(
-        await run(Effect.flip(a.service.change({ ...a.context, catalogue: [movie] }, change))),
-      ).toMatchObject({ error: { kind: "no-list" } });
+      await expect(run(a.service.change(admitted, change))).rejects.toThrow();
 
     await a.close();
     const b = await open();
-    expect((await run(b.service.list(b.context))).map((list) => list.name)).toEqual([
-      "Films",
-      "Smart",
+    const reopened = { ...b.context, catalogue: [movie, other], smart };
+    expect(await run(b.service.list(reopened))).toMatchObject([
+      { name: "Films" },
+      { name: "Smart" },
+      { name: "Newer", withheld, total: 0 },
     ]);
     expect(
       b.db.prepare("select rules from collection_rules where collection_id = 'newer'").get(),
     ).toEqual({ rules: stored });
+
+    const repaired = { kind: "movie" as const, filters: { quality: "hd" as const } };
+    await run(b.service.change(b.context, { kind: "rules", id: "newer", rules: repaired }));
+    expect((await run(b.service.list(reopened)))[2]).toEqual({
+      id: "newer",
+      name: "Newer",
+      rules: repaired,
+      total: 2,
+    });
   },
 );
 
-it("reserves withheld collection names and order slots until their rules are readable again", async () => {
+it("withholds a collection holding a malformed member row, keeping its row, name and order slot", async () => {
   const { open } = fixture();
   const a = await open();
   await seed(a.service, a.context);
-  const rules = { kind: "movie" as const, filters: { quality: "4k" as const } };
-  await run(a.service.change(a.context, { kind: "create", id: "hidden", name: "Hidden", rules }));
+  await run(a.service.change(a.context, { kind: "create", id: "hidden", name: "Hidden" }));
+  await run(
+    a.service.change(
+      { ...a.context, catalogue: [movie] },
+      { kind: "member", id: "hidden", title: movie, present: true },
+    ),
+  );
   await run(a.service.change(a.context, { kind: "create", id: "two", name: "Two" }));
-  a.db.prepare("update collection_rules set rules = ? where collection_id = 'hidden'").run("{");
+  // A kind this version doesn't know, as a later version might save.
+  a.db.exec(
+    "insert into collection_members values ('hidden', 'account-a', 'podcast', '7', 'Odd', null, 1, 0)",
+  );
+
+  expect(await run(a.service.list(a.context))).toEqual([
+    { id: "one", name: "one", total: 3 },
+    { id: "two", name: "Two", total: 0 },
+  ]);
 
   for (const change of [
     { kind: "create", id: "duplicate", name: "hidden" },
@@ -571,17 +620,39 @@ it("reserves withheld collection names and order slots until their rules are rea
       error: { kind: "list-name-taken" },
     });
 
+  expect(
+    await run(
+      Effect.flip(
+        a.service.change(
+          { ...a.context, catalogue: [other] },
+          { kind: "member", id: "hidden", title: other, present: true },
+        ),
+      ),
+    ),
+  ).toMatchObject({ error: { kind: "no-list" } });
+
   await run(a.service.change(a.context, { kind: "reorder", ids: ["two", "one"] }));
   expect((await run(a.service.list(a.context))).map((list) => list.id)).toEqual(["two", "one"]);
   await a.close();
   const b = await open();
-  b.db
-    .prepare("update collection_rules set rules = ? where collection_id = 'hidden'")
-    .run(JSON.stringify(rules));
-  expect((await run(b.service.list(b.context))).map((list) => list.id)).toEqual([
-    "two",
-    "hidden",
-    "one",
+  const row = "select * from collection_members where kind = 'podcast'";
+  expect(b.db.prepare(row).all()).toEqual([
+    {
+      collection_id: "hidden",
+      account: "account-a",
+      kind: "podcast",
+      title_id: "7",
+      name: "Odd",
+      year: null,
+      position: 1,
+      adult: 0,
+    },
+  ]);
+  b.db.exec("delete from collection_members where kind = 'podcast'");
+  expect(await run(b.service.list(b.context))).toMatchObject([
+    { id: "two" },
+    { id: "hidden", total: 1 },
+    { id: "one" },
   ]);
 });
 
@@ -644,4 +715,31 @@ it("re-evaluates saved smart rules through admitted catalogue reads after refres
   expect(await run(collections.page("smart", 0, 48))).toEqual({ total: 0, members: [] });
   await run(collections.change({ kind: "delete", id: "smart" }));
   expect(await run(collections.list)).toMatchObject([{ id: "manual", total: 0 }]);
+});
+
+it.each([
+  ["an unknown filter", { quality: "4k", cast: ["A"] }],
+  ["an unknown range bound", { year: { min: 1990, step: 5 } }],
+  ["no filters", {}],
+  ["a reversed range", { rating: { min: 8, max: 6 } }],
+])("refuses smart rules holding %s in commands as in storage", async (_, filters) => {
+  const rules = { kind: "movie", filters };
+  const change = ipcInputs["collections.change"]();
+
+  expect(change({ kind: "rules", id: "smart", rules })).toBeInstanceOf(type.errors);
+  expect(change({ kind: "create", id: "smart", name: "Smart", rules })).toBeInstanceOf(type.errors);
+  expect(
+    change({ kind: "rules", id: "smart", rules: { kind: "movie", filters: { quality: "4k" } } }),
+  ).not.toBeInstanceOf(type.errors);
+
+  const { open } = fixture();
+  const a = await open();
+  const saved = { kind: "movie" as const, filters: { quality: "4k" as const } };
+  await run(
+    a.service.change(a.context, { kind: "create", id: "smart", name: "Smart", rules: saved }),
+  );
+  a.db
+    .prepare("update collection_rules set rules = ? where collection_id = 'smart'")
+    .run(JSON.stringify(rules));
+  expect((await run(a.service.list(a.context))).some((list) => list.rules)).toBe(false);
 });

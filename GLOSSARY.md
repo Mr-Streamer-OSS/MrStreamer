@@ -34,6 +34,9 @@ A named group of movies and series selected by the viewer.
 **Smart collection**:
 A named group of movies and series selected by saved filtering rules as the available catalogue changes.
 
+**Withheld smart collection**:
+A smart collection whose saved rules this version cannot apply exactly. It selects nothing and keeps its saved rules until the viewer replaces them.
+
 **Followed series**:
 A series from one source that a viewer asked to hear about when new episodes are listed. Following does not save it to the watchlist.
 

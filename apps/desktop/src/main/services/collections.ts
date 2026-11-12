@@ -14,6 +14,7 @@ import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles"
 import {
   changedTitles,
   collectionKey,
+  isManual,
   type CollectionChange,
   type CollectionIdentity,
   type CollectionPage,
@@ -161,10 +162,10 @@ export function makeCollections(
   return {
     list: (visibility: CollectionVisibility) =>
       Effect.map(read(visibility), (lists) =>
-        lists.map(({ id, name, members, rules }) => ({
+        lists.map(({ id, name, members, rules, withheld }) => ({
           id,
           name,
-          ...defined({ rules }),
+          ...defined({ rules, withheld }),
           total: members.length,
         })),
       ),
@@ -486,7 +487,7 @@ export class Collections extends Context.Service<
             const ids: string[] = [];
 
             for (const list of lists) {
-              if (list.rules) continue;
+              if (!isManual(list)) continue;
 
               for (let offset = 0; offset < list.total; offset += 200) {
                 const page = yield* module.page(visibility, list.id, offset, 200);

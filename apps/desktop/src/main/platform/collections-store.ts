@@ -3,7 +3,6 @@ import { EVENT_VERSION } from "@mrstreamer/core/viewing/record";
 import type { DatabaseSync } from "node:sqlite";
 import { TITLE_KINDS } from "@mrstreamer/contracts/ondemand";
 import { type } from "arktype";
-import { defined } from "@mrstreamer/core/defined";
 import { normalize } from "@mrstreamer/core/text";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -15,7 +14,10 @@ import {
   type CollectionChange,
   type CollectionTitle,
   type PersonalCollection,
-  SmartCollectionRules,
+  isManual,
+  type SmartCollectionRules,
+  StrictSmartCollectionRules,
+  savedRules,
 } from "@mrstreamer/contracts/collections";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
 
@@ -170,47 +172,41 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
 
   reconcile();
 
-  // Rules as a write saves them: known keys only, some filter and no reversed range. Evaluation
-  // ignores what this version doesn't know, so stored rules failing this would pick more members.
-  const Rules = SmartCollectionRules()
-    .onDeepUndeclaredKey("reject")
-    .narrow(
-      ({ filters }) =>
-        Object.keys(filters).length > 0 &&
-        [filters.year, filters.runtime, filters.rating].every(
-          (range) => range?.min === undefined || range.max === undefined || range.min <= range.max,
-        ),
-    );
-
-  const StoredRules = type("string.json.parse").pipe(Rules);
-
+  const Text = type("string");
   const lists = db.prepare("select id, name from personal_collections order by position, rowid");
-  const savedRules = db.prepare("select rules from collection_rules where collection_id = ?");
+  const storedRules = db.prepare("select rules from collection_rules where collection_id = ?");
 
   const members = db.prepare(
     "select account, kind, title_id as titleId, name, year, adult from collection_members where collection_id = ? order by position, rowid",
   );
 
   const read = () =>
-    lists.all().flatMap((raw) => {
+    lists.all().flatMap((raw): StoredCollection[] => {
       const row = Row.assert(raw);
+      const saved = storedRules.get(row.id);
 
-      const saved = savedRules.get(row.id);
-      const rules = saved ? StoredRules(saved.rules) : undefined;
+      if (saved) {
+        // The column is text; anything else is unreadable, as unparseable JSON is.
+        const json = Text(saved.rules);
+        const read = savedRules(json instanceof type.errors ? "" : json);
 
-      // Withheld from reads and commands, and kept as stored: read as manual or by the filters
-      // this version knows, it would show more than its rules allow.
-      if (rules instanceof type.errors) return [];
+        // Withheld rules are kept as stored and never applied: read as manual or by the filters
+        // this version knows, they would show more than they allow. Only a `rules` change
+        // replaces them.
+        return [{ ...row, ...read, members: [] }];
+      }
+
+      const kept = Member.array()(members.all(row.id));
+
+      // A member this version can't read hides its collection from reads and commands, every
+      // row kept as stored: shown without it, the collection would look complete and member
+      // changes would rewrite rows they can't read. Its name and order slot stay reserved.
+      if (kept instanceof type.errors) return [];
 
       return [
         {
           ...row,
-          ...defined({ rules }),
-          members: members.all(row.id).map((raw) => {
-            const member = Member.assert(raw);
-
-            return { ...member, adult: member.adult !== 0 };
-          }),
+          members: kept.map((member) => ({ ...member, adult: member.adult !== 0 })),
         },
       ];
     });
@@ -244,11 +240,15 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
           if (change.kind !== "create" && change.kind !== "reorder" && !found)
             throw new Failed({ error: { kind: "no-list" } });
 
-          if ((change.kind === "member" || change.kind === "order-members") && found?.rules)
+          if (
+            (change.kind === "member" || change.kind === "order-members") &&
+            found &&
+            !isManual(found)
+          )
             throw new Error("Smart collection membership is determined by its rules.");
 
           const saveRules = (id: string, rules: SmartCollectionRules) => {
-            const parsed = Rules(rules);
+            const parsed = StrictSmartCollectionRules()(rules);
 
             if (parsed instanceof type.errors) throw new Error("Invalid smart collection rules.");
             db.prepare(
@@ -258,7 +258,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
 
           switch (change.kind) {
             case "rules":
-              if (!found?.rules) throw new Error("This collection is manual.");
+              if (!found || isManual(found)) throw new Error("This collection is manual.");
               saveRules(change.id, change.rules);
               break;
             case "create":
@@ -316,7 +316,7 @@ function storeOn(db: DatabaseSync): CollectionsStore["Service"] {
                 change.ids,
               );
 
-              // Move readable lists between their existing slots; withheld rows keep theirs.
+              // Move readable lists between their existing slots; hidden ones keep theirs.
               const positions = db
                 .prepare("select id, position from personal_collections order by position, rowid")
                 .all()
