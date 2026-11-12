@@ -717,46 +717,54 @@ function make(deps: RecordingsDeps) {
     /** How many times in a row each recording's capture ended quickly, by id. */
     const quickEnds = new Map<string, number>();
 
-    const saveInventory = Effect.tryPromise({
-      try: async () => {
-        // One not read yet (see unseen) is kept as it was, its gap not guessed.
-        const kept = [
-          ...[...records.values()].map((record) =>
-            isLive(record) ? (unseen.get(record.id) ?? record) : record,
-          ),
-          ...beginning.values(),
-        ];
+    /**
+     * Writes recordings.json with every record but `without`, the one deleteRecord takes out while
+     * it stays listed until this write is kept. Run it holding `writing`.
+     */
+    const writeInventory = (without?: string) =>
+      Effect.tryPromise({
+        try: async () => {
+          // One not read yet (see unseen) is kept as it was, its gap not guessed.
+          const kept = [
+            ...[...records.values()].flatMap((record) =>
+              record.id === without
+                ? []
+                : [isLive(record) ? (unseen.get(record.id) ?? record) : record],
+            ),
+            ...beginning.values(),
+          ];
 
-        await writeRecordings(
-          path,
-          kept.map(({ protected: _protected, retentionFailed: _failed, ...record }) =>
-            protection.has(record.id) ? { ...record, protected: true as const } : record,
-          ),
-        );
-        // Failed starts it no longer lists lose their marked folders.
-        const listed = new Set(kept.map(({ id }) => id));
+          await writeRecordings(
+            path,
+            kept.map(({ protected: _protected, retentionFailed: _failed, ...record }) =>
+              protection.has(record.id) ? { ...record, protected: true as const } : record,
+            ),
+          );
+          // Failed starts it no longer lists lose their marked folders.
+          const listed = new Set(kept.map(({ id }) => id));
 
-        for (const [id, folder] of failedFolders) {
-          if (listed.has(id)) continue;
-          failedFolders.delete(id);
-          void rm(folder, { recursive: true, force: true }).catch(() => {});
-        }
-      },
-      catch: () =>
-        new Failed({
-          error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
-        }),
-    }).pipe(
-      // Every record is written each time: what couldn't be kept before is now.
-      Effect.tap(() =>
-        Effect.sync(() => {
-          unsaved.recordings = false;
-          unsavedEnds.clear();
-          unsavedStops.clear();
-        }),
-      ),
-    );
+          for (const [id, folder] of failedFolders) {
+            if (listed.has(id)) continue;
+            failedFolders.delete(id);
+            void rm(folder, { recursive: true, force: true }).catch(() => {});
+          }
+        },
+        catch: () =>
+          new Failed({
+            error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
+          }),
+      }).pipe(
+        // Every retained record is written each time: what couldn't be kept before is now.
+        Effect.tap(() =>
+          Effect.sync(() => {
+            unsaved.recordings = false;
+            unsavedEnds.clear();
+            unsavedStops.clear();
+          }),
+        ),
+      );
 
+    const saveInventory = writeInventory();
     const save = writing(saveInventory);
 
     /**
@@ -2810,13 +2818,16 @@ function make(deps: RecordingsDeps) {
               error: { kind: "unexpected", detail: t("The recording couldn't be deleted.") },
             }),
         });
-        records.delete(id);
         recordingFiles.delete(id);
-        const written = yield* Effect.result(save);
+        missing.add(id);
+
+        // Listed, as missing, until a write without it is kept. Its record goes before the permit
+        // does, so no other write puts it back.
+        const written = yield* Effect.result(
+          writing(Effect.tap(writeInventory(id), () => Effect.sync(() => records.delete(id)))),
+        );
 
         if (written._tag === "Failure") {
-          records.set(id, record);
-          missing.add(id);
           yield* publish;
 
           return yield* written.failure;
@@ -2831,7 +2842,10 @@ function make(deps: RecordingsDeps) {
         yield* Effect.ignore(savedSubtitles.forget(subtitlesOfCopy(id, { kind: "movie", id })));
         // Room it took may let a paused one go on.
         yield* retryPaused;
-      });
+      }).pipe(
+        // Once deletion starts, finish the inventory commit and publication even on cancellation.
+        Effect.uninterruptible,
+      );
 
     const holdOf = (id: string): RetentionHold | null =>
       protection.has(id)
