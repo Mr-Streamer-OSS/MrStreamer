@@ -819,18 +819,14 @@ function make(deps: OnDemandDeps) {
     });
 
     /**
-     * Tells the UI the status; `marked` after lists that mark a title they listed for adults. A
-     * refresh can settle after its viewer's admission ended: the UI then hears it without that viewer.
+     * Publishes household status; the window re-reads it under fresh viewer admission. `marked`
+     * follows lists that mark a title they listed for adults. Acceptance can outlive its viewer.
      */
     const publish = (marked: boolean) =>
       Effect.flatMap(status, (current) =>
         PubSub.publish(updates, marked ? { ...current, markedForAdults: true } : current),
       ).pipe(
-        Effect.updateContext((context: Context.Context<never>) =>
-          Option.exists(Context.getOption(context, AdmittedSettings), (each) => !each.current())
-            ? Context.omit(AdmittedSettings, AdmittedKids)(context)
-            : context,
-        ),
+        Effect.updateContext(Context.omit(AdmittedSettings, AdmittedKids)),
       );
 
     const publishStatus = publish(false);
