@@ -48,7 +48,7 @@ function formatFiles() {
 function redacted(text: string) {
   return text
     .replace(/https?:\/\/[^/\s]+/g, "")
-    .replace(/\/(movie|series|live|timeshift)\/[^/\s]+\/[^/\s]+\//g, "/$1/*/*/")
+    .replace(/\/(movie|series|live|timeshift)\/[^/\s]+\/[^/\s]+/g, "/$1/*/*")
     .replace(/(username|password)=[^&\s]*/g, "$1=*");
 }
 

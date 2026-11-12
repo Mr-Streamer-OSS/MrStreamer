@@ -158,13 +158,13 @@ test("public series episodes and archives serve silent provenance bytes and reta
     Buffer.from(await step("movie body", () => title.arrayBuffer())),
   );
 
-  const channels = await step("channels", async () =>
-    (
-      await fetch(
-        `${fixture.url}/player_api.php?username=fixture&password=fixture-pass&action=get_live_streams`,
-      )
-    ).json(),
+  const channelsResponse = await step("channels fetch", () =>
+    fetch(
+      `${fixture.url}/player_api.php?username=fixture&password=fixture-pass&action=get_live_streams`,
+    ),
   );
+
+  const channels = await step("channels body", () => channelsResponse.json());
 
   const channel = channels.find((row: { tv_archive: number }) => row.tv_archive === 1);
   const archive = `/timeshift/fixture/fixture-pass/1/2026-11-05:12-00/${channel.stream_id}.ts`;
@@ -198,6 +198,36 @@ test("public series episodes and archives serve silent provenance bytes and reta
     ).status,
   ).toBe(404);
 }, 30000);
+
+test("request diagnostics redact credentials even when the route ends after the password", async () => {
+  const first = fixture.diagnostics.length;
+
+  for (const route of ["movie", "series", "live", "timeshift"]) {
+    for (const suffix of ["", "/", "/999999.ts"]) {
+      const response = await fetch(`${fixture.url}/${route}/fixture/fixture-pass${suffix}`, {
+        redirect: "manual",
+      });
+
+      await response.arrayBuffer();
+    }
+  }
+
+  const requests = fixture.diagnostics.slice(first).filter((entry) => entry.event === "request");
+  expect(requests.map((entry) => entry.route)).toEqual([
+    "/movie/*/*",
+    "/movie/*/*/",
+    "/movie/*/*/999999.ts",
+    "/series/*/*",
+    "/series/*/*/",
+    "/series/*/*/999999.ts",
+    "/live/*/*",
+    "/live/*/*/",
+    "/live/*/*/999999.ts",
+    "/timeshift/*/*",
+    "/timeshift/*/*/",
+    "/timeshift/*/*/999999.ts",
+  ]);
+});
 
 test("failed media reads keep HTTP status, unknown identity and completed empty responses", async () => {
   for (const path of [
