@@ -3467,7 +3467,10 @@ it.each([0, 1, 2])(
 
     expect(truncated?.layout.video?.codec).toBe("h264");
     expect(truncated?.open).toContainEqual(["h264", "h264-interlaced"]);
-    expect(inspector.push(source)?.layout.video?.codec).toBe("h264");
+    expect(inspector.push(source)).toMatchObject({
+      layout: { video: { codec: "h264" } },
+      open: [],
+    });
   },
 );
 
