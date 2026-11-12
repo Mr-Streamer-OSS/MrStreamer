@@ -1066,13 +1066,9 @@ describe("a person's or franchise's titles", () => {
 
     await press(linkTo("Harbour Collection"));
     await listing("Harbour Collection", "Loading…");
-    await act(async () =>
-      first.reject({ kind: "unexpected", detail: "TMDB didn't answer. Try again." }),
-    );
+    await act(async () => first.reject({ kind: "unexpected", detail: "TMDB didn't answer." }));
     await settle();
-    expect(sheet()?.querySelector('[role="alert"]')?.textContent).toContain(
-      "TMDB didn't answer. Try again.",
-    );
+    expect(sheet()?.querySelector('[role="alert"]')?.textContent).toContain("TMDB didn't answer.");
 
     // TMDB answers now, without a name for the id: the list keeps the link's.
     ipc.always("ondemand.linked", { name: null, titles: [] });

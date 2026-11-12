@@ -819,7 +819,7 @@ export const en = {
   "Services need a TMDB key, in Settings.": "Services need a TMDB key, in Settings.",
   "People and franchises need a TMDB key, in Settings.":
     "People and franchises need a TMDB key, in Settings.",
-  "TMDB didn't answer. Try again.": "TMDB didn't answer. Try again.",
+  "TMDB didn't answer.": "TMDB didn't answer.",
   "Part of": "Part of",
   "{count} in your subscriptions, newest first": "{count} in your subscriptions, newest first",
   "{count} in your subscriptions, in release order":

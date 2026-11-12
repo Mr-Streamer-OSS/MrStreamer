@@ -55,15 +55,9 @@ export interface TitleAbout {
   /** A film's directors, or a series' creators. */
   readonly directors: readonly string[];
   /** `directors` with TMDB's person ids; absent in details kept before ids were. */
-  readonly directorCredits?: readonly TmdbPerson[];
+  readonly directorCredits?: readonly { readonly id: number; readonly name: string }[];
   /** The film franchise it belongs to; absent in details kept before franchises were. */
   readonly collection?: { readonly id: number; readonly name: string } | null;
-}
-
-/** A person by TMDB's person id. */
-export interface TmdbPerson {
-  readonly id: number;
-  readonly name: string;
 }
 
 /**

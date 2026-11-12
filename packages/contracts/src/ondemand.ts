@@ -176,7 +176,7 @@ export interface Person {
 export interface MovieDetails extends DetailsBase {
   readonly kind: "movie";
   /** The film franchise TMDB says it belongs to, by TMDB id (`RelatedLink`). */
-  readonly franchise?: { readonly tmdbId: number; readonly name: string } | null;
+  readonly franchise?: { readonly tmdbId: number; readonly name: string };
 }
 
 export interface SeriesDetails extends DetailsBase {

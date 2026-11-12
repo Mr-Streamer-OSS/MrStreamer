@@ -1216,7 +1216,7 @@ function make(deps: OnDemandDeps) {
                 detail:
                   cause instanceof TmdbError && cause.failure.kind === "refused"
                     ? t("TMDB refused the key. Check it in Settings.")
-                    : t("TMDB didn't answer. Try again."),
+                    : t("TMDB didn't answer."),
               },
             }),
         });

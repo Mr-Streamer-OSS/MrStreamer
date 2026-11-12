@@ -880,7 +880,7 @@ export const es: Translation = {
     "Los servicios necesitan una clave de TMDB, en Ajustes.",
   "People and franchises need a TMDB key, in Settings.":
     "Las personas y las sagas necesitan una clave de TMDB, en Ajustes.",
-  "TMDB didn't answer. Try again.": "TMDB no respondió. Inténtalo de nuevo.",
+  "TMDB didn't answer.": "TMDB no respondió.",
   "Part of": "Parte de",
   "{count} in your subscriptions, newest first":
     "{count} en tus suscripciones, los más recientes primero",

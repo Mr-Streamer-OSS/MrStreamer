@@ -830,7 +830,7 @@ export const nl: Translation = {
     "Diensten hebben een TMDB-sleutel nodig, in Instellingen.",
   "People and franchises need a TMDB key, in Settings.":
     "Personen en filmreeksen hebben een TMDB-sleutel nodig, in Instellingen.",
-  "TMDB didn't answer. Try again.": "TMDB antwoordde niet. Probeer het opnieuw.",
+  "TMDB didn't answer.": "TMDB antwoordde niet.",
   "Part of": "Onderdeel van",
   "{count} in your subscriptions, newest first": "{count} in je abonnementen, nieuwste eerst",
   "{count} in your subscriptions, in release order":

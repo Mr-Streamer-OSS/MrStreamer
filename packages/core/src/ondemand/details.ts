@@ -33,7 +33,9 @@ export function movieDetails(
   return {
     kind: "movie",
     ...shared(title, details, about),
-    ...defined({ franchise: franchise && { tmdbId: franchise.id, name: franchise.name } }),
+    ...defined({
+      franchise: franchise ? { tmdbId: franchise.id, name: franchise.name } : undefined,
+    }),
   };
 }
 
