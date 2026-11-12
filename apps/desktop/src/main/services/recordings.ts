@@ -2843,7 +2843,7 @@ function make(deps: RecordingsDeps) {
         // Room it took may let a paused one go on.
         yield* retryPaused;
       }).pipe(
-        // Once its folder goes, finish the inventory commit and publication even on cancellation.
+        // Once deletion starts, finish the inventory commit and publication even on cancellation.
         Effect.uninterruptible,
       );
 
