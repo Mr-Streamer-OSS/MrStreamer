@@ -19,14 +19,12 @@ import {
 import { t } from "@mrstreamer/core/i18n";
 import { appError, describeError } from "../lib/errors.ts";
 import { currentPreferences, readPreferences, updatePreferences } from "../lib/preferences.ts";
-import { receiverName, useOutput } from "./output.ts";
+import { receiverName, receiverOf, useOutput } from "./output.ts";
 import { setSound } from "./sound.ts";
 
 export interface AdjustmentsState {
   /** What plays now: the latest choice while it is saved, the saved one otherwise. */
   readonly adjustments: PlaybackAdjustments;
-  /** A choice is on its way to the viewing preferences. */
-  readonly saving: boolean;
   /**
    * The last choice that could not be saved and what went wrong, translated. Playback went back to
    * the saved adjustments. Null once another choice is made.
@@ -36,7 +34,6 @@ export interface AdjustmentsState {
 
 const store = createStore<AdjustmentsState>(() => ({
   adjustments: DEFAULT_PLAYBACK_ADJUSTMENTS,
-  saving: false,
   failed: null,
 }));
 
@@ -72,7 +69,7 @@ export async function adjustPlayback(
 ): Promise<void> {
   const next = { ...store.getState().adjustments, ...change };
   pending = next;
-  store.setState({ saving: true, failed: null });
+  store.setState({ failed: null });
   play(next);
 
   try {
@@ -80,7 +77,6 @@ export async function adjustPlayback(
 
     if (pending !== next) return;
     pending = null;
-    store.setState({ saving: false });
     play(saved(preferences));
   } catch (cause) {
     if (pending !== next) return;
@@ -89,19 +85,9 @@ export async function adjustPlayback(
 
     if (pending !== next) return;
     pending = null;
-    store.setState({
-      saving: false,
-      failed: { adjustments: next, message: describeError(appError(cause)) },
-    });
+    store.setState({ failed: { adjustments: next, message: describeError(appError(cause)) } });
     play(saved(currentPreferences(client)));
   }
-}
-
-/** Whether anything differs from the stream's own timing, loudness and picture. */
-export function isAdjusted(adjustments: PlaybackAdjustments): boolean {
-  return (Object.keys(DEFAULT_PLAYBACK_ADJUSTMENTS) as (keyof PlaybackAdjustments)[]).some(
-    (key) => adjustments[key] !== DEFAULT_PLAYBACK_ADJUSTMENTS[key],
-  );
 }
 
 /** Back to the stream's own timing, loudness and picture. */
@@ -119,13 +105,9 @@ export async function retryPlayback(client?: QueryClient): Promise<void> {
 /**
  * Why the adjustments don't apply to what plays now, "Living Room TV plays the stream as sent",
  * or null while playback is this computer's.
- *
- * @public For the player's picture and sound controls, which say it in place of their choices.
  */
 export function useAdjustmentsRefusal(): string | null {
-  const output = useOutput((state) => state.status.output);
+  const receiver = useOutput((state) => receiverOf(state.status.output));
 
-  if (output.kind !== "receiver" && output.kind !== "lost") return null;
-
-  return t("{receiver} plays the stream as sent", { receiver: receiverName(output.receiver) });
+  return receiver && t("{receiver} plays the stream as sent", { receiver: receiverName(receiver) });
 }

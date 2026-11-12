@@ -89,7 +89,7 @@ function listAnchor() {
 }
 
 /** The receiver `output` has playback on, or had it on until its connection broke. */
-function receiverOf(output: Output): Receiver | null {
+export function receiverOf(output: Output): Receiver | null {
   return output.kind === "receiver" || output.kind === "lost" ? output.receiver : null;
 }
 

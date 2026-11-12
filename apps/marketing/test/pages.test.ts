@@ -88,6 +88,7 @@ describe("public document pages without JavaScript", () => {
       "live-channels",
       "multiview",
       "movies-and-episodes",
+      "picture-and-sound",
       "recordings",
       "online-subtitles",
       "playing-on-a-tv",
@@ -101,7 +102,7 @@ describe("public document pages without JavaScript", () => {
     );
     // A renamed heading's old address lands right before its section, not inside the one above.
     expect(document.querySelector("#online-subtitles-from-009")?.nextElementSibling).toBe(
-      sections[4],
+      document.querySelector("#online-subtitles")?.closest("details.section"),
     );
   });
 

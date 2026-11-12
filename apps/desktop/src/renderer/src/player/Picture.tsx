@@ -5,8 +5,9 @@
 // An `adjusted` Picture, where the viewer watches, shows the picture at the viewer's aspect, crop
 // and zoom (see adjustments.ts); previews and panes show it as the stream does.
 import { useLayoutEffect, useRef, type HTMLAttributes } from "react";
+import { isAdjusted } from "@mrstreamer/contracts/preferences";
 import { usePlaybackAdjustments } from "./adjustments.ts";
-import { pictureBox, pictureUnchanged, type PictureAdjustments } from "./picture-fit.ts";
+import { pictureBox, type PictureAdjustments } from "./picture-fit.ts";
 import { usePlayerVideo } from "./player.ts";
 import { subtitleLayerFor } from "./subtitles.ts";
 
@@ -118,7 +119,7 @@ export function Picture({
   const aspect = usePlaybackAdjustments((state) => state.adjustments.aspect);
   const crop = usePlaybackAdjustments((state) => state.adjustments.crop);
   const zoom = usePlaybackAdjustments((state) => state.adjustments.zoom);
-  const placed = adjusted && !pictureUnchanged({ aspect, crop, zoom });
+  const placed = adjusted && isAdjusted({ aspect, crop, zoom });
   useLayoutEffect(() => {
     const container = box.current;
 

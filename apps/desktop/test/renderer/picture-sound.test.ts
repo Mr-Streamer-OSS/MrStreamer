@@ -103,6 +103,7 @@ it("says a choice wasn't saved, plays the saved one and saves it on Retry", asyn
   const refused = ipc.hold("preferences.update");
   await press(named("Zoom In"));
   await act(async () => refused.reject({ kind: "unexpected", detail: "disk full" }));
+  expect(saves()).toEqual([{ ...DEFAULT_PLAYBACK_ADJUSTMENTS, zoom: 125 }]);
   expect(dialog().querySelector('[role="alert"]')?.textContent).toMatch(
     /Couldn't save\. Nothing changed\..*disk full/,
   );

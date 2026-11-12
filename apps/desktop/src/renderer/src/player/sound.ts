@@ -10,6 +10,7 @@
 import {
   DEFAULT_PLAYBACK_ADJUSTMENTS,
   SOUND_DELAY_MAX_MS,
+  isAdjusted,
   type PlaybackAdjustments,
 } from "@mrstreamer/contracts/preferences";
 
@@ -64,15 +65,13 @@ export function soundChain(context: BaseAudioContext, input: AudioNode): SoundCh
   };
 }
 
-/** Whether `adjustments` change the sound at all. */
-function neutral(adjustments: SoundAdjustments): boolean {
-  return (
-    adjustments.soundDelayMs === DEFAULT_PLAYBACK_ADJUSTMENTS.soundDelayMs &&
-    adjustments.leveling === DEFAULT_PLAYBACK_ADJUSTMENTS.leveling
-  );
-}
+/** Only the sound part, so `isAdjusted` asks about the sound alone. */
+const soundOf = ({ soundDelayMs, leveling }: SoundAdjustments): SoundAdjustments => ({
+  soundDelayMs,
+  leveling,
+});
 
-let current: SoundAdjustments = DEFAULT_PLAYBACK_ADJUSTMENTS;
+let current = soundOf(DEFAULT_PLAYBACK_ADJUSTMENTS);
 let context: AudioContext | null = null;
 
 /** Each element engines play in, with how many of them hold it: one may start before another stops. */
@@ -107,7 +106,7 @@ function route(element: HTMLMediaElement): void {
 export function attachSound(element: HTMLMediaElement): () => void {
   attached.set(element, (attached.get(element) ?? 0) + 1);
 
-  if (routes.has(element) || !neutral(current)) route(element);
+  if (routes.has(element) || isAdjusted(current)) route(element);
   let held = true;
 
   return () => {
@@ -123,9 +122,9 @@ export function attachSound(element: HTMLMediaElement): () => void {
 
 /** Applies `adjustments` to every attached element at once. */
 export function setSound(adjustments: SoundAdjustments): void {
-  current = { soundDelayMs: adjustments.soundDelayMs, leveling: adjustments.leveling };
+  current = soundOf(adjustments);
 
   for (const element of attached.keys()) {
-    if (routes.has(element) || !neutral(current)) route(element);
+    if (routes.has(element) || isAdjusted(current)) route(element);
   }
 }

@@ -54,6 +54,13 @@ export const DEFAULT_PLAYBACK_ADJUSTMENTS: PlaybackAdjustments = {
   zoom: PICTURE_ZOOM.min,
 };
 
+/** Whether any of `adjustments` differs from the stream's own: the sound part, the picture part or all. */
+export function isAdjusted(adjustments: Partial<PlaybackAdjustments>): boolean {
+  return Object.entries(adjustments).some(
+    ([key, value]) => value !== DEFAULT_PLAYBACK_ADJUSTMENTS[key as keyof PlaybackAdjustments],
+  );
+}
+
 /**
  * Viewing preferences that survive restarts and hold whichever subscription plays. What the
  * viewer left one subscription at is `SubscriptionPreferences`. Favourites and recently watched

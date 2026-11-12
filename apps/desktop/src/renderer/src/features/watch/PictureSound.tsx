@@ -5,19 +5,18 @@
 //   Sound can only wait behind the picture, and leveling mixes to stereo; the panel says both. A
 // choice that can't be saved plays the saved one again and offers Retry. While a receiver plays,
 // the panel says it plays the stream as sent instead of offering choices.
-import { QueryClientContext } from "@tanstack/react-query";
 import { SlidersHorizontal } from "lucide-react";
-import { useContext, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   PICTURE_RATIOS,
   PICTURE_ZOOM,
   SOUND_DELAY_MAX_MS,
+  isAdjusted,
   type PlaybackAdjustments,
 } from "@mrstreamer/contracts/preferences";
 import { formatNumber, formatPercent, t } from "@mrstreamer/core/i18n";
 import {
   adjustPlayback,
-  isAdjusted,
   resetPlayback,
   retryPlayback,
   useAdjustmentsRefusal,
@@ -75,7 +74,6 @@ export function PictureSoundMenu({
 
 /** The menu's rows, also Live TV's More page. */
 export function PictureSoundRows() {
-  const client = useContext(QueryClientContext) ?? undefined;
   const adjustments = usePlaybackAdjustments((state) => state.adjustments);
   const failed = usePlaybackAdjustments((state) => state.failed);
   const refusal = useAdjustmentsRefusal();
@@ -88,7 +86,7 @@ export function PictureSoundRows() {
       </>
     );
 
-  const adjust = (change: Partial<PlaybackAdjustments>) => void adjustPlayback(change, client);
+  const adjust = (change: Partial<PlaybackAdjustments>) => void adjustPlayback(change);
   const { soundDelayMs, leveling, aspect, crop, zoom } = adjustments;
 
   return (
@@ -166,7 +164,7 @@ export function PictureSoundRows() {
         data-item
         disabled={!isAdjusted(adjustments)}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => void resetPlayback(client)}
+        onClick={() => void resetPlayback()}
         className="flex w-full items-center rounded-lg px-2 py-1.5 text-left text-foreground/80 outline-none enabled:hover:bg-white/6 focus-visible:bg-white/10 disabled:opacity-40"
       >
         {t("Reset")}
@@ -175,7 +173,7 @@ export function PictureSoundRows() {
         <div role="alert" className="px-2 pt-1.5 pb-1 text-[0.8125rem] leading-snug">
           <div className="flex items-baseline gap-3">
             <span className="flex-1 text-destructive">{t("Couldn't save. Nothing changed.")}</span>
-            <TextButton onClick={() => void retryPlayback(client)}>{t("Retry")}</TextButton>
+            <TextButton onClick={() => void retryPlayback()}>{t("Retry")}</TextButton>
           </div>
           <p className="text-destructive">{failed.message}</p>
         </div>

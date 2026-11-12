@@ -1,8 +1,4 @@
-import {
-  DEFAULT_PLAYBACK_ADJUSTMENTS,
-  type PictureRatio,
-  type PlaybackAdjustments,
-} from "@mrstreamer/contracts/preferences";
+import type { PictureRatio, PlaybackAdjustments } from "@mrstreamer/contracts/preferences";
 
 export type PictureAdjustments = Pick<PlaybackAdjustments, "aspect" | "crop" | "zoom">;
 
@@ -21,15 +17,6 @@ function ratio(picked: PictureRatio): number {
   const [width, height] = picked.split(":").map(Number);
 
   return width! / height!;
-}
-
-/** Whether `adjustments` leave the picture as the stream shows it, fitted inside the area. */
-export function pictureUnchanged(adjustments: PictureAdjustments): boolean {
-  return (
-    adjustments.aspect === DEFAULT_PLAYBACK_ADJUSTMENTS.aspect &&
-    adjustments.crop === DEFAULT_PLAYBACK_ADJUSTMENTS.crop &&
-    adjustments.zoom === DEFAULT_PLAYBACK_ADJUSTMENTS.zoom
-  );
 }
 
 /**
