@@ -322,6 +322,74 @@ describe("a movie with a receiver connected", () => {
     expect(titlePlayer.state()).toMatchObject({ phase: { kind: "paused" }, position: 125 });
   });
 
+  it("Space pauses and resumes the receiver from the title screen", async () => {
+    document.body.append(container);
+    await show(TitleWatch);
+    await onReceiver(movieNow(movie, null), 120, 1);
+
+    const output = button("Playing on Living Room TV");
+    await act(async () => output.focus());
+    expect(await key(" ", document.activeElement!)).toBe(false);
+    expect(commands()).toEqual([]);
+    await act(async () => output.blur());
+    expect(await key(" ", document.body)).toBe(true);
+    expect(commands()).toEqual([{ generation: 1, command: "pause" }]);
+    expect(text()).toContain("Playing on Living Room TV");
+    await emit(connected(said(1, movieItem, "paused", 125, 3600)));
+    expect(text()).toContain("Paused on Living Room TV");
+
+    await key(" ", document.body);
+    expect(commands().at(-1)).toEqual({ generation: 1, command: "play" });
+    await emit(connected(said(1, movieItem, "playing", 125, 3600)));
+    expect(text()).toContain("Playing on Living Room TV");
+  });
+
+  it("Space pauses after the keyboard chooser hands a local title to the receiver", async () => {
+    document.body.append(container);
+    await emit(HERE);
+    ipc.always("playback.openTitle", {
+      ...remoteTitle("local", movieRef),
+      url: "http://127.0.0.1/movie.mp4",
+    });
+    await show(TitleWatch);
+    await act(async () => playTitle(movieNow(movie, null), 120));
+    await act(async () => vi.advanceTimersToNextFrame());
+    // The harness first tries a receiver that refuses, dismisses with Escape, then tries again.
+    await key("o", document.body);
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    const refused = ipc.hold("output.connect");
+
+    const firstChoice = [...document.querySelectorAll<HTMLButtonElement>("button[data-item]")].find(
+      (each) => each.textContent?.startsWith("Living Room TV"),
+    )!;
+
+    await act(async () => firstChoice.click());
+    await act(async () => refused.reject({ kind: "output", failure: { kind: "unreachable" } }));
+    await key("Escape", document.activeElement!);
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    await key("o", document.activeElement!);
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+
+    const choice = [...document.querySelectorAll<HTMLButtonElement>("button[data-item]")].find(
+      (each) => each.textContent?.startsWith("Living Room TV"),
+    );
+
+    expect(choice).toBeDefined();
+    // The CDP harness selects with HTMLElement.click(), without pointer events.
+    await act(async () => choice!.click());
+    await emit(reaching(tv));
+    const opened = ipc.hold("output.openTitle");
+    const loaded = ipc.hold("output.playTitle");
+    await emit(connected());
+    await act(async () => opened.resolve(remoteTitle("r1", movieRef)));
+    await act(async () => loaded.resolve(said(1, movieItem, "playing", 120, 3600)));
+    await emit(connected(said(1, movieItem, "playing", 120, 3600)));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(document.activeElement).toBe(document.body);
+    expect(await key(" ", document.activeElement!)).toBe(true);
+    expect(commands()).toEqual([{ generation: 1, command: "pause" }]);
+  });
+
   it("keeps a skip where the viewer put it until the receiver catches up", async () => {
     await onReceiver(movieNow(movie, null), 120, 1);
 
@@ -1008,6 +1076,17 @@ describe("a channel with a receiver connected", () => {
 
     expect(ipc.methods()).not.toContain("playback.open");
     expect(player.state()).toMatchObject({ phase: { kind: "idle" }, stopped: true });
+  });
+
+  it("Space explains that live rewind is local while the receiver plays", async () => {
+    document.body.append(container);
+    await playing();
+    useUi.setState({ watching: true });
+    await show(WatchScreen);
+    await key(" ", document.body);
+    expect(text()).toContain("Rewind plays here only");
+    expect(text()).toContain("Playing on Living Room TV");
+    expect(commands()).toEqual([]);
   });
 
   it("says paused and buffering as the receiver confirms them, on the one stream", async () => {

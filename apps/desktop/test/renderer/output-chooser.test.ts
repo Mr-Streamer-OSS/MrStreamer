@@ -600,3 +600,57 @@ describe("the system's list and the view it was asked from", () => {
     expect(takenBack()).toEqual(lists().map(({ request }) => request));
   });
 });
+
+// MR_STREAMER_CAST=on on a Mac offers Google Cast beside AirPlay until Cast is qualified there
+// (#882). Cast's own list then opens, and AirPlay has to stay one choice away in it.
+describe("a Mac with Google Cast turned on", () => {
+  const tv: Receiver = { id: "tv", kind: "cast", name: "Living Room TV" };
+
+  /** The choices the open list shows, by their words. */
+  const choices = () =>
+    [...document.querySelectorAll<HTMLButtonElement>("button[data-item]")].map(
+      (button) => button.textContent,
+    );
+
+  const choose = (name: string) =>
+    after(() => {
+      const choice = [...document.querySelectorAll<HTMLButtonElement>("button[data-item]")].find(
+        (button) => button.textContent === name,
+      );
+
+      if (!choice) throw new Error(`No ${name} in the list`);
+      choice.click();
+    });
+
+  beforeEach(() =>
+    after(() =>
+      ipc.emit("output.changed", {
+        ...status({ kind: "local" }),
+        offers: ["airplay", "cast"],
+        receivers: [tv],
+      }),
+    ),
+  );
+
+  it.each(Object.keys(views) as (keyof typeof views)[])(
+    "lists the Cast device and AirPlay from O in %s, and AirPlay opens Apple's list at the controls",
+    async (view) => {
+      await views[view].show();
+
+      await key("o");
+      // Live TV's More also names the Play on page it shows.
+      expect(choices()).toEqual(
+        expect.arrayContaining(["This computer", "Living Room TV", "AirPlay"]),
+      );
+      // O opens the app's list, not Apple's.
+      expect(asked()).toEqual([]);
+
+      await choose("AirPlay");
+      expect(asked()).toEqual([{ anchor: BUTTON }]);
+
+      await key("o");
+      await choose("Living Room TV");
+      expect(ipc.argsOf("output.connect")).toEqual([{ receiverId: "tv" }]);
+    },
+  );
+});
