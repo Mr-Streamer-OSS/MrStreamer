@@ -326,6 +326,48 @@ it("OS pause and play retain the local channel and report its paused state", asy
   expect(ipc.argsOf("playback.seekLive").at(-1)?.at).toBeCloseTo(cursor + 10_000, -2);
 });
 
+it("skips by the seek step saved in Settings from J and L, the buttons named by it and the system's buttons", async () => {
+  vi.useFakeTimers();
+  ipc.prefer({ seekStepSeconds: 30 });
+  const client = new QueryClient();
+  const stop = syncPreferences(client, player.hydrate);
+  await readPreferences(client);
+
+  try {
+    const end = Date.now();
+
+    const { press } = await watch(
+      { start: end - 600_000, end, cursor: end - 300_000, expired: false },
+      [watched],
+      client,
+    );
+
+    const cursor = () => player.state().timeline!.cursor;
+    const sought = () => ipc.argsOf("playback.seekLive").at(-1)?.at;
+    let from = cursor();
+
+    await press("j");
+    expect(sought()).toBeCloseTo(from - 30_000, -2);
+    from = cursor();
+    await press("l");
+    expect(sought()).toBeCloseTo(from + 30_000, -2);
+
+    from = cursor();
+    await pressButton("Back 30 seconds");
+    expect(sought()).toBeCloseTo(from - 30_000, -2);
+    from = cursor();
+    await pressButton("Forward 30 seconds");
+    expect(sought()).toBeCloseTo(from + 30_000, -2);
+
+    from = cursor();
+    await act(async () => media.handlers.get("seekbackward")?.());
+    expect(sought()).toBeCloseTo(from - 30_000, -2);
+  } finally {
+    stop();
+    client.clear();
+  }
+});
+
 it("commits the slider's Home key to the oldest retained moment", async () => {
   vi.useFakeTimers();
   const end = Date.now();
@@ -376,10 +418,14 @@ function answer(timeline: LiveTimeline | null) {
 }
 
 /** Plays `watched` in Watch, as `answer` serves it, with `channels` in Watch's list. */
-async function watch(timeline: LiveTimeline | null, channels: readonly LiveChannel[] = [watched]) {
+async function watch(
+  timeline: LiveTimeline | null,
+  channels: readonly LiveChannel[] = [watched],
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   ipc.always("library.browse", browseResult(channels));
   answer(timeline);
-  const mounted = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  const mounted = queryView(client);
   unmount = mounted.unmount;
   await act(async () => {
     openWatch();

@@ -101,6 +101,12 @@ export const Preferences = lazy(() =>
     /** Whole seconds before the next episode, zero for Instant. Ten when absent. */
     "nextEpisodeDelaySeconds?": "0 <= number.integer <= 60",
     /**
+     * Whole seconds the skip keys and buttons move, in titles and in Live TV rewind. Settings
+     * offers `SEEK_STEPS`; any step in range loads, so one a later release offers keeps the file.
+     * `DEFAULT_SEEK_STEP` when absent.
+     */
+    "seekStepSeconds?": "1 <= number.integer <= 600",
+    /**
      * Product-use and reliability statistics. On when absent; saved by the analytics
      * owner.
      */
@@ -293,6 +299,11 @@ export const ORIGINAL_SOUND = "original";
 export const DEFAULT_LIVE_QUALITY: Quality = "fhd";
 
 export const DEFAULT_NEXT_EPISODE_DELAY = 10;
+
+/** The seek steps Settings offers, in seconds. */
+export const SEEK_STEPS = [5, 10, 15, 30, 60] as const;
+
+export const DEFAULT_SEEK_STEP = 10;
 
 export const defaultPreferences: Preferences = { volume: 1, muted: false };
 

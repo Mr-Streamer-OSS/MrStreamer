@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // At the end of a downloaded episode, the copy of the very next episode of its series plays after
-// the saved delay, as online: cancellable, held while Settings is open, off when autoplay is off,
+// the saved delay, as online: cancellable, held while Settings is open, off when autoplay is off or a sleep timer is set for the end,
 // and at once with Next. It opens only once main kept this copy's progress and main's list, read
 // again, still has it on this computer: a save main refused keeps this copy, says so and leaves
 // Next to try again. A next episode with no copy, one still downloading and the series' last
@@ -205,6 +205,21 @@ it("stays on the end once cancelled, this copy's progress kept, and Next episode
   expect(ipc.argsOf("downloads.recordProgress")).toEqual([
     { id: "pilot", position: 2700, duration: 2700 },
   ]);
+
+  await press("Next episode");
+  await wait(0);
+  expect(opened()).toEqual(["pilot", "tide"]);
+});
+
+it("stays on the end with a sleep timer set for it, and Next episode still plays the next copy", async () => {
+  ipc.always("downloads.list", listOf(tide, pilot));
+  await watch(pilot);
+  await act(async () => titlePlayer.setSleep({ kind: "end" }));
+  await act(async () => runs.at(-1)?.end());
+
+  await wait(15_000);
+  expect(opened()).toEqual(["pilot"]);
+  expect(text()).not.toContain("Plays in");
 
   await press("Next episode");
   await wait(0);

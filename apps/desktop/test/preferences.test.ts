@@ -432,6 +432,21 @@ describe("the interface language", () => {
   });
 });
 
+describe("the seek step", () => {
+  it.each([5, 30, 600])("accepts and keeps %i seconds across restart", async (seekStepSeconds) => {
+    const dataDir = await tempDir();
+    const patch = ipcInputs["preferences.update"]()({ seekStepSeconds });
+
+    if (patch instanceof type.errors) throw new Error(patch.summary);
+    await (await settingsIn(dataDir)).update(patch);
+    expect((await (await settingsIn(dataDir)).get()).seekStepSeconds).toBe(seekStepSeconds);
+  });
+
+  it.each([0, 2.5, 601, "10", null])("rejects %s at IPC ingress", (seekStepSeconds) => {
+    expect(ipcInputs["preferences.update"]()({ seekStepSeconds })).toBeInstanceOf(type.errors);
+  });
+});
+
 describe("the next-episode delay", () => {
   it.each([0, 10, 60])(
     "accepts and keeps exactly %i seconds across restart",

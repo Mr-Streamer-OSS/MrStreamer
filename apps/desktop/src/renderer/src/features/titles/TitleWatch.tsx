@@ -4,7 +4,8 @@
 // episode's end counts down to it (see title-player.ts). A downloaded episode does the same with the
 // next episode's copy on this computer, or says why it can't. Back returns to where the title was
 // opened.
-//   Space or K pauses, Left and Right skip 10 seconds, Up and Down change the volume, F is full
+//   Space or K pauses, Left and Right skip the seek step set in Settings (10 seconds unless
+//   changed), Up and Down change the volume, F is full
 //   screen, M mutes, C turns subtitles on or off, N plays the next episode, also during the
 //   countdown, G and H move subtitles earlier or later, < and > play slower or faster, P shrinks
 //   the window into the mini player and back, O opens the chooser of where it plays. While a menu
@@ -35,7 +36,7 @@ import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { formatDecimal, t } from "@mrstreamer/core/i18n";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { blocksPlayerShortcut, resolveShortcut } from "../../app/shortcuts.ts";
-import { currentPreferences } from "../../lib/preferences.ts";
+import { currentPreferences, seekStep, useSeekStep } from "../../lib/preferences.ts";
 import { leaveTitle, openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -84,7 +85,6 @@ import { VolumeControl } from "../watch/VolumeControl.tsx";
 
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
-const SKIP_S = 10;
 
 /** How long the note that subtitles can't be had stays. */
 const SUBTITLES_UNAVAILABLE_MS = 5000;
@@ -198,10 +198,10 @@ export function TitleWatch() {
           titlePlayer.togglePause();
           break;
         case "seekBack":
-          titlePlayer.skip(-SKIP_S);
+          titlePlayer.skip(-seekStep());
           break;
         case "seekForward":
-          titlePlayer.skip(SKIP_S);
+          titlePlayer.skip(seekStep());
           break;
         case "volumeUp":
         case "volumeDown":
@@ -331,23 +331,9 @@ export function TitleWatch() {
           failure={failure}
           onClose={leaveTitle}
         >
-          <Button
-            variant="media"
-            size="icon-sm"
-            aria-label={t("Back 10 seconds")}
-            onClick={() => titlePlayer.skip(-SKIP_S)}
-          >
-            <RotateCcw />
-          </Button>
+          <Skip by={-1} size="icon-sm" />
           <PlayPause size="icon-sm" />
-          <Button
-            variant="media"
-            size="icon-sm"
-            aria-label={t("Forward 10 seconds")}
-            onClick={() => titlePlayer.skip(SKIP_S)}
-          >
-            <RotateCw />
-          </Button>
+          <Skip by={1} size="icon-sm" />
         </MiniControls>
         <Flash />
       </div>
@@ -403,27 +389,9 @@ export function TitleWatch() {
           </div>
           <Scrubber />
           <div className="mt-3 flex items-center gap-2">
-            <Tooltip label={t("Back 10 seconds")}>
-              <Button
-                variant="media"
-                size="icon"
-                aria-label={t("Back 10 seconds")}
-                onClick={() => titlePlayer.skip(-SKIP_S)}
-              >
-                <RotateCcw />
-              </Button>
-            </Tooltip>
+            <Skip by={-1} />
             <PlayPause />
-            <Tooltip label={t("Forward 10 seconds")}>
-              <Button
-                variant="media"
-                size="icon"
-                aria-label={t("Forward 10 seconds")}
-                onClick={() => titlePlayer.skip(SKIP_S)}
-              >
-                <RotateCw />
-              </Button>
-            </Tooltip>
+            <Skip by={1} />
             <div className="ml-auto flex items-center gap-2">
               <RecordingActions />
               <Tracks menu={menu} onMenu={setMenu} />
@@ -484,6 +452,32 @@ function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
       </Button>
     </Tooltip>
   );
+}
+
+/**
+ * Skips back or forward by the seek step set in Settings, which its label names. The mini
+ * player's small buttons go without a tooltip.
+ */
+function Skip({ by, size = "icon" }: { by: -1 | 1; size?: "icon" | "icon-sm" }) {
+  const step = useSeekStep();
+
+  const label =
+    by < 0
+      ? t("Back {seconds} seconds", { seconds: step })
+      : t("Forward {seconds} seconds", { seconds: step });
+
+  const button = (
+    <Button
+      variant="media"
+      size={size}
+      aria-label={label}
+      onClick={() => titlePlayer.skip(by * step)}
+    >
+      {by < 0 ? <RotateCcw /> : <RotateCw />}
+    </Button>
+  );
+
+  return size === "icon" ? <Tooltip label={label}>{button}</Tooltip> : button;
 }
 
 /**

@@ -50,6 +50,22 @@ export function clock(seconds: number): string {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
 }
 
+/**
+ * Seconds a viewer typed as `clock` writes them: "1:02:13", "24:51" or "45". Every part after the
+ * first is two digits under 60, and spaces around it don't count. Null for anything else.
+ */
+export function parseClock(text: string): number | null {
+  const match = /^(?:(?:(\d+):)?(\d+):)?(\d+)$/.exec(text.trim());
+
+  if (!match) return null;
+  const [, hours, minutes, seconds = ""] = match;
+  const later = minutes === undefined ? [] : hours === undefined ? [seconds] : [minutes, seconds];
+
+  if (later.some((part) => part.length !== 2 || Number(part) >= 60)) return null;
+
+  return Number(hours ?? 0) * 3600 + Number(minutes ?? 0) * 60 + Number(seconds);
+}
+
 /** Where a title starts: where it stopped, a few seconds back, or the beginning. */
 export function resumePoint(progress: TitleProgress | undefined): number {
   if (!progress || progress.finished) return 0;
