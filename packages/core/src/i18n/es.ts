@@ -2095,6 +2095,17 @@ export const es: Translation = {
   "Couldn't save. Your changes are kept.": "No se pudo guardar. Tus cambios se conservan.",
   Discard: "Descartar",
   "Save rules": "Guardar reglas",
+  Repair: "Reparar",
+  "Repair rules": "Reparar reglas",
+  "Saved rules need repair. Matches shown here are a preview until you save.":
+    "Las reglas guardadas necesitan reparación. Los resultados son una vista previa hasta que guardes.",
+  "None of the saved rules could be read.": "No se pudo leer ninguna de las reglas guardadas.",
+  "The saved kind of title isn't one this version knows.":
+    "Esta versión no conoce el tipo de título guardado.",
+  "Some saved rules aren't ones this version knows.":
+    "Esta versión no conoce algunas reglas guardadas.",
+  "No rules were saved.": "No se guardaron reglas.",
+  "{rule} was left out.": "Se omitió {rule}.",
   "Smart collection": "Colección inteligente",
   Collection: "Colección",
   "Titles you add": "Títulos que añades",

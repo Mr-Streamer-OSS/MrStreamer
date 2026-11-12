@@ -18,6 +18,7 @@ import {
   type CollectionMember,
   type CollectionSummary,
   type CollectionTitle,
+  type WithheldRules,
 } from "@mrstreamer/contracts/collections";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
@@ -2185,7 +2186,7 @@ describe("a smart collection in the Collections tab", () => {
     await poster("Dune Road, Movie, 2021");
   });
 
-  it("is left out of the picks' Add to collection and offers no Remove", async () => {
+  it("is left out of the picks' Add to collection, as a withheld one is, and offers no Remove", async () => {
     smartMain();
     ipc.answer("collections.list", () => [
       {
@@ -2200,6 +2201,7 @@ describe("a smart collection in the Collections tab", () => {
         total: 0,
         rules: { kind: "movie", filters: { runtime: { min: 7200 } } },
       },
+      { id: "w0", name: "Late night", total: 0, withheld: { filters: {}, problems: [] } },
       { id: "c0", name: "Weekend films", total: 0 },
     ]);
     await mountTab();
@@ -2214,9 +2216,88 @@ describe("a smart collection in the Collections tab", () => {
     ).toEqual(["Weekend films"]);
     expect(() => button("Remove from Short films")).toThrow();
   });
+
+  /** One smart collection whose saved rules are withheld, repaired as the main process does. */
+  function withheldMain(withheld: WithheldRules) {
+    let kept: CollectionSummary[] = [
+      { id: "s0", name: "Short films", total: 0, withheld },
+      { id: "c0", name: "Weekend films", total: 0 },
+    ];
+
+    ipc.answer("collections.list", () => kept);
+    ipc.answer("collections.page", ({ id }) =>
+      id === "s0" && kept[0]?.rules
+        ? { total: 2, members: [member(kite), member(dune)] }
+        : { total: 0, members: [] },
+    );
+    ipc.answer("collections.change", (change) => {
+      if (change.kind === "rules")
+        kept = kept.map((each) =>
+          each.id === change.id
+            ? { id: each.id, name: each.name, total: 2, rules: change.rules }
+            : each,
+        );
+
+      return null;
+    });
+  }
+
+  const repairBar = () =>
+    document.querySelector<HTMLElement>("[role=group][aria-label='Repair rules']");
+
+  it("shows withheld rules for repair with no saved matches, and makes repaired rules effective", async () => {
+    withheldMain({
+      kind: "movie",
+      filters: { runtime: { max: 5399 } },
+      problems: [{ reason: "invalid-filter", filter: "year" }, { reason: "unknown-parts" }],
+    });
+    await mountTab();
+    await vi.waitFor(() => expect(document.querySelector("h1")?.textContent).toBe("Short films"));
+    expect((await row("Short films")).textContent).toContain("Repair");
+    expect(document.body.textContent).toContain(
+      "Saved rules need repair. Matches shown here are a preview until you save.",
+    );
+    expect(document.body.textContent).toContain("Year was left out.");
+    expect(document.body.textContent).toContain("Some saved rules aren't ones this version knows.");
+    // The readable rules are editable as they are, and preview what they would match.
+    expect(document.querySelector("[aria-label='Runtime: Under 90 min']")).not.toBeNull();
+    await vi.waitFor(() => expect(repairBar()?.textContent).toContain("1 title"));
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector("[data-index] button[aria-label^='Kite Season']"),
+      ).not.toBeNull(),
+    );
+    // Nothing reads the withheld collection's saved matches.
+    expect(ipc.argsOf("collections.page")).toEqual([]);
+    expect(() => button("Discard")).toThrow();
+
+    await act(async () => button("Save rules").click());
+    await vi.waitFor(() => expect(repairBar()).toBeNull());
+    expect(ipc.argsOf("collections.change")).toEqual([
+      { kind: "rules", id: "s0", rules: { kind: "movie", filters: { runtime: { max: 5399 } } } },
+    ]);
+    await poster("Dune Road, Movie, 2021");
+    expect((await row("Short films")).textContent).not.toContain("Repair");
+    expect(document.body.textContent).not.toContain("Year was left out.");
+  });
+
+  it("starts an unreadable repair from + Rule in the tab's kind", async () => {
+    withheldMain({ filters: {}, problems: [{ reason: "unreadable" }] });
+    await mountTab();
+    await vi.waitFor(() => expect(repairBar()?.textContent).toContain("Add a rule to save"));
+    expect(document.body.textContent).toContain("None of the saved rules could be read.");
+    expect(button("Save rules").hasAttribute("disabled")).toBe(true);
+
+    await setRule("Rating", "7+");
+    await act(async () => button("Save rules").click());
+    await vi.waitFor(() => expect(repairBar()).toBeNull());
+    expect(ipc.argsOf("collections.change")).toEqual([
+      { kind: "rules", id: "s0", rules: { kind: "movie", filters: { rating: { min: 7 } } } },
+    ]);
+  });
 });
 
-it("leaves smart collections out of a title's collections menu", async () => {
+it("leaves smart and withheld collections out of a title's collections menu", async () => {
   const view = bareView();
   unmount = view.unmount;
   await view.render(
@@ -2235,6 +2316,7 @@ it("leaves smart collections out of a title's collections menu", async () => {
           total: 2,
           rules: { kind: "movie", filters: { runtime: { max: 5399 } } },
         },
+        { id: "w0", name: "Late night", total: 0, withheld: { filters: {}, problems: [] } },
         { id: "c0", name: "Weekend films", total: 0 },
       ],
       memberOf: new Set<string>(),

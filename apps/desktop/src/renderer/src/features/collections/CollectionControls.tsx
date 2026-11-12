@@ -11,6 +11,7 @@ import { Check, Ellipsis, ListFilter, ListPlus, Plus } from "lucide-react";
 import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import {
   COLLECTION_NAME_MAX,
+  isManual,
   type CollectionChange,
   type CollectionSummary,
   type CollectionTitle,
@@ -350,10 +351,14 @@ export function CollectionNav({
                   className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="min-w-0 flex-1 truncate">{collection.name}</span>
-                  {collection.rules && <SmartMark />}
-                  <span className="flex-none text-xs text-muted-foreground tabular-nums">
-                    {collection.total}
-                  </span>
+                  {!isManual(collection) && <SmartMark />}
+                  {collection.withheld ? (
+                    <span className="flex-none text-xs text-destructive">{t("Repair")}</span>
+                  ) : (
+                    <span className="flex-none text-xs text-muted-foreground tabular-nums">
+                      {collection.total}
+                    </span>
+                  )}
                 </button>
                 <CollectionOptions
                   name={collection.name}
@@ -663,7 +668,7 @@ export function CollectionMembership({
 }) {
   const change = useCommit(commit, ready);
   // Rules decide a smart collection's members, so only manual ones are offered.
-  const collections = every.filter((each) => !each.rules);
+  const collections = every.filter(isManual);
   // The new collection's field: its id, and its unsent text while admission is unknown.
   const [creating, setCreating] = useState<Pick<Editing, "id" | "draft"> | null>(null);
   const draft = useRef<string | null>(null);

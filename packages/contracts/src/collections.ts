@@ -28,11 +28,105 @@ export const SmartCollectionRules = lazy(() =>
 
 export type SmartCollectionRules = Infer<typeof SmartCollectionRules>;
 
+const Reversed = lazy(() =>
+  type({ min: "number", max: "number" }).narrow((range) => range.min > range.max),
+);
+
+// Filters as a collection keeps them, each one on its own: known keys only and no reversed range.
+const StrictFilters = lazy(() =>
+  TitleFilters()
+    .onDeepUndeclaredKey("reject")
+    .narrow((filters) => !Object.values(filters).some((value) => Reversed().allows(value))),
+);
+
+/**
+ * Rules as commands send them and the store keeps them: known keys only, some filter and no
+ * reversed range. Evaluation ignores what a version doesn't know, so looser rules would pick
+ * more members than they say.
+ */
+export const StrictSmartCollectionRules = lazy(() =>
+  type({ kind: type.enumerated(...TITLE_KINDS), filters: StrictFilters() })
+    .onUndeclaredKey("reject")
+    .narrow(({ filters }) => Object.keys(filters).length > 0),
+);
+
+/** Why saved rules are withheld. Parts this version doesn't know are never named. */
+export type WithheldRulesProblem =
+  | { readonly reason: "unreadable" | "unknown-kind" | "unknown-parts" | "no-filters" }
+  /** A known filter whose saved value this version refuses, such as a reversed range. */
+  | { readonly reason: "invalid-filter"; readonly filter: keyof TitleFilters };
+
+/**
+ * Saved rules failing `StrictSmartCollectionRules`. Their collection has no members until a
+ * `rules` change replaces them; the saved rules stay as they are until then.
+ */
+export interface WithheldRules {
+  /** The saved kind, when this version knows it. */
+  readonly kind?: TitleKind;
+  /** The saved filters this version reads as they are, to start a replacement from. Never applied. */
+  readonly filters: TitleFilters;
+  readonly problems: readonly WithheldRulesProblem[];
+}
+
+const Saved = lazy(() => type("string.json.parse").pipe(StrictSmartCollectionRules()));
+
+// Any rules-shaped JSON, to say what failing rules still hold.
+const AnySavedRules = lazy(() =>
+  type("string.json.parse").pipe(type({ "kind?": "unknown", filters: { "[string]": "unknown" } })),
+);
+
+/** Rules as saved in JSON, applied only when they pass `StrictSmartCollectionRules`. */
+export function savedRules(
+  json: string,
+): { readonly rules: SmartCollectionRules } | { readonly withheld: WithheldRules } {
+  const rules = Saved()(json);
+
+  if (!(rules instanceof type.errors)) return { rules };
+  const saved = AnySavedRules()(json);
+
+  if (saved instanceof type.errors)
+    return { withheld: { filters: {}, problems: [{ reason: "unreadable" }] } };
+
+  const kind = TITLE_KINDS.find((kind) => kind === saved.kind);
+  const known = TitleFilters().keyof();
+  const entries = Object.entries(saved.filters);
+  const fits = ([filter, value]: [string, unknown]) => StrictFilters().allows({ [filter]: value });
+
+  const problems: WithheldRulesProblem[] = [
+    ...(kind ? [] : [{ reason: "unknown-kind" } as const]),
+    ...entries.flatMap(([filter, value]) =>
+      known.allows(filter) && !fits([filter, value])
+        ? [{ reason: "invalid-filter", filter } as const]
+        : [],
+    ),
+    ...(Object.keys(saved).some((key) => key !== "kind" && key !== "filters") ||
+    entries.some(([filter]) => !known.allows(filter))
+      ? [{ reason: "unknown-parts" } as const]
+      : []),
+    ...(entries.length === 0 ? [{ reason: "no-filters" } as const] : []),
+  ];
+
+  return {
+    withheld: {
+      ...(kind && { kind }),
+      // Filters are checked one by one, so those passing alone pass together.
+      filters: StrictFilters().assert(Object.fromEntries(entries.filter(fits))),
+      problems,
+    },
+  };
+}
+
 export interface PersonalCollection {
   readonly id: string;
   readonly name: string;
   readonly rules?: SmartCollectionRules;
+  /** Present instead of `rules` when its saved rules are withheld: see `WithheldRules`. */
+  readonly withheld?: WithheldRules;
 }
+
+/** Whether the viewer picks its members. A withheld smart collection is not manual. */
+export const isManual = (collection: PersonalCollection) =>
+  !collection.rules && !collection.withheld;
 
 /** A collection as the viewer may see it, with how many of its members they may see. */
 export interface CollectionSummary extends PersonalCollection {

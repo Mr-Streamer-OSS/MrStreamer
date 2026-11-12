@@ -4,7 +4,7 @@
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
 import {
-  SmartCollectionRules,
+  StrictSmartCollectionRules,
   type CollectionPage as PersonalCollectionPage,
   type CollectionSummary,
 } from "./collections.ts";
@@ -766,7 +766,7 @@ export const ipcInputs = {
   "collections.change": () => {
     const identity = type({ sourceId: "string > 0", kind: titleKind(), titleId: "string > 0" });
 
-    const rules = SmartCollectionRules();
+    const rules = StrictSmartCollectionRules();
 
     return type({ kind: "'create'", id: listId(), name: "string", "rules?": rules })
       .or({ kind: "'rename'", id: listId(), name: "string" })

@@ -4,11 +4,13 @@
 // when one of its versions meets every rule. Editing never saves on its own: the head and the
 // Rules changed bar preview the new count from the catalogue already read, and Save rules stores
 // them in one change. A refused save keeps the edits, and the column keeps the saved count.
+// Withheld rules (A3.17) open the same way, from what is still readable, with their saved matches
+// left unread: only a saved repair gives the collection members again.
 import { Popover } from "@base-ui/react/popover";
 import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import type { CollectionChange } from "@mrstreamer/contracts/collections";
+import type { CollectionChange, WithheldRulesProblem } from "@mrstreamer/contracts/collections";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { COLLECTION_NAME_MAX } from "@mrstreamer/contracts/collections";
@@ -24,6 +26,7 @@ import {
   RuleMenus,
   RuleNotes,
   RuleOptionsFailure,
+  ruleName,
   sameFilters,
   setRules,
   useRuleChoices,
@@ -166,7 +169,8 @@ function OwnedSave({ kind, filters }: { kind: TitleKind; filters: TitleFilters }
  * A smart collection open in the Collections tab: its name and count, its rules inline and, while
  * they differ from the saved ones, the Rules changed bar over a preview of what they match.
  * `saved` is null for a new one not stored yet, which saves as `change` creates it. `children` is
- * the saved matches, shown while nothing is changed; a new one has none.
+ * the saved matches, shown while nothing is changed; a new one has none. With `repair`, `saved` is
+ * what withheld rules still hold and the Repair rules bar stays until they are stored.
  */
 export function SmartPane({
   kind,
@@ -178,6 +182,7 @@ export function SmartPane({
   onSaving,
   active,
   notes,
+  repair,
   children,
 }: {
   kind: TitleKind;
@@ -192,6 +197,8 @@ export function SmartPane({
   active: boolean;
   /** Under the rules, such as a failed refresh of the saved matches. */
   notes?: ReactNode;
+  /** Why the saved rules are withheld. Nothing saved is shown, so the preview stays. */
+  repair?: readonly WithheldRulesProblem[];
   children?: ReactNode;
 }) {
   const [edit, setEdit] = useState<TitleFilters | null>(null);
@@ -200,9 +207,14 @@ export function SmartPane({
   const filters = edit ?? saved ?? {};
   const storing = stored !== null && sameFilters(stored, filters);
 
-  const changed = !storing && (saved === null || (edit !== null && !sameFilters(edit, saved)));
-  const matches = useMatches(kind, filters, changed);
-  const total = changed ? matches : savedTotal;
+  const mode = saved === null ? "new" : repair ? "repair" : "changed";
+
+  const changed =
+    !storing && (mode !== "changed" || (edit !== null && !sameFilters(edit, saved ?? {})));
+
+  const previewing = changed || mode === "repair";
+  const matches = useMatches(kind, filters, previewing);
+  const total = previewing ? matches : savedTotal;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -225,14 +237,15 @@ export function SmartPane({
         <RuleMenus kind={kind} filters={filters} onFilters={setEdit} setOnly />
       </div>
       <div className="flex flex-none flex-col gap-1 pr-8 pb-4 empty:hidden">
+        {changed && repair && <RepairNotice problems={repair} />}
         <RuleNotes kind={kind} filters={filters} />
         <RuleOptionsFailure kind={kind} />
         {!changed && notes}
       </div>
       {changed && (
         <RulesChanged
-          key={saved === null ? "new" : "saved"}
-          isNew={saved === null}
+          key={mode}
+          mode={mode}
           name={name}
           filters={filters}
           matches={matches}
@@ -246,7 +259,7 @@ export function SmartPane({
           }}
         />
       )}
-      {changed ? (
+      {previewing ? (
         <CollectionGrid kind={kind} id="all" filters={filters} active={active} />
       ) : (
         children
@@ -255,12 +268,40 @@ export function SmartPane({
   );
 }
 
+/** Why withheld rules are shown for repair, naming only rules this version knows. */
+function RepairNotice({ problems }: { problems: readonly WithheldRulesProblem[] }) {
+  const reasons = problems.map((problem) => {
+    switch (problem.reason) {
+      case "unreadable":
+        return t("None of the saved rules could be read.");
+      case "unknown-kind":
+        return t("The saved kind of title isn't one this version knows.");
+      case "unknown-parts":
+        return t("Some saved rules aren't ones this version knows.");
+      case "no-filters":
+        return t("No rules were saved.");
+      case "invalid-filter":
+        return t("{rule} was left out.", { rule: ruleName(problem.filter) });
+    }
+  });
+
+  return (
+    <div className="flex flex-col gap-1.5 pb-1 text-[0.8125rem] leading-4">
+      <p className="text-destructive">
+        {t("Saved rules need repair. Matches shown here are a preview until you save.")}
+      </p>
+      {reasons.length > 0 && <p className="text-muted-foreground">{reasons.join(" ")}</p>}
+    </div>
+  );
+}
+
 /**
  * "Rules changed · 19 match, 23 before", with Discard and Save rules. A refused save keeps the
- * edits and says so, with Retry; Discard goes back to the saved rules.
+ * edits and says so, with Retry; Discard goes back to the saved rules. A repair has no Discard,
+ * since its saved rules can't be used.
  */
 function RulesChanged({
-  isNew,
+  mode,
   name,
   filters,
   matches,
@@ -270,7 +311,7 @@ function RulesChanged({
   onDiscard,
   onSaving,
 }: {
-  isNew: boolean;
+  mode: "new" | "changed" | "repair";
   name: string;
   filters: TitleFilters;
   matches: number | null;
@@ -283,6 +324,7 @@ function RulesChanged({
   const commit = useCommitCollection();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<{ name: string; problem: CollectionProblem } | null>(null);
+  const isNew = mode === "new";
   const problem = !isNew || failed?.name === name ? (failed?.problem ?? null) : null;
   const empty = Object.keys(filters).length === 0;
 
@@ -307,11 +349,15 @@ function RulesChanged({
     ? t("Add a rule to save")
     : matches === null
       ? null
-      : isNew || before === null
+      : mode !== "changed" || before === null
         ? t("{count} titles", { count: matches })
         : t("{count} match, {before} before", { count: matches, before });
 
-  const label = isNew ? t("New smart collection") : t("Rules changed");
+  const label = {
+    new: t("New smart collection"),
+    changed: t("Rules changed"),
+    repair: t("Repair rules"),
+  }[mode];
 
   return (
     <div className="flex-none pr-8 pb-5">
@@ -331,9 +377,11 @@ function RulesChanged({
           </span>
         )}
         <span className="grow" />
-        <Button variant="ghost" size="sm" disabled={saving} onClick={onDiscard}>
-          {t("Discard")}
-        </Button>
+        {mode !== "repair" && (
+          <Button variant="ghost" size="sm" disabled={saving} onClick={onDiscard}>
+            {t("Discard")}
+          </Button>
+        )}
         <Button
           variant="primary"
           size="sm"

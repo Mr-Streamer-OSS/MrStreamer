@@ -1946,6 +1946,17 @@ export const en = {
   "Couldn't save. Your changes are kept.": "Couldn't save. Your changes are kept.",
   Discard: "Discard",
   "Save rules": "Save rules",
+  Repair: "Repair",
+  "Repair rules": "Repair rules",
+  "Saved rules need repair. Matches shown here are a preview until you save.":
+    "Saved rules need repair. Matches shown here are a preview until you save.",
+  "None of the saved rules could be read.": "None of the saved rules could be read.",
+  "The saved kind of title isn't one this version knows.":
+    "The saved kind of title isn't one this version knows.",
+  "Some saved rules aren't ones this version knows.":
+    "Some saved rules aren't ones this version knows.",
+  "No rules were saved.": "No rules were saved.",
+  "{rule} was left out.": "{rule} was left out.",
   "Smart collection": "Smart collection",
   Collection: "Collection",
   "Titles you add": "Titles you add",
