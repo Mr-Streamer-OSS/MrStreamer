@@ -15,11 +15,13 @@ import type { Reminder, ReminderList } from "@mrstreamer/contracts/reminders";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
-import { useUi } from "../../src/renderer/src/app/ui-store.ts";
+import { leaveSubscription, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { queries, syncGuideUpdates } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { defined } from "@mrstreamer/core/defined";
+import { formatDate, t } from "@mrstreamer/core/i18n";
+import { guideScale } from "../../src/renderer/src/features/live/guide-grid.ts";
 
 // The tests' clock: 10:40:20 on a day without a clock change, well inside most of the test
 // guide's programmes (ten minutes into One's half hour, twenty-five into Two's hour) and twenty
@@ -176,6 +178,8 @@ async function gridPage(
     watching: false,
     searchOpen: false,
     searchFrom: "",
+    // Each test starts where a new window does, not where the last one left Live TV.
+    browsing: useUi.getInitialState().browsing,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queries.categories().queryKey, [
@@ -215,9 +219,20 @@ async function gridPage(
   unmount = mounted.unmount;
   const grid = () => container.querySelector<HTMLElement>('[role="grid"]');
 
+  /** Leaves Live TV for another page, as a view switch does; `enter` comes back. */
+  const leave = () => mounted.render(null);
+  const enter = () => mounted.render(createElement(GuidePage, { active: true }));
+
   return {
     client,
     grid,
+    leave,
+    enter,
+    /** Leaves Live TV for another page and comes back. */
+    back: async () => {
+      await leave();
+      await enter();
+    },
     /** The cell the grid names as its active one, by its accessible name. */
     active: () => {
       const id = grid()?.getAttribute("aria-activedescendant");
@@ -292,6 +307,16 @@ async function gridPage(
 }
 
 const THREE = [channel("1", "One"), channel("2", "Two"), channel("3", "Three")];
+
+/** The button with this accessible name. */
+const labelled = (label: string) =>
+  document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+/** The list's rows that show the keyboard's selection ring, by channel name. */
+const ringed = () =>
+  [...document.querySelectorAll<HTMLElement>(".ring-2.ring-white\\/70")].map((row) =>
+    row.textContent?.includes("Two") ? "Two" : row.textContent?.includes("Three") ? "Three" : "One",
+  );
 
 describe("the guide grid", () => {
   it("switches from the list with Guide and back with List, and with G", async () => {
@@ -684,6 +709,157 @@ describe("the guide grid", () => {
     expect(page.details()).toBe(shown);
   });
 
+  it("comes back to its cursor and the hours in view from another page", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+
+    for (let step = 0; step < 6; step++) await page.press("ArrowRight");
+    await page.press("ArrowDown");
+    const left = page.grid()!.scrollLeft;
+    const later = page.selected();
+    expect(later).toMatch(/^Two /);
+    expect(later).not.toBe(titleAt("2", Date.now()));
+    expect(left).toBeGreaterThan(0);
+
+    await page.back();
+
+    await ready(() => expect(page.selected()).toBe(later));
+    expect(page.grid()!.scrollLeft).toBe(left);
+    await page.press("ArrowDown");
+    expect(page.details()).toContain("No programme information");
+  });
+
+  it("comes back to the list's search and its selected row from another page", async () => {
+    const page = await gridPage(THREE, "list");
+    await ready(() => expect(document.body.textContent).toContain("Three"));
+    await page.press("ArrowDown");
+    await page.press("ArrowDown");
+    await ready(() => expect(ringed()).toEqual(["Three"]));
+
+    await page.back();
+
+    await ready(() => expect(ringed()).toEqual(["Three"]));
+
+    const searchField = () =>
+      document.querySelector<HTMLInputElement>('input[aria-label^="Search"]');
+
+    const field = searchField()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "Tw");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.back();
+    expect(searchField()?.value).toBe("Tw");
+  });
+
+  it("starts at the playing channel at now once the subscription of its cursor is removed", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+    const now = page.selected();
+    await page.press("ArrowRight");
+    await page.press("ArrowDown");
+    await page.scrollAcross(2000);
+    expect(page.selected()).not.toBe(now);
+
+    // Settings removes it while another page shows.
+    await page.leave();
+    await act(async () => leaveSubscription(SUBSCRIPTION));
+    await page.enter();
+
+    await ready(() => expect(page.selected()).toBe(now));
+  });
+
+  it.each([
+    [2, 28, 82800000],
+    [9, 24, 90000000],
+  ])("steps by a local calendar day across DST from %s", async (month, day, elapsed) => {
+    const previousZone = process.env["TZ"];
+    process.env["TZ"] = "Europe/Brussels";
+    const original = Date.now();
+    vi.setSystemTime(new Date(2026, month, day, 12));
+
+    try {
+      const page = await gridPage(THREE);
+      await ready(() => expect(page.grid()).not.toBeNull());
+      await page.leave();
+      const before = useUi.getState().browsing.live.guide!.left;
+      await page.enter();
+      await ready(() => expect(labelled("Day after")).toBeDefined());
+      await act(async () => labelled("Day after")!.click());
+      await page.leave();
+      expect(useUi.getState().browsing.live.guide!.left - before).toBe(elapsed);
+    } finally {
+      vi.setSystemTime(original);
+
+      if (previousZone === undefined) delete process.env["TZ"];
+      else process.env["TZ"] = previousZone;
+    }
+  });
+
+  it("shows both view and density save failures", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.grid()).not.toBeNull());
+    ipc.refuse("preferences.update", { kind: "unexpected", detail: "View save failed" });
+    await page.click("List");
+    await ready(() => expect(document.body.textContent).toContain("View save failed"));
+    ipc.refuse("preferences.update", { kind: "unexpected", detail: "Density save failed" });
+    await act(async () => labelled("More hours")!.click());
+    await ready(() => expect(document.body.textContent).toContain("Density save failed"));
+    expect(document.body.textContent).toContain("View save failed");
+  });
+
+  it("goes a day ahead and back at the same time of day with Day after and Day before", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+    const today = formatDate(new Date().setHours(0, 0, 0, 0), "weekdayDay");
+    const tomorrow = formatDate(new Date().setHours(24, 0, 0, 0), "weekdayDay");
+
+    const leftDate = () =>
+      page.grid()!.querySelector(".sticky.left-0")?.textContent?.split(t("Now"))[0] ?? "";
+
+    expect(leftDate()).toContain(today);
+    const left = page.grid()!.scrollLeft;
+
+    await act(async () => labelled("Day after")!.click());
+    expect(leftDate()).toContain(tomorrow);
+    expect(page.grid()!.scrollLeft).toBeGreaterThan(left);
+    await act(async () => labelled("Day before")!.click());
+    expect(leftDate()).toContain(today);
+    expect(page.grid()!.scrollLeft).toBe(left);
+
+    // The timeline goes back two hours here, no channel keeping an archive.
+    expect(labelled("Day before")!.disabled).toBe(true);
+  });
+
+  it("shows more or fewer hours across as the preferences keep it, and says when that can't be saved", async () => {
+    const page = await gridPage(THREE);
+    await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+    ipc.answer("preferences.update", (patch) =>
+      ipc.snapshot({ ...defaultPreferences, liveView: "grid", ...patch }),
+    );
+
+    // The grid's whole width: its channels' column and its hours.
+    const width = () =>
+      Number.parseFloat((page.grid()!.firstElementChild as HTMLElement).style.width);
+
+    const standard = width();
+
+    await act(async () => labelled("More hours")!.click());
+    await ready(() =>
+      expect(ipc.argsOf("preferences.update").at(-1)).toEqual({ guideDensity: "compact" }),
+    );
+    expect(width()).toBeLessThan(standard);
+    expect(labelled("More hours")!.disabled).toBe(true);
+
+    ipc.refuse("preferences.update", { kind: "unexpected", detail: "The disk is full." });
+    await act(async () => labelled("Fewer hours")!.click());
+    await ready(() =>
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain(t("Guide")),
+    );
+    // What shows is what was saved.
+    expect(labelled("More hours")!.disabled).toBe(true);
+  });
+
   it("keeps the cursor on its channel when the list changes under it", async () => {
     const page = await gridPage(THREE);
     await ready(() => expect(page.cell(titleAt("2", Date.now())!)).toBeDefined());
@@ -821,6 +997,27 @@ it("keeps an exact grid channel through a pending filter and selects the first w
   expect(player.state().channel?.id).toBe("3");
 });
 
+it("does not keep a default selection when leaving before a provider answers", async () => {
+  const page = await gridPage(THREE);
+  await ready(() => expect(page.rows()).toContain("Two"));
+  await page.press("ArrowDown");
+  await page.press("Enter");
+  expect(player.state().channel?.id).toBe("2");
+  const held = ipc.hold("library.browse", (query) => query.filters.browseTopics.includes("news"));
+  await act(async () =>
+    useUi.setState({ watching: false, list: { kind: "topic", topic: "news" } }),
+  );
+  await ready(() => expect(page.rows()).toEqual([]));
+  await page.leave();
+  expect(useUi.getState().browsing.live.selected).toBeNull();
+  ipc.answer("library.browse", () => browseResult(THREE));
+  await act(async () => held.resolve(browseResult(THREE)));
+  await page.enter();
+  await ready(() => expect(page.rows()).toContain("Two"));
+  await page.press("Enter");
+  expect(player.state().channel?.id).toBe("2");
+});
+
 it("opens a newly read list on the playing channel", async () => {
   const page = await gridPage(THREE);
   await ready(() => expect(page.rows()).toEqual(["One", "Two", "Three"]));
@@ -933,4 +1130,36 @@ describe("reminders in the guide grid", () => {
     await act(async () => held.reject({ kind: "unexpected", detail: "disk full" }));
     await ready(() => expect(page.details()).not.toContain("Couldn't save"));
   });
+});
+
+describe("the guide's widths", () => {
+  it("gives the channels' column at most a third of a narrow grid, down to its least", () => {
+    // At a 16 px rem: 224 px in a wide grid, a third of 600, and 9 rem in a very narrow one.
+    expect(guideScale(1600, 16, "standard").columnPx).toBe(224);
+    expect(guideScale(600, 16, "standard").columnPx).toBe(200);
+    expect(guideScale(300, 16, "standard").columnPx).toBe(144);
+    // Larger text widens the least: 9 rem at 24 px.
+    expect(guideScale(300, 24, "standard").columnPx).toBe(216);
+  });
+
+  it("shows more hours across at a denser setting", () => {
+    expect(guideScale(1600, 16, "compact").hourPx).toBe(144);
+    expect(guideScale(1600, 16, "standard").hourPx).toBe(224);
+    expect(guideScale(1600, 16, "roomy").hourPx).toBe(320);
+  });
+});
+
+it("keeps a previous Live selection when a cold return is left before its list answers", async () => {
+  const page = await gridPage(THREE);
+  await ready(() => expect(page.rows()).toContain("Two"));
+  await page.leave();
+  const selected = useUi.getState().browsing.live.selected;
+  expect(selected?.channel?.id).toBe("1");
+  page.client.removeQueries({ queryKey: browseChannels(null).queryKey });
+  const held = ipc.hold("library.browse", () => true);
+  await page.enter();
+  await ready(() => expect(page.rows()).toEqual([]));
+  await page.leave();
+  expect(useUi.getState().browsing.live.selected).toEqual(selected);
+  await act(async () => held.resolve(browseResult(THREE)));
 });

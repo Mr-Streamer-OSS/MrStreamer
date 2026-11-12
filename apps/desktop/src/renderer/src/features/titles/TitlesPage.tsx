@@ -10,8 +10,7 @@ import { useSearchUsage } from "../../app/analytics.ts";
 // shows what it finds in place of the tab; Escape clears it. ⌘K searches everything for the same.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Play } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
-import { create } from "zustand";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   type CollectionId,
   type CollectionRow,
@@ -25,7 +24,15 @@ import { collectionSort } from "@mrstreamer/core/ondemand/collections";
 import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { formatDecimal, formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { isMac, isTyping } from "../../app/platform.ts";
-import { openDetails, openView, useUi } from "../../app/ui-store.ts";
+import {
+  browsingNow,
+  openDetails,
+  openView,
+  setBrowsing,
+  useUi,
+  type TitlesPlace,
+  type TitlesTab,
+} from "../../app/ui-store.ts";
 import { Artwork, PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { SearchField } from "../../components/ui/search-field.tsx";
@@ -45,6 +52,7 @@ import {
 } from "../../lib/titles.ts";
 import { useDebounced } from "../../lib/use-debounced.ts";
 import { useFit } from "../../lib/use-fit.ts";
+import { useKeptScroll, type KeptSpot } from "../../lib/use-kept-scroll.ts";
 import { cn } from "../../lib/utils.ts";
 import { CollectionsPage } from "../collections/CollectionsPage.tsx";
 import { SaveAsCollection } from "../collections/SmartRules.tsx";
@@ -56,30 +64,9 @@ import {
   type TitleFilterControls,
 } from "./TitleFilters.tsx";
 
-type Tab = "for-you" | "new" | "genres" | "services" | "4k" | "adult" | "all" | "collections";
-
-interface Place {
-  readonly tab: Tab;
-  /** A collection opened over the tab, with how the viewer sorted it; null in its own order. */
-  readonly collection: CollectionId | null;
-  readonly collectionSort: CollectionSort | null;
-  /** How All is sorted. */
-  readonly sort: CollectionSort;
-  /** What the field in the tab bar searches for; empty shows the tab. */
-  readonly query: string;
-}
-
-/** Where each kind was, kept while the viewer goes elsewhere and comes back. */
-const usePlace = create<Record<TitleKind, Place>>(() => ({
-  movie: { tab: "for-you", collection: null, collectionSort: null, sort: "added", query: "" },
-  series: { tab: "for-you", collection: null, collectionSort: null, sort: "added", query: "" },
-}));
-
 /** Opens Movies or Series on one collection, with Back to the tab it was on: Home's All. */
 export function openCollection(kind: TitleKind, collection: CollectionId): void {
-  usePlace.setState((state) => ({
-    [kind]: { ...state[kind], collection, collectionSort: null },
-  }));
+  setBrowsing(kind, (place) => ({ ...place, collection, collectionSort: null }));
   openView(kind === "movie" ? "movies" : "series");
 }
 
@@ -87,14 +74,6 @@ const POSTER_REM = 8.5;
 const STILL_REM = 13;
 
 export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean }) {
-  const [filterState, setFilterState] = useState<{ kind: TitleKind; filters: TitleFilters }>({
-    kind,
-    filters: {},
-  });
-
-  if (filterState.kind !== kind) setFilterState({ kind, filters: {} });
-  const filters = filterState.kind === kind ? filterState.filters : {};
-  const onFilters = (next: TitleFilters) => setFilterState({ kind, filters: next });
   const client = useQueryClient();
   useEffect(() => {
     if (!active) return;
@@ -109,10 +88,24 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
           (query.queryKey[1] === "searchKind" && query.queryKey.length > 4)),
     });
   }, [active, kind, client]);
-  const place = usePlace((state) => state[kind]);
+  const place = useUi((state) => state.browsing[kind]);
+  const go = (next: Partial<TitlesPlace>) => setBrowsing(kind, (now) => ({ ...now, ...next }));
+  const { filters } = place;
+  const onFilters = (next: TitleFilters) => go({ filters: next });
+  // Bound to the profile the page was drawn for, so it keeps nothing once another is on show.
+  const keep = useMemo(() => browsingNow(kind), [kind, place.reset]);
 
-  const go = (next: Partial<Place>) =>
-    usePlace.setState((state) => ({ [kind]: { ...state[kind], ...next } }));
+  /** Where a layer of the page stood as it went, while it shows the same `surface` again. */
+  const kept = (layer: "tab" | "collection", surface: string): KeptSpot => {
+    const saved = place.spots[layer];
+    const shows = `${surface}:${JSON.stringify(filters)}`;
+
+    return {
+      from: saved?.surface === shows ? saved : null,
+      keep: (spot) =>
+        keep((now) => ({ ...now, spots: { ...now.spots, [layer]: { ...spot, surface: shows } } })),
+    };
+  };
 
   const subscriptions = useSubscriptions();
 
@@ -140,7 +133,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
         : "for-you"
       : place.tab;
 
-  const tabs: readonly { value: Tab; label: string }[] = [
+  const tabs: readonly { value: TitlesTab; label: string }[] = [
     ...(playlistOnly
       ? []
       : [
@@ -170,11 +163,9 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
       const ui = useUi.getState();
 
       if (ui.searchOpen || ui.settings || ui.updateDialog || ui.details || ui.playingTitle) return;
-      usePlace.setState((state) => ({
-        [kind]: state[kind].collection
-          ? { ...state[kind], collection: null }
-          : { ...state[kind], query: "" },
-      }));
+      setBrowsing(kind, (now) =>
+        now.collection ? { ...now, collection: null } : { ...now, query: "" },
+      );
       event.preventDefault();
     }
 
@@ -200,7 +191,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   const failure = failed[0]?.failure ?? null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div key={place.reset} className="flex h-full flex-col">
       <WindowBar
         className="bg-black"
         {...(place.collection ? { onBack: () => go({ collection: null }) } : {})}
@@ -214,6 +205,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
           active={active}
           filters={filters}
           onFilters={onFilters}
+          kept={kept("collection", `${place.collection}:${place.collectionSort ?? ""}`)}
         />
       ) : (
         <>
@@ -277,11 +269,12 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
               onFilters={onFilters}
               takeFocus={handed}
               onFocusTaken={() => setHanded(false)}
+              kept={kept("tab", `search:${place.query.trim()}`)}
             />
           ) : tab === "for-you" || tab === "new" ? (
-            <Rows kind={kind} tab={tab} onOpen={open} />
+            <Rows kind={kind} tab={tab} onOpen={open} kept={kept("tab", tab)} />
           ) : tab === "genres" || tab === "services" ? (
-            <Tiles kind={kind} of={tab} onOpen={open} />
+            <Tiles kind={kind} of={tab} onOpen={open} kept={kept("tab", tab)} />
           ) : tab === "collections" ? (
             <CollectionsPage kind={kind} active={active} />
           ) : (
@@ -293,6 +286,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
                 active={active}
                 filters={filters}
                 onFilters={onFilters}
+                kept={kept("tab", `${tab}:${tab === "all" ? place.sort : ""}`)}
                 sortControl={
                   tab === "all" ? (
                     <SortMenu value={place.sort} onChange={(sort) => go({ sort })} />
@@ -358,12 +352,14 @@ function SearchResults({
   onFilters,
   takeFocus,
   onFocusTaken,
+  kept,
 }: {
   kind: TitleKind;
   query: string;
   active: boolean;
   takeFocus: boolean;
   onFocusTaken: () => void;
+  kept: KeptSpot;
 } & TitleFilterControls) {
   const debounced = useDebounced(query, 120);
 
@@ -414,11 +410,13 @@ function SearchResults({
           <TitleGrid
             key={`${debounced}:${JSON.stringify(filters)}`}
             titles={titles}
+            ready={found.data !== undefined && !found.isPlaceholderData && debounced === query}
             active={active && !found.isPlaceholderData && debounced === query}
             caption={searchCaption}
             asked={Object.keys(filters).length > 0}
             takeFocus={takeFocus}
             onFocusTaken={onFocusTaken}
+            kept={kept}
           />
         </div>
       )}
@@ -484,12 +482,14 @@ function Collection({
   active,
   filters,
   onFilters,
+  kept,
 }: {
   kind: TitleKind;
   id: CollectionId;
   sort: CollectionSort | null;
   onSort: (sort: CollectionSort) => void;
   active: boolean;
+  kept: KeptSpot;
 } & TitleFilterControls) {
   const listed = useCollection(kind, id, sort ?? undefined, filters);
 
@@ -512,6 +512,7 @@ function Collection({
         onFilters={onFilters}
         sortControl={<SortMenu value={sort ?? collectionSort(id)} onChange={onSort} />}
         hideCount
+        kept={kept}
       />
     </div>
   );
@@ -522,25 +523,42 @@ function Rows({
   kind,
   tab,
   onOpen,
+  kept,
 }: {
   kind: TitleKind;
   tab: "for-you" | "new";
   onOpen: (id: CollectionId) => void;
+  kept: KeptSpot;
 }) {
   const continuing = useContinueWatching();
   const play = useResume();
   const removal = useRemoveFromContinue();
-  const [box, fit] = useFit();
+  const [fitted, fit, measured] = useFit();
+  const scroller = useRef<HTMLDivElement | null>(null);
+
+  const box = useCallback(
+    (element: HTMLDivElement) => {
+      scroller.current = element;
+
+      return fitted(element);
+    },
+    [fitted],
+  );
+
   const stills = fit(STILL_REM);
   const posters = fit(POSTER_REM);
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
   // Titles like the one watched last, by the version that was watched.
   const like = mine[0]?.version ?? null;
   const rows = useQuery(queries.rows(kind, tab, tab === "for-you" ? like : null));
-
-  if (rows.error) {
-    return <p className="px-10 text-sm text-destructive">{describeError(appError(rows.error))}</p>;
-  }
+  useKeptScroll(
+    scroller,
+    kept && {
+      from: kept.from?.top ?? null,
+      keep: (top) => kept.keep({ key: null, index: 0, top }),
+    },
+    rows.data !== undefined && measured,
+  );
 
   const featured = tab === "for-you" ? featuredOf(kind, rows.data ?? []) : null;
 
@@ -551,6 +569,9 @@ function Rows({
 
   return (
     <div ref={box} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
+      {rows.error && (
+        <p className="text-sm text-destructive">{describeError(appError(rows.error))}</p>
+      )}
       {featured && <Featured title={featured} resume={resume ?? null} />}
       <div className="space-y-9">
         {tab === "for-you" && mine.length > 0 && (
@@ -677,23 +698,37 @@ function Tiles({
   kind,
   of,
   onOpen,
+  kept,
 }: {
   kind: TitleKind;
   of: "genres" | "services";
   onOpen: (id: CollectionId) => void;
+  kept: KeptSpot;
 }) {
+  const scroller = useRef<HTMLDivElement>(null);
   const tiles = useQuery(queries.tiles(kind, of));
+  useKeptScroll(
+    scroller,
+    kept && {
+      from: kept.from?.top ?? null,
+      keep: (top) => kept.keep({ key: null, index: 0, top }),
+    },
+    tiles.data !== undefined,
+  );
+
   const status = useQuery(queries.onDemandStatus());
   const metadata = status.data?.metadata;
-
-  if (tiles.error) {
-    return <p className="px-10 text-sm text-destructive">{describeError(appError(tiles.error))}</p>;
-  }
 
   const empty = tiles.data?.length === 0;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pt-1 pb-16">
+    <div
+      ref={scroller}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pt-1 pb-16"
+    >
+      {tiles.error && (
+        <p className="mb-4 text-sm text-destructive">{describeError(appError(tiles.error))}</p>
+      )}
       {empty ? (
         <p className="text-[0.9375rem] text-muted-foreground">
           {!metadata

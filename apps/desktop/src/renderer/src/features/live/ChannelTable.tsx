@@ -99,6 +99,7 @@ import type { RowPart } from "./reorder.ts";
 import { holds } from "./custom-lists.ts";
 import { ListMenu, UnlistedRows, type UnlistedChannel } from "./CustomListControls.tsx";
 import { defined } from "@mrstreamer/core/defined";
+import { useKeptScroll, type KeptSpot } from "../../lib/use-kept-scroll.ts";
 
 const ROW_REM = 3.75;
 const NONE: readonly string[] = [];
@@ -133,7 +134,7 @@ export interface TableLists {
 /**
  * One list's channels, or what a search found of them. Give each its own, by key: the list
  * before, its scroll position and what the virtualiser measured of it, would move this one when
- * a row opens.
+ * a row opens. It opens on the playing channel, or scrolled as `restore` says it was.
  */
 export function ChannelTable({
   channels,
@@ -158,6 +159,7 @@ export function ChannelTable({
   onWatchArchive,
   onToggleSchedule,
   onToggleFavourite,
+  restore,
 }: {
   channels: readonly LiveChannel[];
   searchRows?: readonly SearchChannelRow[] | null;
@@ -195,8 +197,17 @@ export function ChannelTable({
   onWatchArchive: (channel: LiveChannel, index: number, programme: Programme) => void;
   onToggleSchedule: (channelKey: string) => void;
   onToggleFavourite: (channel: LiveChannel) => void;
+  restore?: KeptSpot;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  useKeptScroll(
+    scroller,
+    restore && {
+      from: restore.from?.top ?? null,
+      keep: (top) => restore.keep({ key: null, index: 0, top }),
+    },
+    channels.length > 0,
+  );
   const asked = useRef(searchFocus);
   const focusedRow = useRef<HTMLElement | null>(null);
   const [listMenuOpen, setListMenuOpen] = useState(false);
@@ -263,8 +274,10 @@ export function ChannelTable({
     virtualizer.measure();
   }, [rem, virtualizer]);
 
-  // The list opens on the playing channel.
+  // The list opens on the playing channel, unless it was kept.
   useEffect(() => {
+    if (restore?.from) return;
+
     const index = channels.findIndex((channel, at) =>
       rowPlays(channel, searchRows?.[at], playingKey),
     );

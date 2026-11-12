@@ -1,7 +1,8 @@
 import type { SettingsSection, SettingsControl } from "../features/settings/catalogue.ts";
 import { create } from "zustand";
 import type { LiveDiscovery, LiveFilters } from "@mrstreamer/contracts/live-browse";
-import type { TitleKind } from "@mrstreamer/contracts/ondemand";
+import type { CollectionId, CollectionSort, TitleKind } from "@mrstreamer/contracts/ondemand";
+import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
 import { call } from "../lib/ipc.ts";
@@ -80,6 +81,145 @@ type UpdateDialog = "panel" | "restart" | "reminder";
 export type UpdateReminder =
   "asking" | "done" | { readonly allowed: string } | { readonly kept: string };
 
+/**
+ * Where a list or grid stood as its page went: the item the keys were on, by a key that holds
+ * while the list changes and by its position, and how far it was scrolled. Given back, the item
+ * is found by its key, else the position is kept, so an item the list no longer shows, such as a
+ * title hidden since, never comes back.
+ */
+export interface Spot {
+  readonly key: string | null;
+  readonly index: number;
+  readonly top: number;
+}
+
+/** A `Spot` and what it was of, such as a collection by its sort and filters. */
+interface SurfaceSpot extends Spot {
+  readonly surface: string;
+}
+
+/** The tabs of Movies and Series. */
+export type TitlesTab =
+  "for-you" | "new" | "genres" | "services" | "4k" | "adult" | "all" | "collections";
+
+/** Where Movies or Series was. */
+export interface TitlesPlace {
+  /** Invalidates mounted surfaces and late writes after a policy reset. */
+  readonly reset: number;
+  readonly tab: TitlesTab;
+  /** A collection opened over the tab, with how the viewer sorted it; null in its own order. */
+  readonly collection: CollectionId | null;
+  readonly collectionSort: CollectionSort | null;
+  /** How All is sorted. */
+  readonly sort: CollectionSort;
+  /** What the field in the tab bar searches for; empty shows the tab. */
+  readonly query: string;
+  /** The filters over every grid of the kind. */
+  readonly filters: TitleFilters;
+  /** Where the tab, and a collection open over it, stood as each went. */
+  readonly spots: { readonly tab: SurfaceSpot | null; readonly collection: SurfaceSpot | null };
+}
+
+/**
+ * A channel the keys were on, and the row it was at. Given back, the channel is found again, else
+ * the row: a channel the list no longer shows never comes back.
+ */
+export interface ChannelSpot {
+  readonly channel: OwnedId | null;
+  readonly index: number;
+}
+
+/**
+ * Where the guide stood: its cursor's channel and moment (`at`), the moment at its left edge and
+ * how far down it was scrolled.
+ */
+export interface GuideSpot extends ChannelSpot {
+  readonly at: number;
+  readonly left: number;
+  readonly top: number;
+}
+
+/**
+ * Where Live TV stood in the list on show, `UiState.list`; another list starts over. The rows'
+ * and the guide's places are for the search they showed (`surface`).
+ */
+interface LivePlace {
+  readonly search: string;
+  readonly selected: ChannelSpot | null;
+  readonly rows: SurfaceSpot | null;
+  readonly guide: (GuideSpot & { readonly surface: string }) | null;
+}
+
+/** What Recordings shows beside its side: a list of its own, or one group by its key. */
+export type RecordingsShelf =
+  "overview" | "recorded" | "scheduled" | "rules" | "protected" | "other" | `group:${string}`;
+
+/**
+ * Where each page was as the viewer went to another, for this profile and these subscriptions
+ * only: see `resetForAccount`, `leaveSubscription` and `closeTitleSheets`.
+ */
+export interface Browsing {
+  readonly movie: TitlesPlace;
+  readonly series: TitlesPlace;
+  readonly live: LivePlace;
+  readonly recordings: {
+    readonly shelf: RecordingsShelf;
+    readonly query: string;
+    readonly top: number;
+  };
+  readonly downloads: { readonly top: number };
+}
+
+const TITLES_START: TitlesPlace = {
+  reset: 0,
+  tab: "for-you",
+  collection: null,
+  collectionSort: null,
+  sort: "added",
+  query: "",
+  filters: {},
+  spots: { tab: null, collection: null },
+};
+
+const BROWSING_START: Browsing = {
+  movie: TITLES_START,
+  series: TITLES_START,
+  live: { search: "", selected: null, rows: null, guide: null },
+  recordings: { shelf: "overview", query: "", top: 0 },
+  downloads: { top: 0 },
+};
+
+/** Changes where one page is, keeping the rest. */
+export function setBrowsing<P extends keyof Browsing>(
+  page: P,
+  change: (place: Browsing[P]) => Browsing[P],
+): void {
+  useUi.setState(({ browsing }) => ({ browsing: { ...browsing, [page]: change(browsing[page]) } }));
+}
+
+/**
+ * `setBrowsing` for one page, bound to the account and profile on show now, and for Live TV to
+ * the list on show too. Pages keep their place with it as they unmount: once any of those has
+ * changed, as when a page drawn for the last profile unmounts after the switch, it changes nothing.
+ */
+export function browsingNow<P extends keyof Browsing>(
+  page: P,
+): (change: (place: Browsing[P]) => Browsing[P]) => void {
+  const { account, list, browsing } = useUi.getState();
+  const titlesPage = page === "movie" ? "movie" : page === "series" ? "series" : null;
+
+  return (change) => {
+    const now = useUi.getState();
+
+    if (
+      now.account === account &&
+      (page !== "live" || sameList(now.list, list)) &&
+      (titlesPage === null || now.browsing[titlesPage].reset === browsing[titlesPage].reset)
+    )
+      setBrowsing(page, change);
+  };
+}
+
 interface UiState {
   /**
    * Rises when the subscriptions start over, with the first one saved or the last one removed,
@@ -129,6 +269,8 @@ interface UiState {
   readonly list: ChannelList;
   readonly updateDialog: UpdateDialog | null;
   readonly updateReminder: UpdateReminder | null;
+  /** Where each page was, for coming back to it. */
+  readonly browsing: Browsing;
 }
 
 /** Navigation and overlay state for the window. */
@@ -153,7 +295,14 @@ export const useUi = create<UiState>(() => ({
   list: { kind: "all" },
   updateDialog: null,
   updateReminder: null,
+  browsing: BROWSING_START,
 }));
+
+// Live TV's place belongs to the list it was in: another list starts at its top.
+useUi.subscribe((state, previous) => {
+  if (state.list !== previous.list && !sameList(state.list, previous.list))
+    useUi.setState({ browsing: { ...state.browsing, live: BROWSING_START.live } });
+});
 
 // Settings over a title holds the countdown to its next episode, so nothing starts behind it.
 useUi.subscribe((state) => titlePlayer.holdNext(state.settings !== null));
@@ -207,9 +356,9 @@ export function openView(view: View): void {
 }
 
 /**
- * Home with nothing open over it, for the first subscription or none: a list, details or a title
- * open before belonged to what went. The title closes too, with what it had pending, such as the
- * countdown to its next episode.
+ * Home with nothing open over it, for the first subscription or none: a list, details, a title
+ * open before and where each page was belonged to what went. The title closes too, with what it
+ * had pending, such as the countdown to its next episode.
  */
 export function resetForAccount(): void {
   titlePlayer.close();
@@ -223,6 +372,7 @@ export function resetForAccount(): void {
     channelsOpen: false,
     searchOpen: false,
     list: { kind: "all" },
+    browsing: BROWSING_START,
   }));
 }
 
@@ -350,24 +500,80 @@ export function closeDetails(): void {
 /**
  * What a removed subscription listed leaves the window: details of it close, with the way back
  * through them, Back passes over its titles, and a saved title's sheet goes when it was saved
- * from it.
+ * from it. Movies and Series no longer filter by it, and Live TV's selection and guide cursor go
+ * when they were on one of its channels.
  */
 export function leaveSubscription(id: string): void {
-  useUi.setState(({ details, trail, savedEntry }) => ({
+  useUi.setState(({ details, trail, savedEntry, browsing }) => ({
     ...(details?.subscriptionId === id
       ? NO_DETAILS
       : { trail: trail.filter((step) => step.target.subscriptionId !== id) }),
     savedEntry: savedEntry?.sources.includes(id) ? null : savedEntry,
+    browsing: {
+      ...browsing,
+      movie: withoutSource(browsing.movie, id),
+      series: withoutSource(browsing.series, id),
+      live: {
+        ...browsing.live,
+        selected: ofSubscription(browsing.live.selected, id) ? null : browsing.live.selected,
+        guide: ofSubscription(browsing.live.guide, id) ? null : browsing.live.guide,
+      },
+    },
   }));
+}
+
+/** A place's filters without one subscription; a filter left with no subscription goes. */
+function withoutSource(place: TitlesPlace, id: string): TitlesPlace {
+  const { sourceIds, ...rest } = place.filters;
+
+  const kept = sourceIds?.filter((each) => each !== id);
+  const removedCollection = place.collection?.startsWith(`like:${id}:`);
+
+  return {
+    ...place,
+    filters: sourceIds?.includes(id)
+      ? kept?.length
+        ? { ...rest, sourceIds: kept }
+        : rest
+      : place.filters,
+    collection: removedCollection ? null : place.collection,
+    collectionSort: removedCollection ? null : place.collectionSort,
+    spots: removedCollection ? { ...place.spots, collection: null } : place.spots,
+  };
+}
+
+function ofSubscription(spot: ChannelSpot | null, id: string): boolean {
+  return spot?.channel?.subscriptionId === id;
 }
 
 /**
  * Closes a title's details, with the way back through them, and a saved title's sheet, as when
- * Settings hides titles for adults: what shows may be one. A title the lists mark for adults only
- * later is passed over by Back (`backDetails`).
+ * Settings hides titles for adults: what shows may be one. Movies and Series go back to their tab
+ * at its top, Adults closing for For you, as what they had open or selected may be one too. A
+ * title the lists mark for adults only later is passed over by Back (`backDetails`).
  */
 export function closeTitleSheets(): void {
-  useUi.setState({ ...NO_DETAILS, savedEntry: null });
+  useUi.setState(({ browsing }) => ({
+    ...NO_DETAILS,
+    savedEntry: null,
+    browsing: {
+      ...browsing,
+      movie: tabOnly(browsing.movie),
+      series: tabOnly(browsing.series),
+    },
+  }));
+}
+
+function tabOnly(place: TitlesPlace): TitlesPlace {
+  return {
+    ...place,
+    reset: place.reset + 1,
+    query: "",
+    tab: place.tab === "adult" ? "for-you" : place.tab,
+    collection: null,
+    collectionSort: null,
+    spots: { tab: null, collection: null },
+  };
 }
 
 /** Shows a saved title the lists don't have, over the page: what was kept of it, and Remove. */

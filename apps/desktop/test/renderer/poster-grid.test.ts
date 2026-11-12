@@ -70,6 +70,8 @@ beforeEach(() => {
     playingTitle: false,
     searchOpen: false,
     settings: null,
+    // Each test starts where a new window does, not where the last one left Movies.
+    browsing: useUi.getInitialState().browsing,
   });
 });
 

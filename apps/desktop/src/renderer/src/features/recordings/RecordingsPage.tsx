@@ -39,7 +39,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { Ellipsis, Lock, Play, Repeat2, Search } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import {
   RECORDING_PRIORITY_DEFAULT,
@@ -53,7 +53,8 @@ import {
 } from "@mrstreamer/contracts/recordings";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatBytes, formatDate, formatList, formatNumber, t } from "@mrstreamer/core/i18n";
-import { useUi } from "../../app/ui-store.ts";
+import { browsingNow, useUi, type RecordingsShelf } from "../../app/ui-store.ts";
+import { useKeptScroll } from "../../lib/use-kept-scroll.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { NativeCheckbox } from "../../components/ui/checkbox.tsx";
@@ -93,18 +94,29 @@ import {
   useSchedules,
 } from "./schedules.ts";
 
-/** What the page shows beside the side: a list of its own, or one group by its key. */
-type Shelf =
-  "overview" | "recorded" | "scheduled" | "rules" | "protected" | "other" | `group:${string}`;
-
 export function RecordingsPage({ standalone = false }: { standalone?: boolean }) {
   const list = useRecordings();
   const schedules = useSchedules();
   const ruleList = useRules();
   const resume = useRecordingResume();
   const storage = useRecordingStorage().data;
-  const [shelf, setShelf] = useState<Shelf>("overview");
-  const [query, setQuery] = useState("");
+  // Where the page stood when the viewer last left it (`Browsing`), kept again as it goes.
+  const [kept] = useState(() => useUi.getState().browsing.recordings);
+  const keep = useMemo(() => browsingNow("recordings"), []);
+  const [shelf, setShelf] = useState<RecordingsShelf>(kept.shelf);
+  const [query, setQuery] = useState(kept.query);
+  const scroller = useRef<HTMLDivElement>(null);
+  const leaving = useRef({ shelf, query });
+  leaving.current = { shelf, query };
+  useKeptScroll(
+    scroller,
+    {
+      from: kept.top,
+      keep: (top) => keep(() => ({ ...leaving.current, top })),
+    },
+    list.data !== undefined &&
+      (standalone || (schedules.data !== undefined && ruleList.data !== undefined)),
+  );
   // Standing alone, what was recorded: nothing records or is scheduled without a subscription.
   const recordings = (list.data ?? []).filter((each) => !standalone || !isLive(each));
   const scheduled = standalone ? [] : (schedules.data ?? []);
@@ -115,7 +127,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
   const protectedOnes = recordings.filter((each) => each.protected);
 
   // A group whose last recording went, or Protected once none is, shows Overview again.
-  const showing: Shelf =
+  const showing: RecordingsShelf =
     (shelf.startsWith("group:") && !group) || (shelf === "protected" && !protectedOnes.length)
       ? "overview"
       : shelf;
@@ -162,7 +174,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
 
   const recordedCount = recordings.filter((each) => !isLive(each)).length;
 
-  const show = (id: Shelf) => {
+  const show = (id: RecordingsShelf) => {
     setQuery("");
     setShelf(id);
   };
@@ -184,7 +196,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
                 : { title: t("Recordings"), count };
 
   // Standing alone, nothing is scheduled and nothing follows a rule.
-  const shelves: { id: Shelf; label: string; count: number | null }[] = [
+  const shelves: { id: RecordingsShelf; label: string; count: number | null }[] = [
     { id: "overview", label: t("Overview"), count: null },
     { id: "recorded", label: t("Recorded"), count: recordedCount },
     ...(standalone
@@ -285,7 +297,10 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           <span className="flex-1" />
           {storage && <StorageLine storage={storage} settings={!standalone} />}
         </nav>
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-8 pt-[1.375rem] pb-10 xl:px-9">
+        <div
+          ref={scroller}
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto px-8 pt-[1.375rem] pb-10 xl:px-9"
+        >
           <div className="flex items-baseline gap-2.5 pb-3.5">
             <h1 className="truncate text-[1.625rem] leading-8 font-bold tracking-tight">
               {heading.title}

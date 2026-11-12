@@ -76,6 +76,11 @@ export const Preferences = lazy(() =>
      * when absent. A new view needs a new key, as for `subtitleLook`.
      */
     "liveView?": "'list' | 'grid'",
+    /**
+     * How many hours the guide grid shows across: compact shows the most, roomy the fewest.
+     * Standard when absent. A new density needs a new key, as for `subtitleLook`.
+     */
+    "guideDensity?": "'compact' | 'standard' | 'roomy'",
   }),
 );
 
@@ -84,6 +89,8 @@ export type Preferences = Infer<typeof Preferences>;
 export type SubtitleLook = NonNullable<Preferences["subtitleLook"]>;
 
 export type LiveView = NonNullable<Preferences["liveView"]>;
+
+export type GuideDensity = NonNullable<Preferences["guideDensity"]>;
 
 /**
  * What the viewer left one subscription at: where Live TV opens, and the versions and streams

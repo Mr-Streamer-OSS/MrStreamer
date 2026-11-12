@@ -86,7 +86,15 @@ const titles = (ids: readonly string[]) => ids.map((id) => `Channel ${id}`);
  */
 async function favouritesPage(count: number, list: ChannelList = { kind: "favourites" }) {
   ipc.reset();
-  useUi.setState({ view: "live", list, watching: false, searchOpen: false, searchFrom: "" });
+  // Each test starts where a new window does, not where the last one left Live TV.
+  useUi.setState({
+    view: "live",
+    list,
+    watching: false,
+    searchOpen: false,
+    searchFrom: "",
+    browsing: useUi.getInitialState().browsing,
+  });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await client.fetchQuery(queries.preferences());
   const shown = Array.from({ length: count }, (_, index) => String(index + 1));
