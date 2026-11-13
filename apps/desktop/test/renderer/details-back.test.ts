@@ -905,6 +905,23 @@ describe("the way back", () => {
 });
 
 describe("grid and related details", () => {
+  it("lists a series' related titles after its seasons and episodes, as the keyboard reaches them", async () => {
+    await window_();
+    await act(async () => openDetails({ kind: "series", ...ownedOf(canyon) }));
+    await showing("Canyon Hours");
+
+    const lastEpisode = [...sheet()!.querySelectorAll("button")].findLast((each) =>
+      each.textContent?.includes("Chapter 1.2"),
+    )!;
+
+    // No control sets a positive tabindex, so the order in the sheet is the keyboard's order.
+    for (const before of [inSheet("Season 2")!, lastEpisode])
+      expect(
+        before.compareDocumentPosition(relatedTile("Meridian Dawn")!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+  });
+
   it("closes a keyboard related chain to its grid opener after the poster moved", async () => {
     const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
     onTestFinished(() => {

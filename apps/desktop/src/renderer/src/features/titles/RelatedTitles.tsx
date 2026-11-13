@@ -58,7 +58,18 @@ export function RelatedTitles({
         )}
       </div>
       {picks.length > 0 ? (
-        <div className="flex gap-4 overflow-x-auto pb-3">
+        // Padded so a poster's ring and focus outline show inside the row that scrolls; the
+        // negative margins keep the posters where they would stand without it. Chromium leaves a
+        // partly shown tile where it is when the keyboard reaches it, so the row brings it in
+        // whole, clear of the edge by that padding.
+        <div
+          className="-mx-1 -mt-1 flex scroll-px-1 gap-4 overflow-x-auto px-1 pt-1 pb-3"
+          onFocus={(event) => {
+            // Window reactivation repeats focus with no previous control; keep its scroll position.
+            if (event.relatedTarget)
+              event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+          }}
+        >
           {picks.map(({ title, reason }) => (
             <div key={title.key} className="w-36 shrink-0">
               <PosterTile
