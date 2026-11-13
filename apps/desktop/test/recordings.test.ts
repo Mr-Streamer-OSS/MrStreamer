@@ -5969,7 +5969,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
   });
 
   /** A schedule of the next programme whose first stream request waits for `answer`. */
-  async function firstStartHeld() {
+  async function firstStartHeld(remaining?: number) {
     let opened = 0;
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
     const { promise: gate, resolve: answer } = Promise.withResolvers<void>();
@@ -5985,14 +5985,16 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     onTestFinished(() => answer());
     const { next } = await started.listing();
     await started.recordings.schedule(started.programmePlan(next));
-    await started.clockTo(next.start);
+    await started.clockTo(remaining === undefined ? next.start : next.stop - remaining);
     await asked;
 
     return { ...started, next, answer, opened: () => opened };
   }
 
-  it("tries a first start again once it went a minute unanswered", async () => {
-    const { provider, recordings, next, clockTo, opened } = await firstStartHeld();
+  it("settles a first unanswered start as missed at its minute limit", async () => {
+    const { provider, recordings, next, clockTo, opened, answer, dataDir, quit } =
+      await firstStartHeld();
+
     const time = { start: next.start, stop: next.stop };
 
     await clockTo(next.start + 50_000);
@@ -6001,12 +6003,273 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       { next: time, status: { kind: "planned" } },
     ]);
 
-    // A minute on, it gave that start up as a stream that couldn't be opened, and asks again.
-    await clockTo(next.start + 61_000);
+    await clockTo(next.start + MINUTE);
     const [recording] = await until(recordings.list, ([each]) => each !== undefined, 2000);
-    expect(opened()).toBe(2);
-    expect(recording?.status).toEqual({ kind: "recording" });
-    expect(recording?.scheduled?.late).toBe("stream");
+    expect(recording?.status).toEqual({ kind: "missed", why: "stream" });
+    expect(await recordings.schedules()).toEqual([]);
+    expect(await allClosed(provider)).toBe(true);
+    answer();
+    await clockTo(next.start + 2 * MINUTE);
+    expect(opened()).toBe(1);
+    expect(await until(recordings.list, (list) => list.length === 1)).toEqual([recording]);
+
+    const kept = await until(
+      () => readdir(join(dataDir, "recordings")),
+      (names) => names.every((name) => name.includes(".")),
+    );
+
+    expect(kept.filter((name) => !name.includes("."))).toEqual([]);
+    await quit();
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    expect(await again.recordings.list()).toEqual([recording]);
+    expect(await again.recordings.schedules()).toEqual([]);
+  });
+
+  it.each([
+    { minutes: 3, late: 0, limit: MINUTE },
+    { minutes: 1, late: 30_000, limit: 30_000 },
+  ])(
+    "settles a held playlist after restart at its $limit ms limit before issuing a stream request",
+    async ({ minutes, late, limit }) => {
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+      vi.setSystemTime(TEN_PAST);
+
+      onTestFinished(() => {
+        vi.useRealTimers();
+      });
+
+      const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
+
+      const tracks = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+
+      const playlist = `#EXTM3U\n#EXTINF:-1,${TRACKS}\n${provider.url}/live/demo/demo/${tracks.streamId}.ts\n`;
+      let hold = false;
+
+      const asked = Promise.withResolvers<void>();
+
+      const answer = Promise.withResolvers<void>();
+
+      const host = createServer(async (_request, response) => {
+        if (hold) {
+          asked.resolve();
+          await answer.promise;
+        }
+
+        response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist);
+      });
+
+      await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+
+      onTestFinished(() => {
+        answer.resolve();
+        host.closeAllConnections();
+        host.close();
+      });
+
+      const address = host.address();
+
+      if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No address");
+
+      const dataDir = await tempDir();
+
+      const before = await app(dataDir);
+
+      const { id: subscriptionId } = await before.subscriptions.add({
+        server: `http://127.0.0.1:${address.port}/playlist.m3u`,
+        username: "",
+        password: "",
+      });
+
+      await before.library.refresh(subscriptionId);
+
+      const channel = (await before.library.channels({})).find((each) => each.title === TRACKS)!;
+
+      const at = new Date(TEN_PAST + 2 * MINUTE);
+
+      const plan: RecordingPlan = {
+        kind: "slot",
+        channel: { subscriptionId, id: channel.id },
+        days: EVERY_DAY,
+        at: at.getHours() * 60 + at.getMinutes(),
+        minutes,
+        title: TRACKS,
+        padding: { before: 0, after: 0 },
+      };
+
+      const saved = await before.recordings.schedule(plan);
+      await before.quit();
+
+      const { recordings, quit } = await app(dataDir);
+
+      onTestFinished(quit);
+      hold = true;
+      vi.setSystemTime(at.getTime() + late);
+      await recordings.check();
+      await asked.promise;
+      expect(provider.streamRequests()).toBe(0);
+      vi.setSystemTime(at.getTime() + late + limit - 1000);
+      await recordings.check();
+      expect(await recordings.list()).toEqual([]);
+      expect(await recordings.schedules()).toMatchObject([{ status: { kind: "planned" } }]);
+      vi.setSystemTime(at.getTime() + late + limit);
+      await recordings.check();
+
+      const [missed] = await until(
+        recordings.list,
+        (list) => list[0]?.status.kind === "missed",
+        2000,
+      );
+
+      expect(missed?.status).toEqual({ kind: "missed", why: "stream" });
+      expect(await recordings.schedules()).toMatchObject([{ next: { start: at.getTime() + DAY } }]);
+      answer.resolve();
+      // Preview waits for that schedule's start to answer without changing or cancelling it.
+      await recordings.plan(plan, saved.id);
+      await recordings.check();
+      expect(await recordings.list()).toEqual([missed]);
+      expect(provider.streamRequests()).toBe(0);
+      expect(
+        (await readdir(join(dataDir, "recordings"))).filter((name) => !name.includes(".")),
+      ).toEqual([]);
+    },
+  );
+
+  it("keeps an occurrence missed when its capture opens as the deadline cancels it", async () => {
+    let source: Writable | undefined;
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+
+    const { provider, dataDir, recordings, listing, programmePlan, clockTo } = await scheduling({
+      streams: (_channel, out) => {
+        source = out;
+        out.write(Buffer.alloc(0));
+        arrived();
+      },
+    });
+
+    const { next } = await listing();
+
+    await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+    await asked;
+    source!.write(fixture("h264-aac.mpegts"));
+
+    // As in subscription removal, observe the table on disk before activation completes.
+    const folder = join(dataDir, "recordings");
+
+    const writing = () =>
+      readdirSync(folder, { withFileTypes: true }).some(
+        (entry) =>
+          entry.isDirectory() &&
+          readdirSync(join(folder, entry.name)).some(
+            (file) => statSync(join(folder, entry.name, file)).size > 0,
+          ),
+      );
+
+    const by = Date.now() + 10_000;
+
+    while (!writing()) {
+      if (Date.now() >= by) throw new Error("No program table was written");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    await clockTo(next.start + MINUTE);
+    expect(
+      await until(
+        recordings.list,
+        (list) => list.length === 1 && list[0]?.status.kind === "missed",
+        2000,
+      ),
+    ).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
+    expect(await allClosed(provider)).toBe(true);
+
+    const kept = await until(
+      () => readdir(folder),
+      (names) => names.every((name) => name.includes(".")),
+    );
+
+    expect(kept.filter((name) => !name.includes("."))).toEqual([]);
+  });
+
+  it("keeps a timed-out repeat missed while saving fails, then records only its next occurrence", async () => {
+    let opened = 0;
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: answer } = Promise.withResolvers<void>();
+
+    const { provider, channel, recordings, dataDir, clockTo, quit } = await scheduling({
+      streams: (channel, out, signal) => {
+        if (++opened !== 1) return liveStreams(channel, out, signal);
+        arrived();
+        void gate.then(() => liveStreams(channel, out, signal));
+      },
+    });
+
+    onTestFinished(() => answer());
+    const at = new Date(TEN_PAST + 2 * MINUTE);
+    await recordings.schedule({
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 5,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    });
+    await clockTo(at.getTime());
+    await asked;
+    const move = fs.rename;
+
+    const writes = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (to === join(dataDir, "recordings", "recordings.json"))
+        throw new Error("The disk refuses the inventory.");
+      await move(from, to);
+    });
+
+    onTestFinished(() => writes.mockRestore());
+    await clockTo(at.getTime() + MINUTE);
+
+    const [missed] = await until(
+      recordings.list,
+      (list) => list[0]?.status.kind === "missed",
+      2000,
+    );
+
+    expect(missed).toMatchObject({ status: { kind: "missed", why: "stream" } });
+    const inventory = await readRecordings(join(dataDir, "recordings", "recordings.json"));
+
+    if (inventory.kind !== "read") throw new Error("Inventory not read");
+    expect(inventory.items.some((each) => each.id === missed!.id)).toBe(false);
+    expect(await recordings.schedules()).toMatchObject([
+      { next: { start: at.getTime() + DAY }, status: { kind: "planned" } },
+    ]);
+    answer();
+    await clockTo(at.getTime() + 2 * MINUTE);
+    expect(opened).toBe(1);
+    expect(await allClosed(provider)).toBe(true);
+    writes.mockRestore();
+    await recordings.check();
+    await until(recordings.list, (list) => list.length === 1 && !list[0]?.unsaved);
+    await quit();
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    expect(await again.recordings.list()).toMatchObject([
+      { id: missed!.id, status: { kind: "missed", why: "stream" } },
+    ]);
+    expect(await again.recordings.schedules()).toMatchObject([
+      { next: { start: at.getTime() + DAY }, status: { kind: "planned" } },
+    ]);
+    vi.setSystemTime(at.getTime() + DAY);
+    await again.recordings.check();
+
+    const list = await until(again.recordings.list, (list) =>
+      list.some((each) => each.status.kind === "recording"),
+    );
+
+    expect(list).toHaveLength(2);
+    expect(list.find((each) => each.status.kind === "recording")?.scheduled?.from).toBe(
+      at.getTime() + DAY,
+    );
+    expect(opened).toBe(2);
   });
 
   it("records a first start that answers inside its minute as it would at once", async () => {
@@ -6023,12 +6286,16 @@ describe.skipIf(!hasTools)("recording schedules", () => {
   });
 
   it("settles a first start the provider never answers as missed by its stop", async () => {
-    const { provider, dataDir, recordings, next, clockTo, answer } = await firstStartHeld();
+    const { provider, dataDir, recordings, next, clockTo, answer } = await firstStartHeld(30_000);
 
     // Its stop passes while the provider still says nothing: the time was missed, as a stream that
     // couldn't be opened, and the schedule no longer says it plans it.
-    await clockTo(next.stop + MINUTE);
-    await until(recordings.list, ([each]) => each?.status.kind === "missed", 2000);
+    await clockTo(next.stop);
+    await until(
+      recordings.list,
+      (list) => list.length === 1 && list[0]?.status.kind === "missed",
+      2000,
+    );
     expect(await recordings.list()).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
     expect(await recordings.schedules()).toEqual([]);
 
@@ -6037,7 +6304,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     answer();
     await clockTo(next.stop + 2 * MINUTE);
     expect(await recordings.list()).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
-    const kept = await readdir(join(dataDir, "recordings"));
+
+    const kept = await until(
+      () => readdir(join(dataDir, "recordings")),
+      (names) => names.every((name) => name.includes(".")),
+    );
+
     expect(kept.filter((name) => !name.includes("."))).toEqual([]);
   });
 
