@@ -63,7 +63,10 @@ export function SliderControl({ className, children }: { className: string; chil
   );
 }
 
-/** A slim horizontal slider with a round thumb. Values run from 0 to 1. */
+/**
+ * A slim horizontal slider with a round thumb. Values run from 0 to 1. The thumb stays inside the
+ * slider at both ends, so the controls beside it keep their gap.
+ */
 export function Slider({
   value,
   onValueChange,
@@ -81,6 +84,7 @@ export function Slider({
       min={0}
       max={1}
       step={0.01}
+      thumbAlignment="edge"
       onValueChange={(next) => onValueChange(Array.isArray(next) ? (next[0] ?? 0) : next)}
       className={cn("w-24", className)}
     >
