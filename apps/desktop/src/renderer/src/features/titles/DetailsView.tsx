@@ -100,7 +100,7 @@ import {
   useEpisodeMarks,
   useTitleMarks,
 } from "./EpisodeMarks.tsx";
-import { LinkedTitles, RelatedTitles } from "./RelatedTitles.tsx";
+import { LinkedTitles, RelatedTitles, revealFocused } from "./RelatedTitles.tsx";
 import { VersionMenu } from "./VersionMenu.tsx";
 import { defined } from "@mrstreamer/core/defined";
 
@@ -530,8 +530,9 @@ function Credits({ details, onLink }: { details: TitleDetails; onLink: SheetPlac
   if (cast.length === 0 && makers.length === 0) return null;
 
   return (
-    // Padded so a link's focus ring shows inside the row that scrolls.
-    <div className="-mx-1 mt-5 flex gap-5 overflow-x-auto p-1">
+    // Padded so a link's focus ring shows inside the row that scrolls, and brought in whole by
+    // the keyboard like the related row.
+    <div className="-mx-1 mt-5 flex scroll-px-1 gap-5 overflow-x-auto p-1" onFocus={revealFocused}>
       {cast.map((person, index) => (
         <LinkButton
           key={`${person.name}:${person.role ?? ""}`}
