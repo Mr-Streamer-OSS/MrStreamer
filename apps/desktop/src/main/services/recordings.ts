@@ -150,6 +150,14 @@ const MISSED_KEPT_MS = 7 * DAY_MS;
 /** A schedule that starts within this of its time started on time. */
 const ON_TIME_MS = 60_000;
 
+/**
+ * How long a schedule's start that reads as planned meanwhile may go unanswered before it fails as
+ * a stream that couldn't be opened, never past its stop. A healthy start answers well inside it:
+ * capture gives the provider 15 seconds to answer and 15 more to send its program table
+ * (SILENCE_MS and START_LIMIT in `apps/desktop/src/main/recordings/capture.ts`).
+ */
+const ANSWER_MS = 60_000;
+
 /** How long the guide settles after a change before the schedules follow it. */
 const GUIDE_SETTLE = "2 seconds";
 
@@ -494,15 +502,17 @@ function make(deps: RecordingsDeps) {
     const active = new Map<string, Active>();
 
     /**
-     * Captures still starting, by subscription, which the app's close and a removal stop too, and
-     * by recording for one going on after a gap, which its Stop stops. `done` settles once one is
-     * active, or has ended and let its connection go.
+     * Captures still starting, by subscription, which the app's close and a removal stop too, by
+     * recording for one going on after a gap, which its Stop stops, and by schedule, which stops
+     * one unanswered past its limit. `done` settles once one is active, or has ended and let its
+     * connection go.
      */
     const starting = new Map<
       AbortController,
       {
         readonly subscriptionId: string;
         readonly resumes?: string;
+        readonly schedule?: string;
         readonly done: Promise<void>;
       }
     >();
@@ -1486,6 +1496,7 @@ function make(deps: RecordingsDeps) {
         starting.set(controller, {
           subscriptionId: channel.subscriptionId,
           ...(options.resumes && { resumes: options.resumes.id }),
+          ...(options.scheduled && { schedule: options.scheduled.schedule }),
           done,
         });
 
@@ -1668,13 +1679,15 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Each schedule's start under way: the occurrence it starts, why that time wasn't recording
-     * before it, and `answered`, settling once it answered, for a change to wait on.
+     * before it, `by`, when a check stops it unanswered, and `answered`, settling once it answered,
+     * for a change to wait on.
      */
     const startsOf = new Map<
       string,
       {
         readonly occurrence: Occurrence;
         readonly before: ScheduleMiss | "starting" | undefined;
+        readonly by: number;
         readonly answered: Promise<void>;
       }
     >();
@@ -2384,7 +2397,13 @@ function make(deps: RecordingsDeps) {
       why.set(key, "starting");
       startingOn.add(subscriptionId);
       const answered = Promise.withResolvers<void>();
-      startsOf.set(schedule.id, { occurrence, before, answered: answered.promise });
+      // A retry reads as retrying while it answers (see standingOf), so only its stop limits it.
+      const by =
+        before === "stream" || before === "disk"
+          ? Infinity
+          : Math.min(now + ANSWER_MS, occurrence.stop);
+
+      startsOf.set(schedule.id, { occurrence, before, by, answered: answered.promise });
       const { plan } = schedule;
       Effect.runFork(
         Effect.gen(function* () {
@@ -2664,6 +2683,16 @@ function make(deps: RecordingsDeps) {
       let missed = false;
       let retry = false;
       const found = new Map<string, Hold | null>();
+
+      // A start unanswered by its limit stops, failing as a stream that couldn't be opened; its
+      // answer wakes the check that settles it. One still on its way to asking is stopped later.
+      for (const [id, { by }] of startsOf) {
+        if (by > now) continue;
+        retry = true;
+
+        for (const [controller, each] of starting) if (each.schedule === id) controller.abort();
+      }
+
       const inLine = (each: KeptSchedule) => nextOccurrence(each.plan, now)?.start ?? Infinity;
 
       const ordered = [...schedules.values()].toSorted(
@@ -2822,9 +2851,10 @@ function make(deps: RecordingsDeps) {
         yield* PubSub.publish(scheduleChanges, list);
       }
 
-      const starts = list.flatMap((each) =>
-        each.next && each.next.start > now ? [each.next.start] : [],
-      );
+      const starts = [
+        ...list.flatMap((each) => (each.next && each.next.start > now ? [each.next.start] : [])),
+        ...[...startsOf.values()].flatMap(({ by }) => (by > now ? [by] : [])),
+      ];
 
       return Math.min(
         now + (retry || paused || pendingProgress.size > 0 ? RETRY_MS : CHECK_MS),

@@ -5968,6 +5968,77 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
   });
 
+  /** A schedule of the next programme whose first stream request waits for `answer`. */
+  async function firstStartHeld() {
+    let opened = 0;
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: answer } = Promise.withResolvers<void>();
+
+    const started = await scheduling({
+      streams: (channel, out, signal) => {
+        if (++opened !== 1) return liveStreams(channel, out, signal);
+        arrived();
+        void gate.then(() => liveStreams(channel, out, signal));
+      },
+    });
+
+    onTestFinished(() => answer());
+    const { next } = await started.listing();
+    await started.recordings.schedule(started.programmePlan(next));
+    await started.clockTo(next.start);
+    await asked;
+
+    return { ...started, next, answer, opened: () => opened };
+  }
+
+  it("tries a first start again once it went a minute unanswered", async () => {
+    const { provider, recordings, next, clockTo, opened } = await firstStartHeld();
+    const time = { start: next.start, stop: next.stop };
+
+    await clockTo(next.start + 50_000);
+    expect(provider.activeStreams()).toBe(1);
+    expect(await recordings.schedules()).toMatchObject([{ next: time, status: { kind: "planned" } }]);
+
+    // A minute on, it gave that start up as a stream that couldn't be opened, and asks again.
+    await clockTo(next.start + 61_000);
+    const [recording] = await until(recordings.list, ([each]) => each !== undefined, 2000);
+    expect(opened()).toBe(2);
+    expect(recording?.status).toEqual({ kind: "recording" });
+    expect(recording?.scheduled?.late).toBe("stream");
+  });
+
+  it("records a first start that answers inside its minute as it would at once", async () => {
+    const { provider, recordings, next, clockTo, answer, opened } = await firstStartHeld();
+
+    await clockTo(next.start + 50_000);
+    answer();
+    const [recording] = await until(recordings.list, ([each]) => each !== undefined, 2000);
+    expect(recording?.status).toEqual({ kind: "recording" });
+    expect(recording?.scheduled?.late).toBeNull();
+    await clockTo(next.start + 2 * MINUTE);
+    expect(opened()).toBe(1);
+    expect(provider.activeStreams()).toBe(1);
+  });
+
+  it("settles a first start the provider never answers as missed by its stop", async () => {
+    const { provider, dataDir, recordings, next, clockTo, answer } = await firstStartHeld();
+
+    // Its stop passes while the provider still says nothing: the time was missed, as a stream that
+    // couldn't be opened, and the schedule no longer says it plans it.
+    await clockTo(next.stop + MINUTE);
+    await until(recordings.list, ([each]) => each?.status.kind === "missed", 2000);
+    expect(await recordings.list()).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
+    expect(await recordings.schedules()).toEqual([]);
+
+    // The request was given up, so the provider's late answer records nothing and writes nothing.
+    expect(await allClosed(provider)).toBe(true);
+    answer();
+    await clockTo(next.stop + 2 * MINUTE);
+    expect(await recordings.list()).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
+    const kept = await readdir(join(dataDir, "recordings"));
+    expect(kept.filter((name) => !name.includes("."))).toEqual([]);
+  });
+
   it("leaves a schedules file it can't read as it is, and schedules nothing meanwhile", async () => {
     const { dataDir, listing, programmePlan } = await scheduling();
     const { next } = await listing();
