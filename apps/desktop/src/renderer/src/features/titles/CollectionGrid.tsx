@@ -375,8 +375,12 @@ export function Grid<T>({
     return () => observer.disconnect();
   }, []);
   const gap = GAP_REM * rem;
-  // Within the scroller's padding: 0.25rem left (pl-1) and 2rem right (pr-8).
-  const inner = Math.max(0, width - 2.25 * rem);
+  // Room for the first row's and column's ring: the scroller's pl-1 on the left, and the
+  // virtualizer's padding on top, which it counts so the rows it finds in view, and those it
+  // scrolls to the top, are where they show.
+  const ringRoom = rem / 4;
+  // Within the scroller's padding: ringRoom left and 2rem right (pr-8).
+  const inner = Math.max(0, width - 2 * rem - ringRoom);
   const columns = Math.max(1, Math.floor((inner + gap) / (POSTER_REM * rem + gap)));
   const tileWidth = (inner - gap * (columns - 1)) / columns;
   // A poster, its name and one line, then the gap before the next row.
@@ -432,10 +436,6 @@ export function Grid<T>({
     },
     [selectedRow],
   );
-
-  // Room above the first row for its ring, which the virtualizer counts so the rows it finds in
-  // view, and those it scrolls to the top, are where they show.
-  const ringRoom = rem / 4;
 
   const virtual = useVirtualizer({
     count: rows,
@@ -676,9 +676,7 @@ export function Grid<T>({
         if (event.target.isConnected && !box.current?.contains(event.relatedTarget))
           part.current = null;
       }}
-      // Room at the top (the virtualizer's ringRoom) and left so the first row's and column's
-      // ring shows inside the scroller; the negative margins keep the posters where they would
-      // stand without it.
+      // The negative margins offset ringRoom, so the posters stand where they would without it.
       className="-mt-1 -ml-1 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-8 pb-10 pl-1"
     >
       <div role="list" className="relative" style={{ height: virtual.getTotalSize() }}>
