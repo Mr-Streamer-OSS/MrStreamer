@@ -433,10 +433,16 @@ export function Grid<T>({
     [selectedRow],
   );
 
+  // Room above the first row for its ring, which the virtualizer counts so the rows it finds in
+  // view, and those it scrolls to the top, are where they show.
+  const ringRoom = rem / 4;
+
   const virtual = useVirtualizer({
     count: rows,
     getScrollElement: () => box.current,
     estimateSize: () => rowHeight,
+    paddingStart: ringRoom,
+    scrollPaddingStart: ringRoom,
     overscan: 2,
     rangeExtractor,
   });
@@ -670,9 +676,10 @@ export function Grid<T>({
         if (event.target.isConnected && !box.current?.contains(event.relatedTarget))
           part.current = null;
       }}
-      // Padded at the top and left so the first row's and column's ring shows inside the
-      // scroller; the negative margins keep the posters where they would stand without it.
-      className="-mt-1 -ml-1 min-h-0 flex-1 overflow-y-auto overscroll-contain pt-1 pr-8 pb-10 pl-1"
+      // Room at the top (the virtualizer's ringRoom) and left so the first row's and column's
+      // ring shows inside the scroller; the negative margins keep the posters where they would
+      // stand without it.
+      className="-mt-1 -ml-1 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-8 pb-10 pl-1"
     >
       <div role="list" className="relative" style={{ height: virtual.getTotalSize() }}>
         {items.map((row) => {
