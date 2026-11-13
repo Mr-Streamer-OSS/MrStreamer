@@ -5991,25 +5991,37 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     return { ...started, next, answer, opened: () => opened };
   }
 
-  it("settles a first unanswered start as missed at its minute limit", async () => {
+  it.each([
+    { limit: MINUTE, remaining: undefined, by: "its minute limit" },
+    { limit: 30_000, remaining: 30_000, by: "its stop when sooner" },
+  ])("settles a first unanswered start as missed at $by", async ({ limit, remaining }) => {
     const { provider, recordings, next, clockTo, opened, answer, dataDir, quit } =
-      await firstStartHeld();
+      await firstStartHeld(remaining);
 
     const time = { start: next.start, stop: next.stop };
+    const asked = remaining === undefined ? next.start : next.stop - remaining;
 
-    await clockTo(next.start + 50_000);
+    await clockTo(asked + limit - 10_000);
     expect(provider.activeStreams()).toBe(1);
     expect(await recordings.schedules()).toMatchObject([
       { next: time, status: { kind: "planned" } },
     ]);
 
-    await clockTo(next.start + MINUTE);
-    const [recording] = await until(recordings.list, ([each]) => each !== undefined, 2000);
+    // Missed as a stream that couldn't be opened; the request is given up, so the provider's late
+    // answer records nothing and writes nothing.
+    await clockTo(asked + limit);
+
+    const [recording] = await until(
+      recordings.list,
+      (list) => list.length === 1 && list[0]?.status.kind === "missed",
+      2000,
+    );
+
     expect(recording?.status).toEqual({ kind: "missed", why: "stream" });
     expect(await recordings.schedules()).toEqual([]);
     expect(await allClosed(provider)).toBe(true);
     answer();
-    await clockTo(next.start + 2 * MINUTE);
+    await clockTo(asked + limit + MINUTE);
     expect(opened()).toBe(1);
     expect(await until(recordings.list, (list) => list.length === 1)).toEqual([recording]);
 
@@ -6283,34 +6295,6 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await clockTo(next.start + 2 * MINUTE);
     expect(opened()).toBe(1);
     expect(provider.activeStreams()).toBe(1);
-  });
-
-  it("settles a first start the provider never answers as missed by its stop", async () => {
-    const { provider, dataDir, recordings, next, clockTo, answer } = await firstStartHeld(30_000);
-
-    // Its stop passes while the provider still says nothing: the time was missed, as a stream that
-    // couldn't be opened, and the schedule no longer says it plans it.
-    await clockTo(next.stop);
-    await until(
-      recordings.list,
-      (list) => list.length === 1 && list[0]?.status.kind === "missed",
-      2000,
-    );
-    expect(await recordings.list()).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
-    expect(await recordings.schedules()).toEqual([]);
-
-    // The request was given up, so the provider's late answer records nothing and writes nothing.
-    expect(await allClosed(provider)).toBe(true);
-    answer();
-    await clockTo(next.stop + 2 * MINUTE);
-    expect(await recordings.list()).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
-
-    const kept = await until(
-      () => readdir(join(dataDir, "recordings")),
-      (names) => names.every((name) => name.includes(".")),
-    );
-
-    expect(kept.filter((name) => !name.includes("."))).toEqual([]);
   });
 
   it("leaves a schedules file it can't read as it is, and schedules nothing meanwhile", async () => {

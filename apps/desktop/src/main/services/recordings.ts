@@ -1487,12 +1487,7 @@ function make(deps: RecordingsDeps) {
       Effect.suspend(() => {
         // Nothing starts as the app closes or an update restarts it, nor by itself as the
         // computer sleeps.
-        if (
-          controller.signal.aborted ||
-          closing ||
-          held ||
-          (asleep !== null && (options.resumes || options.scheduled))
-        )
+        if (closing || held || (asleep !== null && (options.resumes || options.scheduled)))
           return Effect.fail(
             new Failed({
               error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
@@ -1686,8 +1681,8 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Each schedule's start under way: the occurrence it starts, why that time wasn't recording
-     * before it, `by`, when a check stops it unanswered, and `answered`, settling once it answered,
-     * for a change to wait on.
+     * before it, `by`, when a check stops it unanswered through its `controller`, and `answered`,
+     * settling once it answered, for a change to wait on.
      */
     const startsOf = new Map<
       string,
