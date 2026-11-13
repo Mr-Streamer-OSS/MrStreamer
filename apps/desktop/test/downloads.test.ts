@@ -896,8 +896,15 @@ describe.skipIf(!hasTools)("downloads", () => {
       const film = movie(provider, subscriptionId, "TEST | Two sound tracks");
       provider.stallMovieFile(film.id, 30_000, 60_000);
       const active = await downloads.add(film.ref);
-      await vi.waitFor(async () =>
-        expect((await find(active.id))?.status.kind).toBe("transferring"),
+      // Held at its stall, the active transfer has made every request it will: transferring alone
+      // is shown before its redirect and file request reach the provider.
+      await vi.waitFor(
+        async () =>
+          expect((await find(active.id))?.status).toMatchObject({
+            kind: "transferring",
+            received: 30_000,
+          }),
+        { timeout: LONG },
       );
       const queued = await downloads.add(episode(provider, subscriptionId).ref);
       const arrived = Promise.withResolvers<void>();
@@ -922,6 +929,8 @@ describe.skipIf(!hasTools)("downloads", () => {
       } finally {
         release.resolve();
         removing.mockRestore();
+        // Settled before teardown, so a failed check above never interrupts the deletion.
+        await Promise.allSettled([deletion]);
       }
 
       const result = await deletion;
