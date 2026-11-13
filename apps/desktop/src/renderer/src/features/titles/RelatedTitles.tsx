@@ -58,7 +58,9 @@ export function RelatedTitles({
         )}
       </div>
       {picks.length > 0 ? (
-        <div className="flex gap-4 overflow-x-auto pb-3">
+        // Padded so a poster's ring and focus outline show inside the row that scrolls; the
+        // negative margins keep the posters where they would stand without it.
+        <div className="-mx-1 -mt-1 flex gap-4 overflow-x-auto px-1 pt-1 pb-3">
           {picks.map(({ title, reason }) => (
             <div key={title.key} className="w-36 shrink-0">
               <PosterTile

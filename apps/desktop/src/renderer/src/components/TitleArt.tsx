@@ -74,7 +74,11 @@ export function Artwork({
 export const POSTER_ASPECT_RATIO = 2 / 3;
 export const POSTER_CAPTION_HEIGHT_REM = 2.75;
 
-/** Containers assign width; every loaded or fallback picture fills the same poster frame. */
+/**
+ * Containers assign width; every loaded or fallback picture fills the same poster frame. Its ring
+ * (2px on hover or selection) and a tile's focus outline paint outside the frame, so a scroller
+ * around posters leaves 0.25rem of padding at the edges they meet (RelatedTitles, Grid).
+ */
 export function PosterContent({
   artworkUrl,
   name,

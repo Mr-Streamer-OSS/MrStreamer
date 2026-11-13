@@ -375,7 +375,8 @@ export function Grid<T>({
     return () => observer.disconnect();
   }, []);
   const gap = GAP_REM * rem;
-  const inner = Math.max(0, width - 2 * rem);
+  // Within the scroller's padding: 0.25rem left (pl-1) and 2rem right (pr-8).
+  const inner = Math.max(0, width - 2.25 * rem);
   const columns = Math.max(1, Math.floor((inner + gap) / (POSTER_REM * rem + gap)));
   const tileWidth = (inner - gap * (columns - 1)) / columns;
   // A poster, its name and one line, then the gap before the next row.
@@ -669,7 +670,9 @@ export function Grid<T>({
         if (event.target.isConnected && !box.current?.contains(event.relatedTarget))
           part.current = null;
       }}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-8 pb-10"
+      // Padded at the top and left so the first row's and column's ring shows inside the
+      // scroller; the negative margins keep the posters where they would stand without it.
+      className="-mt-1 -ml-1 min-h-0 flex-1 overflow-y-auto overscroll-contain pt-1 pr-8 pb-10 pl-1"
     >
       <div role="list" className="relative" style={{ height: virtual.getTotalSize() }}>
         {items.map((row) => {

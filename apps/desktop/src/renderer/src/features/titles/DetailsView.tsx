@@ -448,13 +448,6 @@ function Content({
           </span>
         </LinkButton>
       )}
-      <RelatedTitles
-        details={details}
-        switching={switching}
-        here={place.here}
-        returnTo={place.returnTo}
-        onReturn={place.onReturn}
-      />
       {details.kind === "series" && (
         <div inert={switching || undefined}>
           <Episodes
@@ -465,6 +458,14 @@ function Content({
           />
         </div>
       )}
+      {/* Last, so a series' seasons and episodes come before titles like it. */}
+      <RelatedTitles
+        details={details}
+        switching={switching}
+        here={place.here}
+        returnTo={place.returnTo}
+        onReturn={place.onReturn}
+      />
     </Header>
   );
 }
