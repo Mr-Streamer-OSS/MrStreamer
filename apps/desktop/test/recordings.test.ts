@@ -2713,11 +2713,13 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("seeds legacy recording progress once, retries a refused write and keeps zero across inventory updates and provider removal", async () => {
     const { dataDir, channel, recordings, quit, roster, subscriptionId } = await connected();
-    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
 
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
-    await until(recordings.list, ([first]) => first?.status.kind === "complete");
+    // Any captured recording has progress to seed: it is stopped once it holds some.
+    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+    await recordings.stop(id);
     await roster.remove(subscriptionId, true);
     await quit();
     const path = join(dataDir, "recordings", "recordings.json");
@@ -5649,17 +5651,24 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
     await recordings.stop(recording!.id);
 
-    /** No second recording of today's time starts, waiting a moment for one that would. */
-    const recordedOnce = async (count: number) =>
-      (await until(recordings.list, (list) => list.length > count, 2000)).length === count;
+    /**
+     * After a check, no second recording of today's time starts: the check began none, which would
+     * keep today's time next, and none is listed. `before` is the padding of tomorrow's time.
+     */
+    const recordedOnce = async (count: number, before: number) => {
+      expect(await recordings.schedules()).toMatchObject([
+        { next: { start: at.getTime() + DAY - before * MINUTE } },
+      ]);
+      expect(await recordings.list()).toHaveLength(count);
+    };
 
     for (const before of [5, 2]) await recordings.schedule(slot(before), saved.id);
     await recordings.check();
-    expect(await recordedOnce(1)).toBe(true);
+    await recordedOnce(1, 2);
     await recordings.remove(recording!.id);
     await recordings.schedule(slot(0), saved.id);
     await recordings.check();
-    expect(await recordedOnce(0)).toBe(true);
+    await recordedOnce(0, 0);
     expect(await allClosed(provider)).toBe(true);
   });
 
@@ -6481,31 +6490,41 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     const { next } = await listing();
 
+    const folder = join(dataDir, "recordings");
+    // The capture's first write lands on disk, then waits for the deadline before its start can
+    // activate: either order is the product's, so the test holds the one it asks about.
+    const { promise: written, resolve: wrote } = Promise.withResolvers<void>();
+    const { promise: deadline, resolve: passed } = Promise.withResolvers<void>();
+    const opening = fs.open;
+
+    const opens = vi.spyOn(fs, "open").mockImplementation(async (path, flags, mode) => {
+      const file = await opening(path, flags, mode);
+
+      if (!String(path).startsWith(folder) || !String(path).endsWith(".ts")) return file;
+      const write = file.write.bind(file);
+
+      return Object.assign(file, {
+        write: async (...args: Parameters<typeof write>) => {
+          const done = await write(...args);
+          wrote();
+          await deadline;
+
+          return done;
+        },
+      });
+    });
+
+    onTestFinished(() => {
+      passed();
+      opens.mockRestore();
+    });
     await recordings.schedule(programmePlan(next));
     await clockTo(next.start);
     await asked;
     source!.write(fixture("h264-aac.mpegts"));
-
-    // As in subscription removal, observe the table on disk before activation completes.
-    const folder = join(dataDir, "recordings");
-
-    const writing = () =>
-      readdirSync(folder, { withFileTypes: true }).some(
-        (entry) =>
-          entry.isDirectory() &&
-          readdirSync(join(folder, entry.name)).some(
-            (file) => statSync(join(folder, entry.name, file)).size > 0,
-          ),
-      );
-
-    const by = Date.now() + 10_000;
-
-    while (!writing()) {
-      if (Date.now() >= by) throw new Error("No program table was written");
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-
+    await written;
     await clockTo(next.start + 150_000);
+    passed();
     expect(
       await until(
         recordings.list,
