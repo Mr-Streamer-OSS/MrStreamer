@@ -2718,7 +2718,9 @@ describe.skipIf(!hasTools)("recordings", () => {
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
     // Any captured recording has progress to seed: it is stopped once it holds some.
-    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+    expect(
+      (await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0))[0]?.bytes,
+    ).toBeGreaterThan(0);
     await recordings.stop(id);
     await roster.remove(subscriptionId, true);
     await quit();
@@ -5651,11 +5653,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
     await recordings.stop(recording!.id);
 
-    /**
-     * After a check, no second recording of today's time starts: the check began none, which would
-     * keep today's time next, and none is listed. `before` is the padding of tomorrow's time.
-     */
+    /** Preview waits for any start from the check to answer before checking for duplicates. */
     const recordedOnce = async (count: number, before: number) => {
+      await recordings.plan(slot(before), saved.id);
       expect(await recordings.schedules()).toMatchObject([
         { next: { start: at.getTime() + DAY - before * MINUTE } },
       ]);
@@ -6476,7 +6476,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     },
   );
 
-  it("keeps an occurrence missed when its capture opens as the deadline cancels it", async () => {
+  it("keeps an occurrence missed when its capture opens as the deadline cancels it", async ({
+    signal,
+  }) => {
     let source: Writable | undefined;
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
 
@@ -6491,8 +6493,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { next } = await listing();
 
     const folder = join(dataDir, "recordings");
-    // The capture's first write lands on disk, then waits for the deadline before its start can
-    // activate: either order is the product's, so the test holds the one it asks about.
+    // startCapture writes its table through fs.open and FileHandle.write. Hold that write after
+    // it lands, so the deadline cancels the start before activation can win the race.
     const { promise: written, resolve: wrote } = Promise.withResolvers<void>();
     const { promise: deadline, resolve: passed } = Promise.withResolvers<void>();
     const opening = fs.open;
@@ -6514,32 +6516,37 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       });
     });
 
-    onTestFinished(() => {
+    // A failed or timed-out test must release the write before runtime disposal waits for it.
+    signal.addEventListener("abort", passed, { once: true });
+
+    try {
+      await recordings.schedule(programmePlan(next));
+      await clockTo(next.start);
+      await asked;
+      source!.write(fixture("h264-aac.mpegts"));
+      await written;
+      await clockTo(next.start + 150_000);
       passed();
+      expect(
+        await until(
+          recordings.list,
+          (list) => list.length === 1 && list[0]?.status.kind === "missed",
+          2000,
+        ),
+      ).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
+      expect(await allClosed(provider)).toBe(true);
+
+      const kept = await until(
+        () => readdir(folder),
+        (names) => names.every((name) => name.includes(".")),
+      );
+
+      expect(kept.filter((name) => !name.includes("."))).toEqual([]);
+    } finally {
+      passed();
+      signal.removeEventListener("abort", passed);
       opens.mockRestore();
-    });
-    await recordings.schedule(programmePlan(next));
-    await clockTo(next.start);
-    await asked;
-    source!.write(fixture("h264-aac.mpegts"));
-    await written;
-    await clockTo(next.start + 150_000);
-    passed();
-    expect(
-      await until(
-        recordings.list,
-        (list) => list.length === 1 && list[0]?.status.kind === "missed",
-        2000,
-      ),
-    ).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
-    expect(await allClosed(provider)).toBe(true);
-
-    const kept = await until(
-      () => readdir(folder),
-      (names) => names.every((name) => name.includes(".")),
-    );
-
-    expect(kept.filter((name) => !name.includes("."))).toEqual([]);
+    }
   });
 
   it("keeps a timed-out repeat missed while saving fails, then records only its next occurrence", async () => {
