@@ -1612,15 +1612,17 @@ describe("live captures", () => {
 
   it("empties what a run before left in its folder", async () => {
     const folder = join(await tempDir(), "live-history");
-    await mkdir(join(folder, "1"), { recursive: true });
-    await writeFile(join(folder, "1", "0.ts"), new Uint8Array(188 * 100));
+    // A name no capture of this run makes, so its absence tells the old run's files went.
+    await mkdir(join(folder, "crashed"), { recursive: true });
+    await writeFile(join(folder, "crashed", "0.ts"), new Uint8Array(188 * 100));
     const { captures, key, provider } = await capturing({ folder });
     const watch = new AbortController();
     await take(
       (await captures.request(key, "watch", provider, watch.signal)).body!.getReader(),
       188,
     );
-    await vi.waitFor(async () => expect(await bytesIn(folder)).toBe(0));
+    // The capture writes pieces of its own meanwhile, as its reader stopped reading.
+    await vi.waitFor(async () => expect(await readdir(folder)).not.toContain("crashed"));
     watch.abort();
     await captures.idle("watch");
   });
