@@ -902,6 +902,8 @@ syncBuiltinESMExports();
     },
   );
 
+  // About 25 runs of the CLI, each to its exit: the time is their Node starts, which slow with the
+  // CPU the parallel suite leaves them.
   it("rejects malformed CLI inputs and existing outputs before authentication or network, from any working directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "package-updates-cli-"));
 
@@ -1000,5 +1002,5 @@ syncBuiltinESMExports();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 });

@@ -57,6 +57,8 @@ describe("native telemetry verification CLI", () => {
       priorExecutable: resolve("old/app"),
     });
   });
+  // Three runs of the verification CLI, each awaited to its exit: the time is their Node starts,
+  // which slow with the CPU the parallel suite leaves them.
   it("retains a failed proof for a missing executable and starts a relative executable", async () => {
     const directory = await mkdtemp(join(tmpdir(), "analytics-cli-contract-"));
     const entry = fileURLToPath(new URL("./e2e/analytics-app.ts", import.meta.url));
@@ -120,7 +122,7 @@ describe("native telemetry verification CLI", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
   it("keeps expensive or installed compatibility options out of ordinary aggregate execution", () => {
     for (const flag of [
       "--native-case=periodic",
