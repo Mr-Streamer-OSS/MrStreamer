@@ -13,9 +13,11 @@ import { queries } from "../../lib/queries.ts";
  * A scrolling row's `onFocus`: Chromium leaves a partly shown control where it is when the
  * keyboard reaches it, so this brings it in whole, clear of the edge by the row's `scroll-px`.
  * Window reactivation repeats focus with no previous control, so that keeps its scroll position.
+ * Pointer focus must not move the pressed control before the click is released.
  */
 export function revealFocused(event: FocusEvent) {
-  if (event.relatedTarget) event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  if (event.relatedTarget && event.target.matches(":focus-visible"))
+    event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 /**
