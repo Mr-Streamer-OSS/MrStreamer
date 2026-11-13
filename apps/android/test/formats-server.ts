@@ -77,13 +77,12 @@ function described(cause: unknown): DescribedError | undefined {
 
 /**
  * One transport observation on the formats provider port. `by` says who ended a response or
- * connection: it finished, the fixture's teardown, the proxy handler, a socket timeout, or
- * otherwise the peer (or something unknown).
+ * connection: it finished, the fixture's teardown, the proxy handler, or otherwise the peer
+ * (or something unknown).
  */
 interface Diagnostic {
   readonly event:
     | "connection"
-    | "socket timeout"
     | "socket error"
     | "socket closed"
     | "request"
@@ -108,8 +107,7 @@ interface Diagnostic {
   readonly flushed?: number | undefined;
   /** Node's writable buffer at observation time, which may be empty after destruction. */
   readonly unflushed?: number | undefined;
-  readonly by?:
-    "finished" | "teardown" | "handler" | "socket timeout" | "peer or unknown" | undefined;
+  readonly by?: "finished" | "teardown" | "handler" | "peer or unknown" | undefined;
   readonly hadError?: boolean | undefined;
   readonly requests?: number | undefined;
   readonly bytesRead?: number | undefined;
@@ -382,7 +380,7 @@ export async function startFormats(options: {
     readonly id: number;
     requests: number;
     idleSince: number;
-    endedBy?: "handler" | "socket timeout";
+    endedBy?: "handler";
   }
 
   const connections = new WeakMap<Socket, Connection>();
@@ -396,6 +394,11 @@ export async function startFormats(options: {
     void task.finally(() => pending.delete(task));
   });
 
+  // Clients close idle connections, never the fixture. A test stalls this process and its
+  // in-process fixture together, so a fixture idle timer expires unseen and closes the
+  // connection just after fetch writes its next request there (#885).
+  server.keepAliveTimeout = 0;
+
   server.on("connection", (socket: Socket) => {
     const connection: Connection = {
       id: ++connectionCount,
@@ -405,14 +408,6 @@ export async function startFormats(options: {
 
     connections.set(socket, connection);
     note("connection", { connection: connection.id, peerPort: socket.remotePort });
-
-    socket.on("timeout", () => {
-      connection.endedBy ??= "socket timeout";
-      note("socket timeout", {
-        connection: connection.id,
-        idleMs: Math.round(performance.now() - connection.idleSince),
-      });
-    });
 
     socket.on("error", (error) =>
       note("socket error", { connection: connection.id, error: described(error) }),
