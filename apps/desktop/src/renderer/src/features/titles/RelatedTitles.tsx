@@ -64,7 +64,11 @@ export function RelatedTitles({
         // whole, clear of the edge by that padding.
         <div
           className="-mx-1 -mt-1 flex scroll-px-1 gap-4 overflow-x-auto px-1 pt-1 pb-3"
-          onFocus={(event) => event.target.scrollIntoView({ block: "nearest", inline: "nearest" })}
+          onFocus={(event) => {
+            // Window reactivation repeats focus with no previous control; keep its scroll position.
+            if (event.relatedTarget)
+              event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+          }}
         >
           {picks.map(({ title, reason }) => (
             <div key={title.key} className="w-36 shrink-0">
