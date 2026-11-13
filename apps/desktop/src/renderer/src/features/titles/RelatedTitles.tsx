@@ -1,6 +1,6 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type FocusEvent } from "react";
 import type { Title, TitleDetails } from "@mrstreamer/contracts/ondemand";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
@@ -8,6 +8,17 @@ import { openRelated, type DetailsPlace, type LinkedView } from "../../app/ui-st
 import { PosterTile } from "../../components/TitleArt.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { queries } from "../../lib/queries.ts";
+
+/**
+ * A scrolling row's `onFocus`: Chromium leaves a partly shown control where it is when the
+ * keyboard reaches it, so this brings it in whole, clear of the edge by the row's `scroll-px`.
+ * Window reactivation repeats focus with no previous control, so that keeps its scroll position.
+ * Pointer focus must not move the pressed control before the click is released.
+ */
+export function revealFocused(event: FocusEvent) {
+  if (event.relatedTarget && event.target.matches(":focus-visible"))
+    event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
 
 /**
  * An inline row from the lists already loaded, requested only while these details are shown. A
@@ -64,11 +75,7 @@ export function RelatedTitles({
         // whole, clear of the edge by that padding.
         <div
           className="-mx-1 -mt-1 flex scroll-px-1 gap-4 overflow-x-auto px-1 pt-1 pb-3"
-          onFocus={(event) => {
-            // Window reactivation repeats focus with no previous control; keep its scroll position.
-            if (event.relatedTarget)
-              event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
-          }}
+          onFocus={revealFocused}
         >
           {picks.map(({ title, reason }) => (
             <div key={title.key} className="w-36 shrink-0">
