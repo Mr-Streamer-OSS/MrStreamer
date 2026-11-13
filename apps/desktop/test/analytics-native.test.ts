@@ -57,7 +57,7 @@ describe("native telemetry verification CLI", () => {
       priorExecutable: resolve("old/app"),
     });
   });
-  // Three runs of the verification CLI, each awaited to its exit: the time is their Node starts,
+  // Three runs of the verification CLI, each awaited to its exit: Node starts and fixture setup,
   // which slow with the CPU the parallel suite leaves them.
   it("retains a failed proof for a missing executable and starts a relative executable", async () => {
     const directory = await mkdtemp(join(tmpdir(), "analytics-cli-contract-"));

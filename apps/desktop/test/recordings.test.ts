@@ -768,7 +768,8 @@ describe.skipIf(!hasTools)("recordings", () => {
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
 
     if (answer.kind !== "started") throw new Error("Not started");
-    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
+    const [capturing] = await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
+    expect(capturing?.bytes).toBeGreaterThan(100_000);
 
     await recordings.stop(answer.recording.id);
     // Answered once the provider's request ended. The provider frees its slot as it hears the
