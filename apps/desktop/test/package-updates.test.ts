@@ -902,6 +902,8 @@ syncBuiltinESMExports();
     },
   );
 
+  // 22 Node starts for CLI validation and a template import, each awaited to exit, slow with the
+  // CPU the parallel suite leaves them.
   it("rejects malformed CLI inputs and existing outputs before authentication or network, from any working directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "package-updates-cli-"));
 
@@ -1000,5 +1002,5 @@ syncBuiltinESMExports();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 });

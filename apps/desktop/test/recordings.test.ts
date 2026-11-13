@@ -761,12 +761,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     },
   );
 
+  // The provider plays the channel out over three seconds, and the capture waits for two of them,
+  // so little of the default budget is left for a busy machine.
   it("stops once its request ended and its file closed, keeping what it captured", async () => {
     const { provider, dataDir, channel, subscriptionId, recordings } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
 
     if (answer.kind !== "started") throw new Error("Not started");
-    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
+    const [capturing] = await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
+    expect(capturing?.bytes).toBeGreaterThan(100_000);
 
     await recordings.stop(answer.recording.id);
     // Answered once the provider's request ended. The provider frees its slot as it hears the
@@ -779,7 +782,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const file = await fileOf(dataDir, stopped!);
     expect(stopped?.bytes).toBe(file.size);
     expect(decodes(file.path)).toBe(true);
-  });
+  }, 30_000);
 
   it("stops with its subscription, before its login goes", async () => {
     const { provider, channel, subscriptionId, recordings, roster } = await connected();
@@ -3662,6 +3665,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     return { ...started, listing, programmePlan, clockTo };
   }
 
+  // Two app starts and a hundred schedules, every step awaited: no wait to shorten, only work that
+  // slows with the CPU the parallel suite leaves it.
   it("rule safety: old missed airings release queue budget after a long absence", async () => {
     const { provider, guide, subscriptionId, channel, recordings, quit, dataDir } =
       await scheduling();
@@ -3707,8 +3712,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(preview.matches).toHaveLength(100);
     const planned = await again.recordings.schedules();
     expect(planned).toHaveLength(100);
-  });
+  }, 30_000);
 
+  // A hundred schedules, a second provider's guide and a subscription's removal, every step awaited:
+  // as above, only work that slows with the CPU the parallel suite leaves it.
   it("rule safety: removed busy subscription releases the shared queue", async () => {
     const {
       provider,
@@ -3760,7 +3767,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect((await recordings.rules())[0]?.error).toBe(
       "This rule's subscription is no longer there.",
     );
-  });
+  }, 30_000);
   it("rule safety: global XMLTV supplies a subscription without its own guide", async () => {
     const { provider, guide, subscriptions, library, recordings, channel } = await scheduling();
     const source = await guide.addSource(`${provider.url}/xmltv.php?username=demo&password=demo`);

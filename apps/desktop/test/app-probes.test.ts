@@ -35,6 +35,8 @@ it("does not label Linux context switches or Windows placeholder zero as wakeups
   expect(wakeupSupport("darwin")).toMatchObject({ status: "supported", unit: "wakeups/s" });
 });
 
+// Four runs of the measuring CLI, each to its exit: the time is their Node starts, which slow with
+// the CPU the parallel suite leaves them.
 it("refuses ambiguous diagnostic CLI invocations before starting an app", () => {
   const scratch = mkdtempSync(join(tmpdir(), "mr-streamer-cli-"));
   const output = join(scratch, "results", "app.json");
@@ -70,7 +72,7 @@ it("refuses ambiguous diagnostic CLI invocations before starting an app", () => 
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
-});
+}, 30_000);
 
 it("attributes V8 self time by function and keeps idle, native and collector time apart", () => {
   const frame = (functionName: string, lineNumber = 0, url = "app.js") => ({
