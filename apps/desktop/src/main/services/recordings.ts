@@ -2397,6 +2397,7 @@ function make(deps: RecordingsDeps) {
       why.set(key, "starting");
       startingOn.add(subscriptionId);
       const answered = Promise.withResolvers<void>();
+
       // A retry reads as retrying while it answers (see standingOf), so only its stop limits it.
       const by =
         before === "stream" || before === "disk"

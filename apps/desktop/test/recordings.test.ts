@@ -5997,7 +5997,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     await clockTo(next.start + 50_000);
     expect(provider.activeStreams()).toBe(1);
-    expect(await recordings.schedules()).toMatchObject([{ next: time, status: { kind: "planned" } }]);
+    expect(await recordings.schedules()).toMatchObject([
+      { next: time, status: { kind: "planned" } },
+    ]);
 
     // A minute on, it gave that start up as a stream that couldn't be opened, and asks again.
     await clockTo(next.start + 61_000);
