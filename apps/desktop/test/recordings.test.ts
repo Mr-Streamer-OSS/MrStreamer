@@ -6531,7 +6531,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       await asked;
       source!.write(fixture("h264-aac.mpegts"));
       await written;
-      await clockTo(next.start + 150_000);
+      // The start check samples an auto-advancing clock. Pass its 150s answer window from
+      // this observed write, after the start began, so a tick cannot leave it short of the deadline.
+      await clockTo(Date.now() + 150_000 + 1000);
       passed();
       expect(
         await until(
