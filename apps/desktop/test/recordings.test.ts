@@ -6516,8 +6516,14 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       });
     });
 
-    // A failed or timed-out test must release the write before runtime disposal waits for it.
-    signal.addEventListener("abort", passed, { once: true });
+    // Abort can leave the body suspended before finally, so it restores the spy too.
+    const cleanup = () => {
+      passed();
+      signal.removeEventListener("abort", cleanup);
+      opens.mockRestore();
+    };
+
+    signal.addEventListener("abort", cleanup, { once: true });
 
     try {
       await recordings.schedule(programmePlan(next));
@@ -6543,9 +6549,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
       expect(kept.filter((name) => !name.includes("."))).toEqual([]);
     } finally {
-      passed();
-      signal.removeEventListener("abort", passed);
-      opens.mockRestore();
+      cleanup();
     }
   });
 
