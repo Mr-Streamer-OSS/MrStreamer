@@ -512,6 +512,7 @@ function make(deps: RecordingsDeps) {
         readonly subscriptionId: string;
         readonly resumes?: string;
         readonly done: Promise<void>;
+        connection?: boolean;
       }
     >();
 
@@ -893,22 +894,27 @@ function make(deps: RecordingsDeps) {
       ),
     );
 
-    const shown = Effect.sync(() =>
-      [
-        ...records.values(),
-        // A missed occurrence already represents its failed start. Keep the cleanup owner,
-        // but do not show its pending folder as a second recording while saving fails.
-        ...[...failedFolders.values()].filter(
-          (record) =>
-            !record.scheduled ||
-            ![...records.values()].some(
-              (each) =>
-                each.status.kind === "missed" &&
-                each.scheduled?.schedule === record.scheduled?.schedule &&
-                each.scheduled?.from === record.scheduled?.from,
-            ),
-        ),
-      ]
+    const shown = Effect.sync(() => {
+      const unsavedMisses = new Set<string>();
+
+      // A missed occurrence represents its failed start, including its pending inventory write.
+      // The hidden cleanup owner keeps its folder until that write succeeds.
+      const failed = [...failedFolders.values()].filter((record) => {
+        const missed =
+          record.scheduled &&
+          [...records.values()].find(
+            (each) =>
+              each.status.kind === "missed" &&
+              each.scheduled?.schedule === record.scheduled?.schedule &&
+              each.scheduled?.from === record.scheduled?.from,
+          );
+
+        if (missed) unsavedMisses.add(missed.id);
+
+        return !missed;
+      });
+
+      return [...records.values(), ...failed]
         .map((record): Recording => {
           const {
             file: _file,
@@ -924,7 +930,7 @@ function make(deps: RecordingsDeps) {
 
           const marked: Recording = {
             ...rest,
-            ...(unsavedEnds.has(record.id) && { unsaved: true }),
+            ...((unsavedEnds.has(record.id) || unsavedMisses.has(record.id)) && { unsaved: true }),
             ...(protection.has(record.id) && { protected: true }),
             ...(retentionFailures.has(record.id) && { retentionFailed: true }),
           };
@@ -946,8 +952,8 @@ function make(deps: RecordingsDeps) {
 
           return missing.has(record.id) ? { ...marked, status: { kind: "missing" } } : marked;
         })
-        .toSorted((a, b) => b.start - a.start),
-    );
+        .toSorted((a, b) => b.start - a.start);
+    });
 
     const fileListeners = new Set<() => void>();
     let filesClosed = false;
@@ -1307,6 +1313,15 @@ function make(deps: RecordingsDeps) {
             connections: { limit: yield* limitOf(subscriptionId), uses: admitted.uses },
           } satisfies RecordingStart;
         const { held } = admitted;
+        const pending = starting.get(controller);
+
+        if (pending) pending.connection = true;
+
+        const releaseConnection = () => {
+          held.release();
+
+          if (pending) pending.connection = false;
+        };
 
         const title = programme?.title ?? listed.title;
         const id = resumes?.id ?? randomUUID();
@@ -1330,7 +1345,7 @@ function make(deps: RecordingsDeps) {
 
         // Stopped while it waited for a connection: it lets it go, keeping no record.
         if (stopped() || controller.signal.aborted) {
-          held.release();
+          releaseConnection();
 
           return yield* stoppedFailure;
         }
@@ -1343,7 +1358,7 @@ function make(deps: RecordingsDeps) {
           const kept = yield* Effect.result(save);
 
           if (kept._tag === "Failure") {
-            held.release();
+            releaseConnection();
             yield* dropStart(record);
 
             return yield* kept.failure;
@@ -1446,7 +1461,7 @@ function make(deps: RecordingsDeps) {
               void capture.ended
                 .then(async (end) => {
                   await captures.idle(held.id);
-                  held.release();
+                  releaseConnection();
 
                   return Effect.runPromise(ended(id, end, live));
                 })
@@ -1468,7 +1483,7 @@ function make(deps: RecordingsDeps) {
               );
               // What it read last ends its provider request before the connection counts free.
               await captures.idle(held.id);
-              held.release();
+              releaseConnection();
             }).pipe(Effect.andThen(resumes ? Effect.void : dropStart(record))),
           ),
         );
@@ -1698,7 +1713,7 @@ function make(deps: RecordingsDeps) {
      * Subscriptions a schedule starts on now: one at a time each, so the first in line, by its
      * start and then by when it was saved, takes a connection first.
      */
-    const startingOn = new Set<string>();
+    const startingOn = new Map<string, symbol>();
 
     /**
      * Each schedule's start under way: the occurrence it starts, why that time wasn't recording
@@ -1716,6 +1731,9 @@ function make(deps: RecordingsDeps) {
         readonly release: () => void;
       }
     >();
+
+    // Retained across skipped rule reconciliation until the original occurrence is settled.
+    const expiredStarts = new Map<string, Occurrence>();
 
     /** When this run of the app began checking schedules. */
     const started = Date.now();
@@ -2041,6 +2059,8 @@ function make(deps: RecordingsDeps) {
         if (schedule) schedules.set(id, schedule);
         else schedules.delete(id);
         const written = yield* Effect.result(saveSchedules);
+
+        if (written._tag === "Success" && !schedule) expiredStarts.delete(id);
 
         if (written._tag === "Failure") {
           if (was) schedules.set(id, was);
@@ -2403,9 +2423,6 @@ function make(deps: RecordingsDeps) {
       };
     };
 
-    // Retained across skipped rule reconciliation and failed writes until the time is settled.
-    const expiredStarts = new Map<string, Occurrence>();
-
     /**
      * Starts a schedule's occurrence on now, in the background; a check follows its answer. It is
      * late once more than ON_TIME_MS passed since it was owed.
@@ -2423,7 +2440,8 @@ function make(deps: RecordingsDeps) {
 
       const { subscriptionId } = schedule.plan.channel;
       why.set(key, "starting");
-      startingOn.add(subscriptionId);
+      const owner = Symbol();
+      startingOn.set(subscriptionId, owner);
       const answered = Promise.withResolvers<void>();
 
       // A retry reads as retrying while it answers (see standingOf), so only its stop limits it.
@@ -2437,9 +2455,11 @@ function make(deps: RecordingsDeps) {
       const release = () => {
         if (startsOf.get(schedule.id)?.controller === controller) {
           startsOf.delete(schedule.id);
-          startingOn.delete(subscriptionId);
         }
 
+        // A cancelled lookup owns no connection; a capture keeps admission until cleanup ends.
+        if (startingOn.get(subscriptionId) === owner && !starting.get(controller)?.connection)
+          startingOn.delete(subscriptionId);
         answered.resolve();
       };
 
@@ -2537,7 +2557,8 @@ function make(deps: RecordingsDeps) {
      */
     const resumeRecording = (record: StoredRecording) => {
       const { subscriptionId } = record.channel;
-      startingOn.add(subscriptionId);
+      const owner = Symbol();
+      startingOn.set(subscriptionId, owner);
       Effect.runFork(
         Effect.gen(function* () {
           // A drive away isn't measured: its mount point's disk says nothing of its room.
@@ -2562,7 +2583,11 @@ function make(deps: RecordingsDeps) {
 
             return publish;
           }),
-          Effect.ensuring(Effect.sync(() => startingOn.delete(subscriptionId))),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (startingOn.get(subscriptionId) === owner) startingOn.delete(subscriptionId);
+            }),
+          ),
           Effect.andThen(wake),
         ),
       );
@@ -2721,6 +2746,8 @@ function make(deps: RecordingsDeps) {
         return unsaved.recordings ? Date.now() + RETRY_MS : resumeAt;
       }
 
+      for (const id of expiredStarts.keys()) if (!schedules.has(id)) expiredStarts.delete(id);
+
       // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
       // wakes the next check.
       if (schedules.size === 0 && !rules?.length && !unsaved.recordings && !unsaved.schedules) {
@@ -2796,6 +2823,7 @@ function make(deps: RecordingsDeps) {
 
         if (!saved.has(schedule.plan.channel.subscriptionId)) {
           schedules.delete(schedule.id);
+          expiredStarts.delete(schedule.id);
           dirty = true;
           continue;
         }
@@ -2810,9 +2838,19 @@ function make(deps: RecordingsDeps) {
 
         // While it records, its plan stays as the recording was started: a guide that moves the
         // end then moves it for no recording.
+        const expired = expiredStarts.get(schedule.id);
+
         let kept: KeptSchedule = {
           ...schedule,
-          plan: (!recordingOf(schedule.id) && seen?.plan) || schedule.plan,
+          // A timed-out programme settles the airing asked for, even if the guide moved it.
+          plan:
+            expired && schedule.plan.kind === "programme"
+              ? {
+                  ...schedule.plan,
+                  start: expired.start + schedule.plan.padding.before * 60_000,
+                  stop: expired.stop - schedule.plan.padding.after * 60_000,
+                }
+              : (!recordingOf(schedule.id) && seen?.plan) || schedule.plan,
         };
 
         // Each occurrence since it was last settled, up to now. One that ended is settled, as
@@ -2820,7 +2858,11 @@ function make(deps: RecordingsDeps) {
         let through = kept.through;
         let settling = true;
 
-        for (const occurrence of occurrences(kept.plan, kept.through, now + 1)) {
+        const pending = occurrences(kept.plan, kept.through, now + 1);
+
+        for (const occurrence of expired
+          ? [expired, ...pending.filter((each) => each.start !== expired.start)]
+          : pending) {
           const key = occurrenceKey(kept.id, occurrence);
           const made = recordOf(kept.id, occurrence);
           const reason = why.get(key);
@@ -2851,7 +2893,7 @@ function make(deps: RecordingsDeps) {
               missed = true;
             }
 
-            expiredStarts.delete(kept.id);
+            if (expired?.start === occurrence.start) expiredStarts.delete(kept.id);
             why.delete(key);
             tried.delete(key);
 
@@ -3614,7 +3656,10 @@ function make(deps: RecordingsDeps) {
               const before = schedules.size;
 
               for (const [id, each] of schedules)
-                if (each.plan.channel.subscriptionId === subscriptionId) schedules.delete(id);
+                if (each.plan.channel.subscriptionId === subscriptionId) {
+                  schedules.delete(id);
+                  expiredStarts.delete(id);
+                }
 
               if (schedules.size === before) return Effect.void;
 
@@ -4027,7 +4072,10 @@ function make(deps: RecordingsDeps) {
                 const rule = rules?.find((each) => each.id === id);
                 yield* persistRules((rules ?? []).filter((each) => each.id !== id));
 
-                for (const each of rule?.occurrences ?? []) schedules.delete(each.id);
+                for (const each of rule?.occurrences ?? []) {
+                  schedules.delete(each.id);
+                  expiredStarts.delete(each.id);
+                }
               }),
             ),
           ),

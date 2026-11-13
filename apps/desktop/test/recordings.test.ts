@@ -6036,65 +6036,177 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     },
   );
 
-  it("does not resume an inventory write that committed after its start deadline", async () => {
-    const { recordings, listing, programmePlan, clockTo, dataDir, quit, provider } =
+  it("starts the next schedule as soon as a timed-out capture releases its connection", async () => {
+    const { recordings, listing, programmePlan, channel, clockTo, dataDir, subscriptionId } =
       await scheduling();
 
     const { next } = await listing();
     await recordings.schedule(programmePlan(next));
+    const at = new Date(next.start);
+
+    const sibling = await recordings.schedule({
+      kind: "slot",
+      channel: channel(TRACKS),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: "Sibling",
+      padding: { before: 0, after: 0 },
+    });
+
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const move = fs.rename;
-    let count = 0;
+    const make = fs.mkdir;
+    let held = false;
 
-    const writes = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
-      if (to === join(dataDir, "recordings", "recordings.json")) {
-        if (++count === 1) {
-          entered.resolve();
-          await release.promise;
-        } else throw new Error("inventory unavailable");
+    const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
+      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
+        held = true;
+        entered.resolve();
+        await release.promise;
       }
 
-      await move(from, to);
+      return make(path, options);
     });
 
     onTestFinished(() => {
       release.resolve();
-      writes.mockRestore();
+      opening.mockRestore();
     });
-    await clockTo(next.start);
-    await entered.promise;
-    vi.setSystemTime(next.start + 150_000);
-    const checking = recordings.check();
-    await until(recordings.list, (list) => list.some((each) => each.status.kind === "missed"));
-    release.resolve();
-    await checking;
-    await until(() => allClosed(provider), Boolean);
-    const disk = await readRecordings(join(dataDir, "recordings", "recordings.json"));
 
-    if (disk.kind !== "read" || disk.items.length !== 1) throw new Error("No pending inventory");
-    const marker = join(dataDir, "recordings", disk.items[0]!.id, ".mrstreamer-failed");
-    expect(await until(() => Promise.resolve(existsSync(marker)), Boolean)).toBe(true);
+    try {
+      await clockTo(next.start);
+      await entered.promise;
+      expect((await recordings.connections(subscriptionId)).uses).toEqual(["recording"]);
+      await clockTo(next.start + 151_000);
+      await until(recordings.list, (list) => list.some((each) => each.status.kind === "missed"));
+      await recordings.check();
+      expect(
+        (await recordings.schedules()).find((each) => each.id === sibling.id)?.status.kind,
+      ).not.toBe("waiting");
+    } finally {
+      release.resolve();
+    }
 
-    const failedList = await until(
+    const list = await until(
       recordings.list,
-      (list) => list.length === 1 && list[0]?.status.kind === "missed",
-      1000,
+      (list) =>
+        list.some(
+          (each) => each.scheduled?.schedule === sibling.id && each.status.kind === "recording",
+        ),
+      2000,
     );
 
-    expect(failedList).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
-    await quit();
-    const relaunched = await app(dataDir);
-    onTestFinished(relaunched.quit);
-    await relaunched.recordings.check();
-    expect(
-      (await relaunched.recordings.list()).some(
-        (each) => each.status.kind === "recording" || each.status.kind === "paused",
-      ),
-    ).toBe(false);
-    expect(await allClosed(provider)).toBe(true);
-    writes.mockRestore();
+    expect(list.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
+      status: { kind: "recording" },
+      scheduled: { late: "away" },
+    });
   });
+
+  it.each([-10, 10])(
+    "settles the original timed-out occurrence when the guide revises its end by %s minutes",
+    async (minutes) => {
+      const { recordings, provider, guide, subscriptionId, next, clockTo, answer } =
+        await firstStartHeld();
+
+      const id = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+      provider.serveGuide(
+        `<tv><channel id="${id}"><display-name>Test</display-name></channel><programme channel="${id}" start="${xmltvTime(next.start)}" stop="${xmltvTime(next.stop + minutes * MINUTE)}"><title>${next.title}</title></programme></tv>`,
+      );
+      await guide.refresh(subscriptionId);
+      await clockTo(next.start + 151_000);
+
+      const list = await until(recordings.list, (list) =>
+        list.some((each) => each.status.kind === "missed"),
+      );
+
+      expect(list).toMatchObject([
+        { start: next.start, stop: next.stop, status: { kind: "missed", why: "stream" } },
+      ]);
+      expect(await recordings.schedules()).toEqual([]);
+      answer();
+    },
+  );
+
+  it.each([false, true])(
+    "does not resume an inventory write that committed after its start deadline (recover before restart: %s)",
+    async (recover) => {
+      const { recordings, listing, programmePlan, clockTo, dataDir, quit, provider } =
+        await scheduling();
+
+      const { next } = await listing();
+      await recordings.schedule(programmePlan(next));
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const move = fs.rename;
+      let count = 0;
+
+      const writes = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        if (to === join(dataDir, "recordings", "recordings.json")) {
+          if (++count === 1) {
+            entered.resolve();
+            await release.promise;
+          } else throw new Error("inventory unavailable");
+        }
+
+        await move(from, to);
+      });
+
+      onTestFinished(() => {
+        release.resolve();
+        writes.mockRestore();
+      });
+      await clockTo(next.start);
+      await entered.promise;
+      vi.setSystemTime(next.start + 150_000);
+      const checking = recordings.check();
+      await until(recordings.list, (list) => list.some((each) => each.status.kind === "missed"));
+      release.resolve();
+      await checking;
+      await until(() => allClosed(provider), Boolean);
+      const disk = await readRecordings(join(dataDir, "recordings", "recordings.json"));
+
+      if (disk.kind !== "read" || disk.items.length !== 1) throw new Error("No pending inventory");
+      const marker = join(dataDir, "recordings", disk.items[0]!.id, ".mrstreamer-failed");
+      expect(await until(() => Promise.resolve(existsSync(marker)), Boolean)).toBe(true);
+
+      const failedList = await until(
+        recordings.list,
+        (list) => list.length === 1 && list[0]?.status.kind === "missed",
+        1000,
+      );
+
+      expect(failedList).toMatchObject([
+        { status: { kind: "missed", why: "stream" }, unsaved: true },
+      ]);
+
+      if (recover) {
+        writes.mockRestore();
+        await recordings.check();
+        const recovered = await recordings.list();
+        expect(recovered).toHaveLength(1);
+        expect(recovered).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
+        expect(recovered[0]?.unsaved).toBeUndefined();
+      }
+
+      await quit();
+      const relaunched = await app(dataDir);
+      onTestFinished(relaunched.quit);
+      await relaunched.recordings.check();
+      expect(
+        (await relaunched.recordings.list()).some(
+          (each) => each.status.kind === "recording" || each.status.kind === "paused",
+        ),
+      ).toBe(false);
+      const pending = await relaunched.recordings.list();
+      expect(pending.length).toBeGreaterThan(0);
+      expect(pending.every((each) => Boolean(each.unsaved) === !recover)).toBe(true);
+      expect(await allClosed(provider)).toBe(true);
+      writes.mockRestore();
+      await relaunched.recordings.check();
+      expect((await relaunched.recordings.list()).every((each) => !each.unsaved)).toBe(true);
+    },
+  );
 
   it("settles a rule deadline while its guide reconciliation and inventory writes fail", async () => {
     const asked = Promise.withResolvers<void>();
@@ -6204,7 +6316,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     const [recording] = await until(
       recordings.list,
-      (list) => list.length === 1 && list[0]?.status.kind === "missed",
+      (list) => list.length === 1 && list[0]?.status.kind === "missed" && !list[0].unsaved,
       2000,
     );
 
