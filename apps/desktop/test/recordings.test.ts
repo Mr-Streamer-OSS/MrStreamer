@@ -140,6 +140,34 @@ async function connected(options: FakeProviderOptions = {}, ffprobe?: string) {
   return { provider, dataDir, subscriptionId, channel, ...started };
 }
 
+/** Apply a real SQLite authorization rule until restored or the test finishes. */
+function authorizeSqlite(authorize: NonNullable<Parameters<DatabaseSync["setAuthorizer"]>[0]>) {
+  const connections = new Set<DatabaseSync>();
+  const prepare = DatabaseSync.prototype.prepare;
+  const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+    this: DatabaseSync,
+    sql: string,
+  ) {
+    connections.add(this);
+    this.setAuthorizer(authorize);
+
+    return prepare.call(this, sql);
+  });
+  let restored = false;
+
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    adapter.mockRestore();
+
+    for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
+  };
+
+  onTestFinished(restore);
+
+  return restore;
+}
+
 async function until<A>(read: () => Promise<A>, done: (value: A) => boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
 
@@ -2615,36 +2643,17 @@ describe.skipIf(!hasTools)("recordings", () => {
       // Observe SQLite's public boundary: a retired retry neither writes nor checks its owner again.
       let registryReads = 0;
       let progressWrites = 0;
-      const connections = new Set<DatabaseSync>();
-      const prepare = DatabaseSync.prototype.prepare;
+      const restore = authorizeSqlite((action, table) => {
+        if (action === sqlite.SQLITE_READ && table === "profiles") registryReads++;
 
-      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
-        this: DatabaseSync,
-        sql: string,
-      ) {
-        connections.add(this);
-        this.setAuthorizer((action, table) => {
-          if (action === sqlite.SQLITE_READ && table === "profiles") registryReads++;
+        if (
+          table === "profile_copy_progress" &&
+          (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+        )
+          progressWrites++;
 
-          if (
-            table === "profile_copy_progress" &&
-            (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
-          )
-            progressWrites++;
-
-          return sqlite.SQLITE_OK;
-        });
-
-        return prepare.call(this, sql);
+        return sqlite.SQLITE_OK;
       });
-
-      const restore = () => {
-        adapter.mockRestore();
-
-        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
-      };
-
-      onTestFinished(restore);
       let now = Date.now();
 
       for (const first of [true, false]) {
@@ -2745,30 +2754,17 @@ describe.skipIf(!hasTools)("recordings", () => {
 
     // SQLite denies personal writes immediately: seeding and playback keep the last saved value.
     const refused = async <A>(run: () => Promise<A>) => {
-      const connections = new Set<DatabaseSync>();
-      const prepare = DatabaseSync.prototype.prepare;
-
-      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
-        this: DatabaseSync,
-        sql: string,
-      ) {
-        connections.add(this);
-        this.setAuthorizer((action, table) =>
-          table === "profile_copy_progress" &&
-          (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
-            ? sqlite.SQLITE_DENY
-            : sqlite.SQLITE_OK,
-        );
-
-        return prepare.call(this, sql);
-      });
+      const restore = authorizeSqlite((action, table) =>
+        table === "profile_copy_progress" &&
+        (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+          ? sqlite.SQLITE_DENY
+          : sqlite.SQLITE_OK,
+      );
 
       try {
         await expect(run()).rejects.toMatchObject({ error: { kind: "unexpected" } });
       } finally {
-        adapter.mockRestore();
-
-        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
+        restore();
       }
     };
 
@@ -2833,44 +2829,25 @@ describe.skipIf(!hasTools)("recordings", () => {
       let refuseRegistry = false;
       let refuseDeletion = false;
       let registryReads = 0;
-      const connections = new Set<DatabaseSync>();
-      const prepare = DatabaseSync.prototype.prepare;
+      const restore = authorizeSqlite((action, table) => {
+        if (action === sqlite.SQLITE_READ && table === "profiles") {
+          registryReads++;
 
-      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
-        this: DatabaseSync,
-        sql: string,
-      ) {
-        connections.add(this);
-        this.setAuthorizer((action, table) => {
-          if (action === sqlite.SQLITE_READ && table === "profiles") {
-            registryReads++;
+          if (refuseRegistry) return sqlite.SQLITE_DENY;
+        }
 
-            if (refuseRegistry) return sqlite.SQLITE_DENY;
-          }
+        if (
+          refuseWrites &&
+          table === "profile_copy_progress" &&
+          (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+        )
+          return sqlite.SQLITE_DENY;
 
-          if (
-            refuseWrites &&
-            table === "profile_copy_progress" &&
-            (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
-          )
-            return sqlite.SQLITE_DENY;
+        if (refuseDeletion && action === sqlite.SQLITE_DELETE && table === "profiles")
+          return sqlite.SQLITE_DENY;
 
-          if (refuseDeletion && action === sqlite.SQLITE_DELETE && table === "profiles")
-            return sqlite.SQLITE_DENY;
-
-          return sqlite.SQLITE_OK;
-        });
-
-        return prepare.call(this, sql);
+        return sqlite.SQLITE_OK;
       });
-
-      const restore = () => {
-        adapter.mockRestore();
-
-        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
-      };
-
-      onTestFinished(restore);
       // Keep the advancing retry deadlines monotonic without changing real timers.
       let now = Date.now();
 
