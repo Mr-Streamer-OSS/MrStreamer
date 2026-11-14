@@ -2548,10 +2548,12 @@ function make(deps: RecordingsDeps) {
               if (controller.signal.reason === "deadline" || controller.signal.reason === "asleep")
                 return;
 
-              if (answer === "asleep") tried.delete(key);
+              if (answer === "asleep") {
+                tried.delete(key);
 
-              if (answer === null || answer === "asleep" || answer.kind === "started")
-                why.delete(key);
+                if (before !== undefined) why.set(key, before);
+                else why.delete(key);
+              } else if (answer === null || answer.kind === "started") why.delete(key);
               else why.set(key, "busy");
             },
             // This computer's when unexpected, as a file it couldn't write; else the stream's,

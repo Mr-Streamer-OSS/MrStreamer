@@ -20,7 +20,7 @@ import {
   truncate,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import * as fs from "node:fs/promises";
 import type { Writable } from "node:stream";
 import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
@@ -3691,7 +3691,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     let held = false;
 
     const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
-      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
+      if (!held && String(path).startsWith(join(dataDir, "recordings") + sep)) {
         held = true;
         entered.resolve();
         await release.promise;
@@ -6237,7 +6237,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const remove = fs.rm;
 
     const cleanup = vi.spyOn(fs, "rm").mockImplementation(async (path, options) => {
-      if (options?.recursive && String(path).startsWith(join(dataDir, "recordings") + "/")) {
+      if (options?.recursive && String(path).startsWith(join(dataDir, "recordings") + sep)) {
         entered.resolve();
         await release.promise;
       }
@@ -6378,6 +6378,63 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     lookup.mockRestore();
     await playback.close(watching.sessionId);
     await clockTo(at.getTime() + 3 * MINUTE);
+
+    const list = await until(recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === saved.id && each.status.kind === "recording",
+      ),
+    );
+
+    expect(list.find((each) => each.scheduled?.schedule === saved.id)).toMatchObject({
+      scheduled: { late: "busy" },
+    });
+  });
+
+  it("keeps Watch refusal when sleep interrupts a retry before start registration", async () => {
+    const { runtime, recordings, playback, channel, listing, programmePlan, clockTo } =
+      await scheduling();
+
+    const guide = await runtime.runPromise(Guide);
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+
+    const waiting = await until(recordings.schedules, (list) =>
+      list.some((each) => each.id === saved.id && each.status.kind === "waiting"),
+    );
+
+    expect(waiting.find((each) => each.id === saved.id)?.status.kind).toBe("waiting");
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const startingAt = guide.startingAt;
+
+    const lookup = vi.spyOn(guide, "startingAt").mockImplementation((channel, at) =>
+      Effect.andThen(
+        Effect.promise(async () => {
+          entered.resolve();
+          await release.promise;
+        }),
+        startingAt(channel, at),
+      ),
+    );
+
+    onTestFinished(() => {
+      release.resolve();
+      lookup.mockRestore();
+    });
+
+    const checking = clockTo(next.start + 11_000);
+    await entered.promise;
+    await recordings.suspend();
+    release.resolve();
+    await checking;
+    lookup.mockRestore();
+    await playback.close(watching.sessionId);
+    await clockTo(next.start + 3 * MINUTE);
 
     const list = await until(recordings.list, (list) =>
       list.some(
