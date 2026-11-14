@@ -38,6 +38,14 @@ const GUIDE_TIMEOUT_MS = 15 * 60_000;
 /** Mapping is bounded; existing unmapped Live playlists keep their original load limits. */
 const MAPPING_BYTES = 64 * 1024 * 1024;
 
+/** A playlist download shared by every call waiting on it; `stop` ends it once none are left. */
+interface Reading {
+  readonly inspecting: boolean;
+  readonly stop: AbortController;
+  readonly promise: Promise<PlaylistRead>;
+  waiting: number;
+}
+
 interface PlaylistRead {
   readonly snapshot: ImportedPlaylist;
   /** Mapping reports are built only when Settings asks for them. */
@@ -87,8 +95,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
   let titleAddresses = new Set<string>();
 
   /** The read in progress, shared by every call that needs one. */
-  let reading: { readonly inspecting: boolean; readonly promise: Promise<PlaylistRead> } | null =
-    null;
+  let reading: Reading | null = null;
 
   /** Opens `url` as fetch’s non-shared byte chunks, turning network and HTTP failures into typed errors. */
   async function open(
@@ -132,23 +139,52 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     });
   }
 
-  /** The playlist, read again. Calls while a read runs share it; none of them can stop it. */
-  function fresh(inspecting = false): Promise<PlaylistRead> {
+  /** Waits for `read` until `signal` aborts, stopping it when no other call is left waiting. */
+  function wait(read: Reading, signal: AbortSignal | undefined): Promise<PlaylistRead> {
+    read.waiting++;
+
+    if (!signal) return read.promise;
+
+    return new Promise((resolve, reject) => {
+      const leave = () => {
+        reject(signal.reason);
+
+        if (--read.waiting > 0) return;
+
+        if (reading === read) reading = null;
+        read.stop.abort();
+      };
+
+      signal.addEventListener("abort", leave, { once: true });
+      read.promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", leave));
+    });
+  }
+
+  /**
+   * The playlist, read again, until `signal` gives up waiting. Calls while a read runs share it,
+   * and it stops once every one of them has given up, so the next call reads afresh.
+   */
+  function fresh(signal?: AbortSignal, inspecting = false): Promise<PlaylistRead> {
+    signal?.throwIfAborted();
+
     if (reading) {
       // An inspection can stop at its mapping cap. Live then retries under its original policy.
       if (!account.mapping && !inspecting && reading.inspecting)
-        return reading.promise.catch((cause: unknown) => {
-          if (cause instanceof AppFailure && cause.error.kind === "unexpected") return fresh();
+        return wait(reading, signal).catch((cause: unknown) => {
+          if (cause instanceof AppFailure && cause.error.kind === "unexpected")
+            return fresh(signal);
           throw cause;
         });
 
-      return reading.promise;
+      return wait(reading, signal);
     }
+
+    const stop = new AbortController();
 
     const promise = (async () => {
       try {
         const body: ReadableStream<NodeJS.BufferSource> = (
-          await open(account.link, PLAYLIST_TIMEOUT_MS)
+          await open(account.link, PLAYLIST_TIMEOUT_MS, stop.signal)
         ).body;
 
         const text = body.pipeThrough(new TextDecoderStream());
@@ -182,6 +218,9 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
             throw notAPlaylist(account.link);
           }
         }
+
+        // EOF may already be buffered when the final waiter cancels the request.
+        stop.signal.throwIfAborted();
 
         for (const entry of reader.end()) entries.push(entry);
 
@@ -218,13 +257,14 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
       } catch (cause) {
         throw lost(cause);
       } finally {
-        reading = null;
+        // A read every caller gave up on has already made way for the next one.
+        if (!stop.signal.aborted) reading = null;
       }
     })();
 
-    reading = { inspecting, promise };
+    reading = { inspecting, stop, promise, waiting: 0 };
 
-    return promise;
+    return wait(reading, signal);
   }
 
   /**
@@ -281,7 +321,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
 
     if (known) return known;
     // Channels loaded from disk after a restart, or added since the last read.
-    const stream = (await abortable(fresh(), signal)).snapshot.live.streams.get(channelId);
+    const stream = (await fresh(signal)).snapshot.live.streams.get(channelId);
 
     if (!stream) throw new AppFailure({ kind: "channel-not-found", channelId });
 
@@ -308,7 +348,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
         snapshot: {
           live: { categories, channels },
         },
-      } = await abortable(fresh(), signal);
+      } = await fresh(signal);
 
       return { categories, channels };
     },
@@ -357,13 +397,11 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     },
 
     async onDemandCatalogue(signal) {
-      return (await abortable(fresh(), signal)).snapshot.catalogue;
+      return (await fresh(signal)).snapshot.catalogue;
     },
 
     async playlistImport(signal, refresh) {
-      const read = refresh
-        ? await abortable(fresh(), signal)
-        : (last ?? (await abortable(fresh(true), signal)));
+      const read = refresh ? await fresh(signal) : (last ?? (await fresh(signal, true)));
 
       signal?.throwIfAborted();
 
@@ -371,7 +409,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     },
 
     async movieDetails(id, signal) {
-      const imported = (last ?? (await abortable(fresh(), signal))).snapshot;
+      const imported = (last ?? (await fresh(signal))).snapshot;
       const details = imported.details.get(id);
 
       if (!details || !imported.catalogue.movies.some((each) => each.id === id)) {
@@ -382,7 +420,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     },
 
     async seriesDetails(id, signal) {
-      const imported = (last ?? (await abortable(fresh(), signal))).snapshot;
+      const imported = (last ?? (await fresh(signal))).snapshot;
       const details = imported.details.get(id);
 
       if (!details || !imported.catalogue.series.some((each) => each.id === id))
@@ -392,7 +430,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     },
 
     async titleFile(kind, id, _container, signal) {
-      const imported = (last ?? (await abortable(fresh(), signal))).snapshot;
+      const imported = (last ?? (await fresh(signal))).snapshot;
       const file = imported.files.get(id);
 
       if (!file || kind !== file.kind)
@@ -456,17 +494,5 @@ function notAPlaylist(link: string): AppFailure {
     kind: "unreachable",
     server: new URL(link).origin,
     detail: t("The address answered, but not with a playlist."),
-  });
-}
-
-/** Waits for `promise` until `signal` aborts. */
-function abortable<A>(promise: Promise<A>, signal: AbortSignal | undefined): Promise<A> {
-  if (!signal) return promise;
-  signal.throwIfAborted();
-
-  return new Promise((resolve, reject) => {
-    const stop = () => reject(signal.reason);
-    signal.addEventListener("abort", stop, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
   });
 }
