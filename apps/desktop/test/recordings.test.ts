@@ -6355,15 +6355,18 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const schedule = guide.schedule;
+
     const lookup = vi.spyOn(guide, "schedule").mockImplementation((channel, from, to) =>
       to !== from + 1
         ? schedule(channel, from, to)
         : Effect.promise(async () => {
             entered.resolve();
             await release.promise;
+
             return [];
           }),
     );
+
     onTestFinished(() => {
       release.resolve();
       lookup.mockRestore();
@@ -6375,11 +6378,13 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     lookup.mockRestore();
     await playback.close(watching.sessionId);
     await clockTo(at.getTime() + 3 * MINUTE);
+
     const list = await until(recordings.list, (list) =>
       list.some(
         (each) => each.scheduled?.schedule === saved.id && each.status.kind === "recording",
       ),
     );
+
     expect(list.find((each) => each.scheduled?.schedule === saved.id)).toMatchObject({
       scheduled: { late: "busy" },
     });
@@ -6391,11 +6396,13 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const first = await recordings.schedule(programmePlan(next));
     const sibling = await recordings.schedule(siblingAt(channel(TRACKS), new Date(next.start), 30));
     await clockTo(next.start);
+
     const list = await until(recordings.list, (list) =>
       list.some(
         (each) => each.scheduled?.schedule === first.id && each.status.kind === "recording",
       ),
     );
+
     await recordings.check();
     expect((await recordings.schedules()).find((each) => each.id === sibling.id)?.status.kind).toBe(
       "waiting",
@@ -6408,11 +6415,13 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     hold.release.resolve();
     await sleeping;
     await clockTo(next.start + 3 * MINUTE);
+
     const resumed = await until(recordings.list, (list) =>
       list.some(
         (each) => each.scheduled?.schedule === sibling.id && each.status.kind === "recording",
       ),
     );
+
     expect(resumed.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
       scheduled: { late: "busy" },
     });

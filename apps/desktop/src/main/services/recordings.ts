@@ -4011,6 +4011,7 @@ function make(deps: RecordingsDeps) {
           if (entry.controller.signal.aborted) continue;
           entry.controller.abort("asleep");
           const key = occurrenceKey(id, entry.occurrence);
+
           // Sleep cancels this attempt, not the reason observed before it began.
           if (entry.before !== undefined) why.set(key, entry.before);
           else why.delete(key);
