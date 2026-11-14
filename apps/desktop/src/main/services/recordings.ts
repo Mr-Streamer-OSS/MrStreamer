@@ -512,6 +512,9 @@ function make(deps: RecordingsDeps) {
         readonly subscriptionId: string;
         readonly resumes?: string;
         readonly done: Promise<void>;
+        readonly schedule?: Extract<ConnectionHolder, { kind: "schedule" }> & {
+          readonly id: string;
+        };
         connection?: boolean;
       }
     >();
@@ -1535,6 +1538,15 @@ function make(deps: RecordingsDeps) {
         starting.set(controller, {
           subscriptionId: channel.subscriptionId,
           ...(options.resumes && { resumes: options.resumes.id }),
+          ...(options.scheduled &&
+            options.title !== undefined && {
+              schedule: {
+                kind: "schedule" as const,
+                id: options.scheduled.schedule,
+                title: options.title,
+                until: stop,
+              },
+            }),
           done,
         });
 
@@ -1735,8 +1747,8 @@ function make(deps: RecordingsDeps) {
     // Retained across skipped rule reconciliation until the original occurrence is settled.
     const expiredStarts = new Map<string, Occurrence>();
 
-    /** When this run of the app began checking schedules. */
-    const started = Date.now();
+    /** When this run began checking schedules, or last woke from sleep. */
+    let started = Date.now();
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
 
     /** The recording a schedule made of `occurrence`, if one did. */
@@ -2118,9 +2130,38 @@ function make(deps: RecordingsDeps) {
       });
 
     /** What of this app holds the subscription's connections now. */
-    const holdersNow = (subscriptionId: string) =>
+    const holdersNow = (subscriptionId: string, scheduleId: string) =>
       Effect.map(coordination.uses(subscriptionId), (uses): ConnectionHolder[] => [
         ...recordingHoldings(subscriptionId).map((each) => each.holder),
+        // Guide lookups reserve the next start before a capture registers in starting.
+        ...[...startsOf].flatMap(([id, entry]) => {
+          const schedule = schedules.get(id);
+
+          return id !== scheduleId &&
+            schedule?.plan.channel.subscriptionId === subscriptionId &&
+            !entry.controller.signal.aborted &&
+            !recordingOf(id) &&
+            !starting.has(entry.controller)
+            ? [
+                {
+                  kind: "schedule" as const,
+                  title: schedule.plan.title,
+                  until: entry.occurrence.stop,
+                },
+              ]
+            : [];
+        }),
+        // A cancelled capture keeps its connection until cleanup ends, beyond startsOf's deadline.
+        ...[...starting].flatMap(([controller, entry]) => {
+          const schedule = entry.schedule;
+
+          return entry.subscriptionId === subscriptionId &&
+            schedule &&
+            schedule.id !== scheduleId &&
+            (!controller.signal.aborted || entry.connection)
+            ? [{ kind: schedule.kind, title: schedule.title, until: schedule.until }]
+            : [];
+        }),
         ...uses.flatMap((use) => (use === "recording" ? [] : [{ kind: use }])),
       ]);
 
@@ -2352,8 +2393,11 @@ function make(deps: RecordingsDeps) {
         const { subscriptionId } = plan.channel;
         const reason = next.start <= now ? why.get(occurrenceKey(schedule.id, next)) : undefined;
 
-        if (reason === "busy")
-          return as({ kind: "waiting", holders: yield* holdersNow(subscriptionId) }, next);
+        if (reason === "busy" || reason === "away")
+          return as(
+            { kind: "waiting", holders: yield* holdersNow(subscriptionId, schedule.id) },
+            next,
+          );
 
         if (reason === "stream" || reason === "disk")
           return as({ kind: "retrying", why: reason }, next);
@@ -2521,7 +2565,7 @@ function make(deps: RecordingsDeps) {
 
               if (answer === null || answer === "asleep" || answer.kind === "started")
                 why.delete(key);
-              else why.set(key, "busy");
+              else why.set(key, before === "away" ? "away" : "busy");
             },
             // This computer's when unexpected, as a file it couldn't write; else the stream's,
             // a lost login included.
@@ -2698,6 +2742,8 @@ function make(deps: RecordingsDeps) {
       if (read.kind !== "read" || closing) return null;
 
       if (asleep !== null && Date.now() - asleep < CHECK_MS) return asleep + CHECK_MS;
+
+      if (asleep !== null) started = Date.now();
       asleep = null;
 
       for (const [id, progress] of pendingProgress) {
@@ -2865,7 +2911,13 @@ function make(deps: RecordingsDeps) {
           : pending) {
           const key = occurrenceKey(kept.id, occurrence);
           const made = recordOf(kept.id, occurrence);
-          const reason = why.get(key);
+          let reason = why.get(key);
+
+          // Sleep or a closed app, rather than a connection, lost the beginning of this time.
+          if (owedOf(kept, occurrence) < started && (reason === undefined || reason === "busy")) {
+            reason = "away";
+            why.set(key, reason);
+          }
 
           if (occurrence.stop <= now || expiredStarts.get(kept.id)?.start === occurrence.start) {
             if (reason === "starting" || (made && isLive(made))) {
@@ -2915,17 +2967,17 @@ function make(deps: RecordingsDeps) {
 
           if (hold) why.set(key, "held");
           else if (hold === undefined) {
-            // Not for a time that began before the app started: that one was missed while away.
-            if (reason === undefined && occurrence.start >= started) why.set(key, "unread");
+            if (reason === undefined) why.set(key, "unread");
             retry = true;
           } else if (startingOn.has(kept.plan.channel.subscriptionId)) {
-            // Queued behind another start that holds its connection: busy, not away.
-            if (reason === undefined && occurrence.start >= started) why.set(key, "busy");
+            // A sibling's pending start holds this occurrence back.
+            if (reason === undefined) why.set(key, "busy");
             retry = true;
           }
           // Busy asks again soon; a failed start, which may not change, once a minute.
           else if (
-            (tried.get(key) ?? -Infinity) + (reason === "busy" ? RETRY_MS : CHECK_MS) <=
+            (tried.get(key) ?? -Infinity) +
+              (reason === "busy" || reason === "away" ? RETRY_MS : CHECK_MS) <=
             now
           ) {
             tried.set(key, now);
@@ -4191,6 +4243,7 @@ function make(deps: RecordingsDeps) {
       // As when the computer wakes: paused recordings ask again at once.
       check: Effect.andThen(
         Effect.sync(() => {
+          if (asleep !== null) started = Date.now();
           asleep = null;
           resumeTried.clear();
         }),

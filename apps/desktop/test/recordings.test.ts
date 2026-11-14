@@ -6043,6 +6043,67 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     },
   );
 
+  it("names a pending guide start as holder until its deadline releases it", async () => {
+    const { runtime, recordings, channel, clockTo } = await scheduling();
+    const guide = await runtime.runPromise(Guide);
+    const at = new Date(TEN_PAST + 2 * MINUTE);
+
+    const plan: RecordingPlan = {
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 5,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    };
+
+    await recordings.schedule(plan);
+
+    const sibling = await recordings.schedule({
+      ...plan,
+      channel: channel(TRACKS),
+      title: "Sibling",
+    });
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const schedule = guide.schedule;
+    let held = false;
+
+    const lookup = vi.spyOn(guide, "schedule").mockImplementation((channel, from, to) => {
+      if (held || to !== from + 1) return schedule(channel, from, to);
+      held = true;
+
+      return Effect.promise(async () => {
+        entered.resolve();
+        await release.promise;
+
+        return [];
+      });
+    });
+
+    onTestFinished(() => {
+      release.resolve();
+      lookup.mockRestore();
+    });
+
+    await clockTo(at.getTime());
+    await entered.promise;
+    await recordings.check();
+    expect((await recordings.schedules()).find((each) => each.id === sibling.id)?.status).toEqual({
+      kind: "waiting",
+      holders: [{ kind: "schedule", title: "Evening", until: at.getTime() + 5 * MINUTE }],
+    });
+    await clockTo(at.getTime() + 151_000);
+
+    const list = await until(recordings.schedules, (list) =>
+      list.some((each) => each.id === sibling.id && each.status.kind === "recording"),
+    );
+
+    expect(list.find((each) => each.id === sibling.id)?.status.kind).toBe("recording");
+  });
+
   it("starts the next schedule as soon as a timed-out capture releases its connection", async () => {
     const { recordings, listing, programmePlan, channel, clockTo, dataDir, subscriptionId } =
       await scheduling();
@@ -6089,9 +6150,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       await until(recordings.list, (list) => list.some((each) => each.status.kind === "missed"));
       await recordings.check();
       // Queued behind the held start, never asked: it waits, and starts once that start lets go.
-      expect(
-        (await recordings.schedules()).find((each) => each.id === sibling.id)?.status.kind,
-      ).toBe("waiting");
+      expect((await recordings.schedules()).find((each) => each.id === sibling.id)?.status).toEqual(
+        {
+          kind: "waiting",
+          holders: [{ kind: "schedule", title: next.title, until: next.stop }],
+        },
+      );
     } finally {
       release.resolve();
     }
@@ -6108,6 +6172,141 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(list.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
       status: { kind: "recording" },
       scheduled: { late: "busy" },
+    });
+  });
+
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ])("preserves away across sleep (already queued: %s, expires: %s)", async (queued, expires) => {
+    const { recordings, listing, programmePlan, channel, clockTo } = await scheduling();
+    const { next } = await listing();
+    const first = await recordings.schedule(programmePlan(next));
+    const at = new Date(next.start);
+
+    const sibling = await recordings.schedule({
+      kind: "slot",
+      channel: channel(TRACKS),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: expires ? 1 : 30,
+      title: "Sibling",
+      padding: { before: 0, after: 0 },
+    });
+
+    if (queued) {
+      await clockTo(next.start);
+      await until(recordings.schedules, (list) =>
+        list.some((each) => each.id === sibling.id && each.status.kind === "waiting"),
+      );
+    }
+
+    await recordings.suspend();
+    await clockTo(next.start + 3 * MINUTE);
+
+    const list = await until(recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === first.id && each.status.kind === "recording",
+      ),
+    );
+
+    if (expires) {
+      const missed = await until(recordings.list, (list) =>
+        list.some((each) => each.scheduled?.schedule === sibling.id),
+      );
+
+      expect(missed.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
+        status: { kind: "missed", why: "away" },
+        scheduled: { late: "away" },
+      });
+
+      return;
+    }
+
+    const recording = list.find((each) => each.scheduled?.schedule === first.id)!;
+    await recordings.stop(recording.id);
+    await clockTo(next.start + 4 * MINUTE);
+
+    const resumed = await until(recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === sibling.id && each.status.kind === "recording",
+      ),
+    );
+
+    expect(resumed.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
+      status: { kind: "recording" },
+      scheduled: { late: "away" },
+    });
+  });
+
+  it("keeps a queued sibling late as away after relaunch during its broadcast", async () => {
+    const { recordings, listing, programmePlan, channel, dataDir, subscriptionId, quit } =
+      await scheduling();
+
+    const { next } = await listing();
+    await recordings.schedule(programmePlan(next));
+    const at = new Date(next.start);
+
+    const sibling = await recordings.schedule({
+      kind: "slot",
+      channel: channel(TRACKS),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: "Sibling",
+      padding: { before: 0, after: 0 },
+    });
+
+    await quit();
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const make = fs.mkdir;
+    let held = false;
+
+    const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
+      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
+        held = true;
+        entered.resolve();
+        await release.promise;
+      }
+
+      return make(path, options);
+    });
+
+    onTestFinished(() => {
+      release.resolve();
+      opening.mockRestore();
+    });
+
+    vi.setSystemTime(next.start + 3 * MINUTE);
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+
+    try {
+      await again.library.refresh(subscriptionId);
+      await again.recordings.check();
+      await entered.promise;
+      // The sibling's broadcast began while closed, even though it now queues behind a start.
+      vi.setSystemTime(next.start + 6 * MINUTE);
+      await again.recordings.check();
+      await until(again.recordings.list, (list) =>
+        list.some((each) => each.status.kind === "missed"),
+      );
+    } finally {
+      release.resolve();
+    }
+
+    const list = await until(again.recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === sibling.id && each.status.kind === "recording",
+      ),
+    );
+
+    expect(list.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
+      status: { kind: "recording" },
+      scheduled: { late: "away" },
     });
   });
 
