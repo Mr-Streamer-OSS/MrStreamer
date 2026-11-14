@@ -6088,9 +6088,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       await clockTo(next.start + 151_000);
       await until(recordings.list, (list) => list.some((each) => each.status.kind === "missed"));
       await recordings.check();
+      // Queued behind the held start, never asked: it waits, and starts once that start lets go.
       expect(
         (await recordings.schedules()).find((each) => each.id === sibling.id)?.status.kind,
-      ).not.toBe("waiting");
+      ).toBe("waiting");
     } finally {
       release.resolve();
     }
@@ -6106,8 +6107,64 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     expect(list.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
       status: { kind: "recording" },
-      scheduled: { late: "away" },
+      scheduled: { late: "busy" },
     });
+  });
+
+  it("misses a schedule as busy when its whole time passes behind another start on its connection", async () => {
+    const { recordings, listing, programmePlan, channel, clockTo, dataDir } = await scheduling();
+
+    const { next } = await listing();
+    await recordings.schedule(programmePlan(next));
+    const at = new Date(next.start);
+
+    const sibling = await recordings.schedule({
+      kind: "slot",
+      channel: channel(TRACKS),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 1,
+      title: "Sibling",
+      padding: { before: 0, after: 0 },
+    });
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const make = fs.mkdir;
+    let held = false;
+
+    const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
+      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
+        held = true;
+        entered.resolve();
+        await release.promise;
+      }
+
+      return make(path, options);
+    });
+
+    onTestFinished(() => {
+      release.resolve();
+      opening.mockRestore();
+    });
+
+    try {
+      await clockTo(next.start);
+      await entered.promise;
+      await clockTo(next.start + 61_000);
+
+      const list = await until(recordings.list, (list) =>
+        list.some((each) => each.scheduled?.schedule === sibling.id),
+      );
+
+      expect(list.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
+        status: { kind: "missed", why: "busy" },
+        scheduled: { late: "busy" },
+      });
+    } finally {
+      // The held start lets go, so the app can quit.
+      release.resolve();
+    }
   });
 
   it.each([-10, 10])(

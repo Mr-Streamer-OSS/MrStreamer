@@ -2918,7 +2918,11 @@ function make(deps: RecordingsDeps) {
             // Not for a time that began before the app started: that one was missed while away.
             if (reason === undefined && occurrence.start >= started) why.set(key, "unread");
             retry = true;
-          } else if (startingOn.has(kept.plan.channel.subscriptionId)) retry = true;
+          } else if (startingOn.has(kept.plan.channel.subscriptionId)) {
+            // Queued behind another start that holds its connection: busy, not away.
+            if (reason === undefined && occurrence.start >= started) why.set(key, "busy");
+            retry = true;
+          }
           // Busy asks again soon; a failed start, which may not change, once a minute.
           else if (
             (tried.get(key) ?? -Infinity) + (reason === "busy" ? RETRY_MS : CHECK_MS) <=
