@@ -2743,16 +2743,32 @@ describe.skipIf(!hasTools)("recordings", () => {
     const again = await app(dataDir);
     onTestFinished(again.quit);
 
-    // Refused personal writes, seeding first and then playback, keep the last saved value.
+    // SQLite denies personal writes immediately: seeding and playback keep the last saved value.
     const refused = async <A>(run: () => Promise<A>) => {
-      const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+      const connections = new Set<DatabaseSync>();
+      const prepare = DatabaseSync.prototype.prepare;
+
+      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+        this: DatabaseSync,
+        sql: string,
+      ) {
+        connections.add(this);
+        this.setAuthorizer((action, table) =>
+          table === "profile_copy_progress" &&
+          (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+            ? sqlite.SQLITE_DENY
+            : sqlite.SQLITE_OK,
+        );
+
+        return prepare.call(this, sql);
+      });
 
       try {
-        lock.exec("begin immediate");
         await expect(run()).rejects.toMatchObject({ error: { kind: "unexpected" } });
       } finally {
-        lock.exec("rollback");
-        lock.close();
+        adapter.mockRestore();
+
+        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
       }
     };
 
@@ -2781,14 +2797,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     "retires captured-owner progress retries only after the owner is %s, retaining registry failures",
     async (state) => {
       const first = await connected();
-      const answer = await first.recordings.start(first.channel(TRACKS), Date.now() + 1500, {});
+      const answer = await first.recordings.start(first.channel(TRACKS), Date.now() + 60_000, {});
 
       if (answer.kind !== "started") throw new Error("Not started");
       const { id } = answer.recording;
+      // Progress ownership needs a captured copy, not an elapsed recording deadline.
       expect(
-        (await until(first.recordings.list, ([each]) => each?.status.kind === "complete"))[0]
-          ?.status.kind,
-      ).toBe("complete");
+        (await until(first.recordings.list, ([each]) => (each?.bytes ?? 0) > 0))[0]?.bytes,
+      ).toBeGreaterThan(0);
+      await first.recordings.stop(id);
       await first.quit();
 
       const runtime = runtimeFor(
@@ -2934,9 +2951,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       await expect(recordings.copy(id, captured)).rejects.toMatchObject({
         error: { kind: "unexpected" },
       });
-      expect((await recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
-        "complete",
-      );
+      expect((await recordings.list()).find((each) => each.id === id)?.status.kind).toBe("stopped");
       expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
       restore();
       await runtime.dispose();
