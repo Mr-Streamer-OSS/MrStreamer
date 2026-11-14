@@ -6339,6 +6339,85 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
   });
 
+  it("keeps Watch refusal when sleep interrupts a retry guide lookup", async () => {
+    const { runtime, recordings, playback, channel, clockTo } = await scheduling();
+    const guide = await runtime.runPromise(Guide);
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
+    const at = new Date(TEN_PAST + 2 * MINUTE);
+    const saved = await recordings.schedule(siblingAt(channel(GUIDED), at, 30));
+    await clockTo(at.getTime());
+    await until(recordings.schedules, (list) =>
+      list.some((each) => each.id === saved.id && each.status.kind === "waiting"),
+    );
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const schedule = guide.schedule;
+    const lookup = vi.spyOn(guide, "schedule").mockImplementation((channel, from, to) =>
+      to !== from + 1
+        ? schedule(channel, from, to)
+        : Effect.promise(async () => {
+            entered.resolve();
+            await release.promise;
+            return [];
+          }),
+    );
+    onTestFinished(() => {
+      release.resolve();
+      lookup.mockRestore();
+    });
+    await clockTo(at.getTime() + 11_000);
+    await entered.promise;
+    await recordings.suspend();
+    release.resolve();
+    lookup.mockRestore();
+    await playback.close(watching.sessionId);
+    await clockTo(at.getTime() + 3 * MINUTE);
+    const list = await until(recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === saved.id && each.status.kind === "recording",
+      ),
+    );
+    expect(list.find((each) => each.scheduled?.schedule === saved.id)).toMatchObject({
+      scheduled: { late: "busy" },
+    });
+  });
+
+  it("keeps an earlier busy reason when sleep interrupts its retry capture", async () => {
+    const { recordings, listing, programmePlan, channel, clockTo, dataDir } = await scheduling();
+    const { next } = await listing();
+    const first = await recordings.schedule(programmePlan(next));
+    const sibling = await recordings.schedule(siblingAt(channel(TRACKS), new Date(next.start), 30));
+    await clockTo(next.start);
+    const list = await until(recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === first.id && each.status.kind === "recording",
+      ),
+    );
+    await recordings.check();
+    expect((await recordings.schedules()).find((each) => each.id === sibling.id)?.status.kind).toBe(
+      "waiting",
+    );
+    const hold = holdFirstCapture(dataDir);
+    await recordings.stop(list.find((each) => each.scheduled?.schedule === first.id)!.id);
+    await clockTo(next.start + MINUTE);
+    await hold.entered.promise;
+    const sleeping = recordings.suspend();
+    hold.release.resolve();
+    await sleeping;
+    await clockTo(next.start + 3 * MINUTE);
+    const resumed = await until(recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === sibling.id && each.status.kind === "recording",
+      ),
+    );
+    expect(resumed.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
+      scheduled: { late: "busy" },
+    });
+  });
+
   it("keeps an occurrence that expired before sleep missed as busy", async () => {
     const { recordings, listing, programmePlan, channel, clockTo } = await scheduling();
     const { next } = await listing();

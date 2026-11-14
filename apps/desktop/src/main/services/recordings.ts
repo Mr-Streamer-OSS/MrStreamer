@@ -1740,8 +1740,6 @@ function make(deps: RecordingsDeps) {
 
     /** When this run began checking schedules, or last woke from sleep. */
     let started = Date.now();
-    // Beginning of the last absence; an occurrence already over then was missed while awake.
-    let absentFrom = -Infinity;
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
 
     /** The recording a schedule made of `occurrence`, if one did. */
@@ -2479,7 +2477,7 @@ function make(deps: RecordingsDeps) {
           startsOf.delete(schedule.id);
         }
 
-        // A cancelled lookup owns no connection; a capture keeps admission until cleanup ends.
+        // A cancelled lookup releases admission; start() owns it through provider asks and cleanup.
         if (startingOn.get(subscriptionId)?.owner === owner && !starting.has(controller))
           startingOn.delete(subscriptionId);
         answered.resolve();
@@ -2564,7 +2562,8 @@ function make(deps: RecordingsDeps) {
 
               // Cut short as the computer slept: it starts after the wake, as if never asked.
               if (asleep !== null) {
-                why.delete(key);
+                if (before !== undefined) why.set(key, before);
+                else why.delete(key);
                 tried.delete(key);
               } else why.set(key, error.kind === "unexpected" ? "disk" : "stream");
             },
@@ -2638,10 +2637,7 @@ function make(deps: RecordingsDeps) {
 
     /** The computer woke: what was owed while it slept was missed while away. */
     const awaken = () => {
-      if (asleep !== null) {
-        absentFrom = asleep;
-        started = Date.now();
-      }
+      if (asleep !== null) started = Date.now();
 
       asleep = null;
     };
@@ -2915,12 +2911,7 @@ function make(deps: RecordingsDeps) {
           const made = recordOf(kept.id, occurrence);
           const reason = why.get(key);
 
-          if (
-            reason === undefined &&
-            owedOf(kept, occurrence) < started &&
-            occurrence.stop > absentFrom
-          )
-            absent.add(key);
+          if (reason === undefined && owedOf(kept, occurrence) < started) absent.add(key);
 
           if (occurrence.stop <= now || expiredStarts.get(kept.id)?.start === occurrence.start) {
             if (reason === "starting" || (made && isLive(made))) {
@@ -4020,7 +4011,9 @@ function make(deps: RecordingsDeps) {
           if (entry.controller.signal.aborted) continue;
           entry.controller.abort("asleep");
           const key = occurrenceKey(id, entry.occurrence);
-          why.delete(key);
+          // Sleep cancels this attempt, not the reason observed before it began.
+          if (entry.before !== undefined) why.set(key, entry.before);
+          else why.delete(key);
           tried.delete(key);
           entry.release();
         }
