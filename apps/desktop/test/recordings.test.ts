@@ -3668,6 +3668,46 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     return { ...started, listing, programmePlan, clockTo };
   }
 
+  /** A "Sibling" slot schedule on `channel` from `at` for `minutes`, unpadded, every day. */
+  const siblingAt = (
+    channel: RecordingPlan["channel"],
+    at: Date,
+    minutes: number,
+  ): RecordingPlan => ({
+    kind: "slot",
+    channel,
+    days: EVERY_DAY,
+    at: at.getHours() * 60 + at.getMinutes(),
+    minutes,
+    title: "Sibling",
+    padding: { before: 0, after: 0 },
+  });
+
+  /** Holds the first capture's folder creation under `dataDir` until `release`, the test's end at the latest. */
+  function holdFirstCapture(dataDir: string) {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const make = fs.mkdir;
+    let held = false;
+
+    const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
+      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
+        held = true;
+        entered.resolve();
+        await release.promise;
+      }
+
+      return make(path, options);
+    });
+
+    onTestFinished(() => {
+      release.resolve();
+      opening.mockRestore();
+    });
+
+    return { entered, release };
+  }
+
   // Two app starts and a hundred schedules, every step awaited: no wait to shorten, only work that
   // slows with the CPU the parallel suite leaves it.
   it("rule safety: old missed airings release queue budget after a long absence", async () => {
@@ -6112,35 +6152,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await recordings.schedule(programmePlan(next));
     const at = new Date(next.start);
 
-    const sibling = await recordings.schedule({
-      kind: "slot",
-      channel: channel(TRACKS),
-      days: EVERY_DAY,
-      at: at.getHours() * 60 + at.getMinutes(),
-      minutes: 30,
-      title: "Sibling",
-      padding: { before: 0, after: 0 },
-    });
+    const sibling = await recordings.schedule(siblingAt(channel(TRACKS), at, 30));
 
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const make = fs.mkdir;
-    let held = false;
-
-    const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
-      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
-        held = true;
-        entered.resolve();
-        await release.promise;
-      }
-
-      return make(path, options);
-    });
-
-    onTestFinished(() => {
-      release.resolve();
-      opening.mockRestore();
-    });
+    const { entered, release } = holdFirstCapture(dataDir);
 
     try {
       await clockTo(next.start);
@@ -6185,15 +6199,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const first = await recordings.schedule(programmePlan(next));
     const at = new Date(next.start);
 
-    const sibling = await recordings.schedule({
-      kind: "slot",
-      channel: channel(TRACKS),
-      days: EVERY_DAY,
-      at: at.getHours() * 60 + at.getMinutes(),
-      minutes: expires ? 1 : 30,
-      title: "Sibling",
-      padding: { before: 0, after: 0 },
-    });
+    const sibling = await recordings.schedule(siblingAt(channel(TRACKS), at, expires ? 1 : 30));
 
     if (queued) {
       await clockTo(next.start);
@@ -6248,37 +6254,11 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await recordings.schedule(programmePlan(next));
     const at = new Date(next.start);
 
-    const sibling = await recordings.schedule({
-      kind: "slot",
-      channel: channel(TRACKS),
-      days: EVERY_DAY,
-      at: at.getHours() * 60 + at.getMinutes(),
-      minutes: 30,
-      title: "Sibling",
-      padding: { before: 0, after: 0 },
-    });
+    const sibling = await recordings.schedule(siblingAt(channel(TRACKS), at, 30));
 
     await quit();
 
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const make = fs.mkdir;
-    let held = false;
-
-    const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
-      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
-        held = true;
-        entered.resolve();
-        await release.promise;
-      }
-
-      return make(path, options);
-    });
-
-    onTestFinished(() => {
-      release.resolve();
-      opening.mockRestore();
-    });
+    const { entered, release } = holdFirstCapture(dataDir);
 
     vi.setSystemTime(next.start + 3 * MINUTE);
     const again = await app(dataDir);
@@ -6317,35 +6297,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await recordings.schedule(programmePlan(next));
     const at = new Date(next.start);
 
-    const sibling = await recordings.schedule({
-      kind: "slot",
-      channel: channel(TRACKS),
-      days: EVERY_DAY,
-      at: at.getHours() * 60 + at.getMinutes(),
-      minutes: 1,
-      title: "Sibling",
-      padding: { before: 0, after: 0 },
-    });
+    const sibling = await recordings.schedule(siblingAt(channel(TRACKS), at, 1));
 
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const make = fs.mkdir;
-    let held = false;
-
-    const opening = vi.spyOn(fs, "mkdir").mockImplementation(async (path, options) => {
-      if (!held && String(path).startsWith(join(dataDir, "recordings") + "/")) {
-        held = true;
-        entered.resolve();
-        await release.promise;
-      }
-
-      return make(path, options);
-    });
-
-    onTestFinished(() => {
-      release.resolve();
-      opening.mockRestore();
-    });
+    const { entered, release } = holdFirstCapture(dataDir);
 
     try {
       await clockTo(next.start);

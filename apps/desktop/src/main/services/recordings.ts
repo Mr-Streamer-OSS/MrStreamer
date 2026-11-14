@@ -512,9 +512,8 @@ function make(deps: RecordingsDeps) {
         readonly subscriptionId: string;
         readonly resumes?: string;
         readonly done: Promise<void>;
-        readonly schedule?: Extract<ConnectionHolder, { kind: "schedule" }> & {
-          readonly id: string;
-        };
+        /** A schedule's capture, as its subscription's other schedules name it holding there. */
+        readonly schedule?: { readonly id: string; readonly holder: ConnectionHolder };
         connection?: boolean;
       }
     >();
@@ -1541,10 +1540,8 @@ function make(deps: RecordingsDeps) {
           ...(options.scheduled &&
             options.title !== undefined && {
               schedule: {
-                kind: "schedule" as const,
                 id: options.scheduled.schedule,
-                title: options.title,
-                until: stop,
+                holder: { kind: "schedule", title: options.title, until: stop },
               },
             }),
           done,
@@ -2152,16 +2149,14 @@ function make(deps: RecordingsDeps) {
             : [];
         }),
         // A cancelled capture keeps its connection until cleanup ends, beyond startsOf's deadline.
-        ...[...starting].flatMap(([controller, entry]) => {
-          const schedule = entry.schedule;
-
-          return entry.subscriptionId === subscriptionId &&
-            schedule &&
-            schedule.id !== scheduleId &&
-            (!controller.signal.aborted || entry.connection)
-            ? [{ kind: schedule.kind, title: schedule.title, until: schedule.until }]
-            : [];
-        }),
+        ...[...starting].flatMap(([controller, { schedule, ...entry }]) =>
+          entry.subscriptionId === subscriptionId &&
+          schedule &&
+          schedule.id !== scheduleId &&
+          (!controller.signal.aborted || entry.connection)
+            ? [schedule.holder]
+            : [],
+        ),
         ...uses.flatMap((use) => (use === "recording" ? [] : [{ kind: use }])),
       ]);
 
@@ -2642,6 +2637,13 @@ function make(deps: RecordingsDeps) {
      * where the system never says it woke, a check comes a minute later.
      */
     let asleep: number | null = null;
+
+    /** The computer woke: what was owed while it slept was missed while away. */
+    const awaken = () => {
+      if (asleep !== null) started = Date.now();
+      asleep = null;
+    };
+
     /** When each paused recording last asked to go on, by id. */
     const resumeTried = new Map<string, number>();
 
@@ -2742,9 +2744,7 @@ function make(deps: RecordingsDeps) {
       if (read.kind !== "read" || closing) return null;
 
       if (asleep !== null && Date.now() - asleep < CHECK_MS) return asleep + CHECK_MS;
-
-      if (asleep !== null) started = Date.now();
-      asleep = null;
+      awaken();
 
       for (const [id, progress] of pendingProgress) {
         if (!records.has(progress.id)) {
@@ -4243,8 +4243,7 @@ function make(deps: RecordingsDeps) {
       // As when the computer wakes: paused recordings ask again at once.
       check: Effect.andThen(
         Effect.sync(() => {
-          if (asleep !== null) started = Date.now();
-          asleep = null;
+          awaken();
           resumeTried.clear();
         }),
         Effect.andThen(checkOnce, wake),
