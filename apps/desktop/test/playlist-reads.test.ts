@@ -41,6 +41,46 @@ function slowHost() {
 }
 
 describe("shared playlist reads", () => {
+  it("does not start a read for a caller whose signal already aborted", async () => {
+    const { requests, provider } = slowHost();
+    const signal = AbortSignal.abort();
+    await expect(provider.liveCatalogue(signal)).rejects.toBe(signal.reason);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("retains the previous cache when the last caller leaves after response EOF", async () => {
+    const { requests, provider } = slowHost();
+    const initial = provider.liveCatalogue();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    requests[0]!.send("#EXTM3U\n" + entries(["kept"]));
+    requests[0]!.end();
+    await initial;
+
+    const leaving = new AbortController();
+    const abandoned = provider.liveCatalogue(leaving.signal);
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    requests[1]!.send("#EXTM3U\n" + entries(["abandoned"]));
+    requests[1]!.end();
+    leaving.abort();
+    await expect(abandoned).rejects.toBe(leaving.signal.reason);
+    // Let buffered bytes and EOF finish processing before observing the cache.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(provider.currentLiveStream!("kept")).toBeDefined();
+    expect(provider.currentLiveStream!("abandoned")).toBeUndefined();
+    expect((await provider.playlistImport!()).live.channels.map((channel) => channel.name)).toEqual(
+      ["kept"],
+    );
+    expect(requests).toHaveLength(2);
+
+    const next = provider.liveCatalogue();
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    requests[2]!.send("#EXTM3U\n" + entries(["fresh"]));
+    requests[2]!.end();
+    expect((await next).channels.map((channel) => channel.name)).toEqual(["fresh"]);
+  });
+
   it("stops a read every caller gave up on, and reads afresh for the next caller", async () => {
     const { requests, provider } = slowHost();
     const leaving = new AbortController();
@@ -65,21 +105,26 @@ describe("shared playlist reads", () => {
     expect(provider.currentLiveStream!("late")).toMatchObject({ url: "https://example.test/late" });
   });
 
-  it("keeps a read going for the caller still waiting when another gives up", async () => {
-    const { requests, provider } = slowHost();
-    const leaving = new AbortController();
-    const abandoned = provider.liveCatalogue(leaving.signal);
-    const staying = provider.onDemandCatalogue(new AbortController().signal);
-    await vi.waitFor(() => expect(requests).toHaveLength(1));
+  it.each([undefined, new AbortController().signal])(
+    "keeps a read going for the caller still waiting with signal %s when another gives up",
+    async (signal) => {
+      const { requests, provider } = slowHost();
+      const leaving = new AbortController();
+      const abandoned = provider.liveCatalogue(leaving.signal);
+      const staying = provider.onDemandCatalogue(signal);
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
 
-    leaving.abort();
-    await expect(abandoned).rejects.toBe(leaving.signal.reason);
-    expect(requests[0]!.signal.aborted).toBe(false);
-    requests[0]!.send("#EXTM3U\n" + entries(["only"]));
-    requests[0]!.end();
-    await staying;
+      leaving.abort();
+      await expect(abandoned).rejects.toBe(leaving.signal.reason);
+      expect(requests[0]!.signal.aborted).toBe(false);
+      requests[0]!.send("#EXTM3U\n" + entries(["only"]));
+      requests[0]!.end();
+      await staying;
 
-    expect(requests).toHaveLength(1);
-    expect(provider.currentLiveStream!("only")).toMatchObject({ url: "https://example.test/only" });
-  });
+      expect(requests).toHaveLength(1);
+      expect(provider.currentLiveStream!("only")).toMatchObject({
+        url: "https://example.test/only",
+      });
+    },
+  );
 });

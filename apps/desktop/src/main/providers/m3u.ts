@@ -219,6 +219,8 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
           }
         }
 
+        // EOF may already be buffered when the final waiter cancels the request.
+        stop.signal.throwIfAborted();
         for (const entry of reader.end()) entries.push(entry);
 
         if (!reader.playlist) throw notAPlaylist(account.link);
