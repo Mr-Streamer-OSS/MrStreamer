@@ -144,6 +144,7 @@ async function connected(options: FakeProviderOptions = {}, ffprobe?: string) {
 function authorizeSqlite(authorize: NonNullable<Parameters<DatabaseSync["setAuthorizer"]>[0]>) {
   const connections = new Set<DatabaseSync>();
   const prepare = DatabaseSync.prototype.prepare;
+
   const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
     this: DatabaseSync,
     sql: string,
@@ -153,6 +154,7 @@ function authorizeSqlite(authorize: NonNullable<Parameters<DatabaseSync["setAuth
 
     return prepare.call(this, sql);
   });
+
   let restored = false;
 
   const restore = () => {
@@ -2643,6 +2645,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       // Observe SQLite's public boundary: a retired retry neither writes nor checks its owner again.
       let registryReads = 0;
       let progressWrites = 0;
+
       const restore = authorizeSqlite((action, table) => {
         if (action === sqlite.SQLITE_READ && table === "profiles") registryReads++;
 
@@ -2654,6 +2657,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
         return sqlite.SQLITE_OK;
       });
+
       let now = Date.now();
 
       for (const first of [true, false]) {
@@ -2829,6 +2833,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       let refuseRegistry = false;
       let refuseDeletion = false;
       let registryReads = 0;
+
       const restore = authorizeSqlite((action, table) => {
         if (action === sqlite.SQLITE_READ && table === "profiles") {
           registryReads++;
@@ -2848,6 +2853,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
         return sqlite.SQLITE_OK;
       });
+
       // Keep the advancing retry deadlines monotonic without changing real timers.
       let now = Date.now();
 
