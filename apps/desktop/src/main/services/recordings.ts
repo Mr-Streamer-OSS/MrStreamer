@@ -1746,6 +1746,8 @@ function make(deps: RecordingsDeps) {
 
     /** When this run began checking schedules, or last woke from sleep. */
     let started = Date.now();
+    // Beginning of the last absence; an occurrence already over then was missed while awake.
+    let absentFrom = -Infinity;
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
 
     /** The recording a schedule made of `occurrence`, if one did. */
@@ -2640,7 +2642,10 @@ function make(deps: RecordingsDeps) {
 
     /** The computer woke: what was owed while it slept was missed while away. */
     const awaken = () => {
-      if (asleep !== null) started = Date.now();
+      if (asleep !== null) {
+        absentFrom = asleep;
+        started = Date.now();
+      }
       asleep = null;
     };
 
@@ -2914,7 +2919,10 @@ function make(deps: RecordingsDeps) {
           let reason = why.get(key);
 
           // Sleep or a closed app, rather than a connection, lost the beginning of this time.
-          if (owedOf(kept, occurrence) < started && (reason === undefined || reason === "busy")) {
+          if (
+            owedOf(kept, occurrence) < started &&
+            (reason === undefined || (reason === "busy" && occurrence.stop > absentFrom))
+          ) {
             reason = "away";
             why.set(key, reason);
           }

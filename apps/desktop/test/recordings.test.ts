@@ -6189,6 +6189,32 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
   });
 
+  it("keeps an occurrence that expired before sleep missed as busy", async () => {
+    const { recordings, listing, programmePlan, channel, clockTo } = await scheduling();
+    const { next } = await listing();
+    const first = await recordings.schedule(programmePlan(next));
+    const sibling = await recordings.schedule(siblingAt(channel(TRACKS), new Date(next.start), 1));
+    await clockTo(next.start);
+    await until(recordings.list, (list) =>
+      list.some(
+        (each) => each.scheduled?.schedule === first.id && each.status.kind === "recording",
+      ),
+    );
+    await recordings.check();
+    expect((await recordings.schedules()).find((each) => each.id === sibling.id)?.status.kind).toBe(
+      "waiting",
+    );
+    vi.setSystemTime(next.start + 61_000);
+    await recordings.suspend();
+    await clockTo(next.start + 3 * MINUTE);
+    const list = await until(recordings.list, (list) =>
+      list.some((each) => each.scheduled?.schedule === sibling.id),
+    );
+    expect(list.find((each) => each.scheduled?.schedule === sibling.id)).toMatchObject({
+      status: { kind: "missed", why: "busy" },
+    });
+  });
+
   it.each([
     [false, false],
     [true, false],
