@@ -140,6 +140,36 @@ async function connected(options: FakeProviderOptions = {}, ffprobe?: string) {
   return { provider, dataDir, subscriptionId, channel, ...started };
 }
 
+/** Apply a real SQLite authorization rule until restored or the test finishes. */
+function authorizeSqlite(authorize: NonNullable<Parameters<DatabaseSync["setAuthorizer"]>[0]>) {
+  const connections = new Set<DatabaseSync>();
+  const prepare = DatabaseSync.prototype.prepare;
+
+  const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+    this: DatabaseSync,
+    sql: string,
+  ) {
+    connections.add(this);
+    this.setAuthorizer(authorize);
+
+    return prepare.call(this, sql);
+  });
+
+  let restored = false;
+
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    adapter.mockRestore();
+
+    for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
+  };
+
+  onTestFinished(restore);
+
+  return restore;
+}
+
 async function until<A>(read: () => Promise<A>, done: (value: A) => boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
 
@@ -2615,36 +2645,19 @@ describe.skipIf(!hasTools)("recordings", () => {
       // Observe SQLite's public boundary: a retired retry neither writes nor checks its owner again.
       let registryReads = 0;
       let progressWrites = 0;
-      const connections = new Set<DatabaseSync>();
-      const prepare = DatabaseSync.prototype.prepare;
 
-      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
-        this: DatabaseSync,
-        sql: string,
-      ) {
-        connections.add(this);
-        this.setAuthorizer((action, table) => {
-          if (action === sqlite.SQLITE_READ && table === "profiles") registryReads++;
+      const restore = authorizeSqlite((action, table) => {
+        if (action === sqlite.SQLITE_READ && table === "profiles") registryReads++;
 
-          if (
-            table === "profile_copy_progress" &&
-            (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
-          )
-            progressWrites++;
+        if (
+          table === "profile_copy_progress" &&
+          (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+        )
+          progressWrites++;
 
-          return sqlite.SQLITE_OK;
-        });
-
-        return prepare.call(this, sql);
+        return sqlite.SQLITE_OK;
       });
 
-      const restore = () => {
-        adapter.mockRestore();
-
-        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
-      };
-
-      onTestFinished(restore);
       let now = Date.now();
 
       for (const first of [true, false]) {
@@ -2713,11 +2726,15 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("seeds legacy recording progress once, retries a refused write and keeps zero across inventory updates and provider removal", async () => {
     const { dataDir, channel, recordings, quit, roster, subscriptionId } = await connected();
-    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
 
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
-    await until(recordings.list, ([first]) => first?.status.kind === "complete");
+    // Any captured recording has progress to seed: it is stopped once it holds some.
+    expect(
+      (await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0))[0]?.bytes,
+    ).toBeGreaterThan(0);
+    await recordings.stop(id);
     await roster.remove(subscriptionId, true);
     await quit();
     const path = join(dataDir, "recordings", "recordings.json");
@@ -2739,16 +2756,19 @@ describe.skipIf(!hasTools)("recordings", () => {
     const again = await app(dataDir);
     onTestFinished(again.quit);
 
-    // Refused personal writes, seeding first and then playback, keep the last saved value.
+    // SQLite denies personal writes immediately: seeding and playback keep the last saved value.
     const refused = async <A>(run: () => Promise<A>) => {
-      const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+      const restore = authorizeSqlite((action, table) =>
+        table === "profile_copy_progress" &&
+        (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+          ? sqlite.SQLITE_DENY
+          : sqlite.SQLITE_OK,
+      );
 
       try {
-        lock.exec("begin immediate");
         await expect(run()).rejects.toMatchObject({ error: { kind: "unexpected" } });
       } finally {
-        lock.exec("rollback");
-        lock.close();
+        restore();
       }
     };
 
@@ -2777,14 +2797,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     "retires captured-owner progress retries only after the owner is %s, retaining registry failures",
     async (state) => {
       const first = await connected();
-      const answer = await first.recordings.start(first.channel(TRACKS), Date.now() + 1500, {});
+      const answer = await first.recordings.start(first.channel(TRACKS), Date.now() + 60_000, {});
 
       if (answer.kind !== "started") throw new Error("Not started");
       const { id } = answer.recording;
+      // Progress ownership needs a captured copy, not an elapsed recording deadline.
       expect(
-        (await until(first.recordings.list, ([each]) => each?.status.kind === "complete"))[0]
-          ?.status.kind,
-      ).toBe("complete");
+        (await until(first.recordings.list, ([each]) => (each?.bytes ?? 0) > 0))[0]?.bytes,
+      ).toBeGreaterThan(0);
+      await first.recordings.stop(id);
       await first.quit();
 
       const runtime = runtimeFor(
@@ -2812,44 +2833,27 @@ describe.skipIf(!hasTools)("recordings", () => {
       let refuseRegistry = false;
       let refuseDeletion = false;
       let registryReads = 0;
-      const connections = new Set<DatabaseSync>();
-      const prepare = DatabaseSync.prototype.prepare;
 
-      const adapter = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
-        this: DatabaseSync,
-        sql: string,
-      ) {
-        connections.add(this);
-        this.setAuthorizer((action, table) => {
-          if (action === sqlite.SQLITE_READ && table === "profiles") {
-            registryReads++;
+      const restore = authorizeSqlite((action, table) => {
+        if (action === sqlite.SQLITE_READ && table === "profiles") {
+          registryReads++;
 
-            if (refuseRegistry) return sqlite.SQLITE_DENY;
-          }
+          if (refuseRegistry) return sqlite.SQLITE_DENY;
+        }
 
-          if (
-            refuseWrites &&
-            table === "profile_copy_progress" &&
-            (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
-          )
-            return sqlite.SQLITE_DENY;
+        if (
+          refuseWrites &&
+          table === "profile_copy_progress" &&
+          (action === sqlite.SQLITE_INSERT || action === sqlite.SQLITE_UPDATE)
+        )
+          return sqlite.SQLITE_DENY;
 
-          if (refuseDeletion && action === sqlite.SQLITE_DELETE && table === "profiles")
-            return sqlite.SQLITE_DENY;
+        if (refuseDeletion && action === sqlite.SQLITE_DELETE && table === "profiles")
+          return sqlite.SQLITE_DENY;
 
-          return sqlite.SQLITE_OK;
-        });
-
-        return prepare.call(this, sql);
+        return sqlite.SQLITE_OK;
       });
 
-      const restore = () => {
-        adapter.mockRestore();
-
-        for (const db of connections) if (db.isOpen) db.setAuthorizer(null);
-      };
-
-      onTestFinished(restore);
       // Keep the advancing retry deadlines monotonic without changing real timers.
       let now = Date.now();
 
@@ -2930,9 +2934,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       await expect(recordings.copy(id, captured)).rejects.toMatchObject({
         error: { kind: "unexpected" },
       });
-      expect((await recordings.list()).find((each) => each.id === id)?.status.kind).toBe(
-        "complete",
-      );
+      expect((await recordings.list()).find((each) => each.id === id)?.status.kind).toBe("stopped");
       expect((await recordings.copy(id))?.progress).toEqual({ position: 9, duration: 90 });
       restore();
       await runtime.dispose();
@@ -5649,17 +5651,22 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
     await recordings.stop(recording!.id);
 
-    /** No second recording of today's time starts, waiting a moment for one that would. */
-    const recordedOnce = async (count: number) =>
-      (await until(recordings.list, (list) => list.length > count, 2000)).length === count;
+    /** Preview waits for any start from the check to answer before checking for duplicates. */
+    const recordedOnce = async (count: number, before: number) => {
+      await recordings.plan(slot(before), saved.id);
+      expect(await recordings.schedules()).toMatchObject([
+        { next: { start: at.getTime() + DAY - before * MINUTE } },
+      ]);
+      expect(await recordings.list()).toHaveLength(count);
+    };
 
     for (const before of [5, 2]) await recordings.schedule(slot(before), saved.id);
     await recordings.check();
-    expect(await recordedOnce(1)).toBe(true);
+    await recordedOnce(1, 2);
     await recordings.remove(recording!.id);
     await recordings.schedule(slot(0), saved.id);
     await recordings.check();
-    expect(await recordedOnce(0)).toBe(true);
+    await recordedOnce(0, 0);
     expect(await allClosed(provider)).toBe(true);
   });
 
@@ -6467,7 +6474,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     },
   );
 
-  it("keeps an occurrence missed when its capture opens as the deadline cancels it", async () => {
+  it("keeps an occurrence missed when its capture opens as the deadline cancels it", async ({
+    signal,
+  }) => {
     let source: Writable | undefined;
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
 
@@ -6481,46 +6490,67 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     const { next } = await listing();
 
-    await recordings.schedule(programmePlan(next));
-    await clockTo(next.start);
-    await asked;
-    source!.write(fixture("h264-aac.mpegts"));
-
-    // As in subscription removal, observe the table on disk before activation completes.
     const folder = join(dataDir, "recordings");
+    // startCapture writes its table through fs.open and FileHandle.write. Hold that write after
+    // it lands, so the deadline cancels the start before activation can win the race.
+    const { promise: written, resolve: wrote } = Promise.withResolvers<void>();
+    const { promise: deadline, resolve: passed } = Promise.withResolvers<void>();
+    const opening = fs.open;
 
-    const writing = () =>
-      readdirSync(folder, { withFileTypes: true }).some(
-        (entry) =>
-          entry.isDirectory() &&
-          readdirSync(join(folder, entry.name)).some(
-            (file) => statSync(join(folder, entry.name, file)).size > 0,
-          ),
+    const opens = vi.spyOn(fs, "open").mockImplementation(async (path, flags, mode) => {
+      const file = await opening(path, flags, mode);
+
+      if (!String(path).startsWith(folder) || !String(path).endsWith(".ts")) return file;
+      const write = file.write.bind(file);
+
+      return Object.assign(file, {
+        write: async (...args: Parameters<typeof write>) => {
+          const done = await write(...args);
+          wrote();
+          await deadline;
+
+          return done;
+        },
+      });
+    });
+
+    // Abort can leave the body suspended before finally, so it restores the spy too.
+    const cleanup = () => {
+      passed();
+      signal.removeEventListener("abort", cleanup);
+      opens.mockRestore();
+    };
+
+    signal.addEventListener("abort", cleanup, { once: true });
+
+    try {
+      await recordings.schedule(programmePlan(next));
+      await clockTo(next.start);
+      await asked;
+      source!.write(fixture("h264-aac.mpegts"));
+      await written;
+      // The start check samples an auto-advancing clock. Pass its 150s answer window from
+      // this observed write, after the start began, so a tick cannot leave it short of the deadline.
+      await clockTo(Date.now() + 150_000 + 1000);
+      passed();
+      expect(
+        await until(
+          recordings.list,
+          (list) => list.length === 1 && list[0]?.status.kind === "missed",
+          2000,
+        ),
+      ).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
+      expect(await allClosed(provider)).toBe(true);
+
+      const kept = await until(
+        () => readdir(folder),
+        (names) => names.every((name) => name.includes(".")),
       );
 
-    const by = Date.now() + 10_000;
-
-    while (!writing()) {
-      if (Date.now() >= by) throw new Error("No program table was written");
-      await new Promise((resolve) => setImmediate(resolve));
+      expect(kept.filter((name) => !name.includes("."))).toEqual([]);
+    } finally {
+      cleanup();
     }
-
-    await clockTo(next.start + 150_000);
-    expect(
-      await until(
-        recordings.list,
-        (list) => list.length === 1 && list[0]?.status.kind === "missed",
-        2000,
-      ),
-    ).toMatchObject([{ status: { kind: "missed", why: "stream" } }]);
-    expect(await allClosed(provider)).toBe(true);
-
-    const kept = await until(
-      () => readdir(folder),
-      (names) => names.every((name) => name.includes(".")),
-    );
-
-    expect(kept.filter((name) => !name.includes("."))).toEqual([]);
   });
 
   it("keeps a timed-out repeat missed while saving fails, then records only its next occurrence", async () => {
