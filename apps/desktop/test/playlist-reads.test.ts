@@ -49,14 +49,19 @@ describe("shared playlist reads", () => {
     requests[0]!.send("#EXTM3U\n" + entries(["early"]));
 
     leaving.abort();
+    // Arrives while the stopped read is still unwinding.
+    const next = provider.liveCatalogue();
     await expect(abandoned).rejects.toBe(leaving.signal.reason);
     await vi.waitFor(() => expect(requests[0]!.signal.aborted).toBe(true));
 
-    const next = provider.liveCatalogue();
     await vi.waitFor(() => expect(requests).toHaveLength(2));
     requests[1]!.send("#EXTM3U\n" + entries(["early", "late"]));
+    // Once the stopped read has ended, a later caller still shares the fresh one.
+    const joining = provider.onDemandCatalogue();
     requests[1]!.end();
     expect((await next).channels.map((channel) => channel.name)).toEqual(["early", "late"]);
+    expect(requests).toHaveLength(2);
+    await joining;
     expect(provider.currentLiveStream!("late")).toMatchObject({ url: "https://example.test/late" });
   });
 
