@@ -48,7 +48,7 @@ Every release, nightlies included, attaches these archives. `sources` in `apps/d
 Electron plays audio and video in its window with Chromium's own build of FFmpeg, under LGPL-2.1-or-later. It is a separate library file in every installer: `ffmpeg.dll`, `libffmpeg.so` or `libffmpeg.dylib`.
 
 - It isn't in `chromium/src`, which About's Chromium notice links. Chromium's DEPS file pins it as a repository of its own, `chromium/third_party/ffmpeg`, at one revision.
-- Electron builds it with its own arguments: `ffmpeg_branding = "Chrome"` and `proprietary_codecs = true` in `build/args/all.gn`, `is_component_ffmpeg = true` in `build/args/release.gn`. It applies one patch, `patches/ffmpeg/link_with_loader_path.patch`, which changes the library's install name on macOS.
+- Electron builds it with its own arguments: `ffmpeg_branding = "Chrome"` and `proprietary_codecs = true` in `build/args/all.gn`, `is_component_ffmpeg = true` in `build/args/release.gn`. In Electron 45.3.2, `patches/ffmpeg` holds `link_with_loader_path.patch`, which changes the library's install name on macOS, and the H.264 decoder and MOV demuxer fixes listed in `.patches`.
 - The **FFmpeg in Chromium** notice names the revision, links that tree and Electron's source on the release, and gives the checkout and build commands for Electron's tag.
 - The two archives aren't a copy of Chromium. A rebuild also needs Chromium itself, its other dependencies and its build tools, which Electron's `gclient` checkout fetches from Google's and GitHub's servers. The notice says so, and [open questions](#open-questions) has what that leaves.
 
@@ -81,7 +81,7 @@ Electron's Windows build carries Microsoft's compiler beside its executable, so 
 This file is Microsoft's and isn't open source. Chromium's credits page doesn't mention it, and Electron's MIT licence says nothing about it.
 
 - Microsoft's [REDIST list](https://learn.microsoft.com/en-us/legal/windows-sdk/redist) names it under `Redist\D3D`, as a file a holder of the [Windows SDK licence](https://learn.microsoft.com/en-us/legal/windows-sdk/license) may redistribute. The licence's conditions for such files include: unmodified, only for Windows, with their notices intact, and under terms that protect them at least as much. The list adds that these files go with "Classic Windows applications" and not with "Universal Windows apps".
-- `dxcompiler.dll`, beside them, is another case. Its version resource says "Google Dawn Custom Build": it is built from the open-source DirectX Shader Compiler, whose licence Chromium's credits hold under DirectX-Shader-Compiler.
+- `dxcompiler.dll`, beside it, is another case. Its version resource says "Google Dawn Custom Build": it is built from the open-source DirectX Shader Compiler, whose licence Chromium's credits hold under DirectX-Shader-Compiler.
 - The **Microsoft Direct3D compiler files** notice says whose the remaining file is, links Microsoft's terms and says what the project hasn't confirmed. Its licence is `LicenseRef-proprietary`, which the build accepts only through the exception written on that one component in `licences.config.json`.
 - The project hasn't confirmed which Microsoft agreement applies to this file, or which one Electron's builders redistribute it under. [Open questions](#open-questions) has the rest.
 
@@ -95,7 +95,7 @@ Electron:
 2. `CHROMIUM_VERSION`: `chromium_version` in the `DEPS` file at that commit.
 3. `CHROMIUM_FFMPEG_COMMIT`: `ffmpeg_revision` in Chromium's `DEPS` file at that version.
 4. In Chromium's FFmpeg at that revision, `chromium/config/Chrome/*/*/config.h` must still say `FFMPEG_LICENSE "LGPL version 2.1 or later"` and `CONFIG_GPL 0`. In Electron's tree, read `patches/ffmpeg` and `build/args`. Update `apps/desktop/licences/chromium/FFmpeg.txt` when the patches, the arguments or the build commands in `docs/development/build-instructions-gn.md` changed.
-5. `D3DCOMPILER_VERSION` and `DXIL_VERSION`: `7z l -slt <file>` on each DLL in Electron's Windows zip prints its version. Look for Microsoft files that are new or gone, and update the notice in `apps/desktop/licences/microsoft` to match.
+5. `D3DCOMPILER_VERSION`: `7z l -slt <file>` on each DLL in Electron's Windows zip prints its version. Look for Microsoft files that are new or gone, and update the pins and the notice in `apps/desktop/licences/microsoft` to match. Electron 45.3.2 carries `d3dcompiler_47.dll` but not `dxil.dll`.
 
 electron-builder:
 

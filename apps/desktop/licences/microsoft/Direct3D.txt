@@ -1,6 +1,6 @@
 Microsoft's Direct3D compiler files, in the Windows builds
 
-Electron {electron}'s Windows build carries d3dcompiler_47.dll from Microsoft beside its executable; dxil.dll is no longer included. Mr. Streamer ships it unchanged in the Windows setup program and in the Microsoft Store package. The Mac and Linux builds don't contain it.
+Electron {electron}'s Windows build carries d3dcompiler_47.dll from Microsoft beside its executable. Mr. Streamer ships it unchanged in the Windows setup program and in the Microsoft Store package. The Mac and Linux builds don't contain it.
 
 d3dcompiler_47.dll, version {D3DCOMPILER_VERSION}
 Direct3D HLSL Compiler for Redistribution
