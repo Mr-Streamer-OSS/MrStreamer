@@ -97,8 +97,8 @@ importers:
         specifier: 4.0.0-rc.118
         version: 4.0.0-rc.118
       electron:
-        specifier: 44.9.3
-        version: 44.9.3(supports-color@10.2.2)
+        specifier: 45.3.2
+        version: 45.3.2(supports-color@10.2.2)
       electron-builder:
         specifier: 26.15.7
         version: 26.15.7(electron-builder-squirrel-windows@26.15.7)(supports-color@10.2.2)
@@ -2142,8 +2142,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@44.9.3:
-    resolution: {integrity: sha512-Cv9/yMnZxNWsMlIe8T4v//NKHdUvbeyoTJoXE3BIcRxus2meeFaO9h/P3zB5d4cBXum51IgAYrT2QjpIDWKpJA==}
+  electron@45.3.2:
+    resolution: {integrity: sha512-bPO0MMvJCdKdPfXgd3ES8zupu+ocr6XmSuRGwyZazTiigTz8jE7rwukSkck0iomS6UZeFuCwzu0uanMD/D34uw==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -3530,7 +3530,7 @@ snapshots:
 
   '@electron/get@5.1.0(supports-color@10.2.2)':
     dependencies:
-      debug: 4.4.3(supports-color@7.2.0)
+      debug: 4.4.3(supports-color@10.2.2)
       env-paths: 3.0.0
       graceful-fs: 4.2.11
       progress: 2.0.3
@@ -4780,12 +4780,6 @@ snapshots:
     optionalDependencies:
       supports-color: 10.2.2
 
-  debug@4.4.3(supports-color@7.2.0):
-    dependencies:
-      ms: 2.1.3
-    optionalDependencies:
-      supports-color: 7.2.0
-
   decompress-response@6.0.0:
     dependencies:
       mimic-response: 3.1.0
@@ -4932,7 +4926,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@44.9.3(supports-color@10.2.2):
+  electron@45.3.2(supports-color@10.2.2):
     dependencies:
       '@electron-internal/extract-zip': 1.0.6
       '@electron/get': 5.1.0(supports-color@10.2.2)
