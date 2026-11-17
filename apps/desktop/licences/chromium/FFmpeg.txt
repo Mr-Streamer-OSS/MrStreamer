@@ -10,7 +10,7 @@ Two sources are attached to this release.
 Chromium's FFmpeg at this revision, the one Chromium {CHROMIUM_VERSION} names in its DEPS file, with each platform's configuration in chromium/config/Chrome:
 https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/chromium-ffmpeg-{CHROMIUM_FFMPEG_COMMIT}.tar.gz
 
-Electron {electron}, commit {ELECTRON_COMMIT}. Its DEPS file names Chromium {CHROMIUM_VERSION}, patches/ffmpeg holds its one change to this FFmpeg, and build/args/release.gn holds the arguments of its release build:
+Electron {electron}, commit {ELECTRON_COMMIT}. Its DEPS file names Chromium {CHROMIUM_VERSION}, patches/ffmpeg holds its loader-path change and H.264 decoder and MOV demuxer fixes for this FFmpeg, and build/args/release.gn holds the arguments of its release build:
 https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/electron-{electron}.tar.gz
 
 These two archives are not all of Chromium. Building the library also takes Chromium {CHROMIUM_VERSION} itself, its other dependencies and its build tools, and those come from their own servers, not from this release. docs/development/build-instructions-gn.md in Electron's archive lists what to install first. Then, with depot_tools:
