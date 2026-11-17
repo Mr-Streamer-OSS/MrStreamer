@@ -45,7 +45,7 @@
     "electron": "45.3.2",
     "electron-builder": "26.15.7",
     "electron-updater": "6.8.12",
-    "electron-vite": "5.0.0",
+    "electron-vite": "6.0.0",
     "fflate": "0.8.3",
     "hls.js": "1.7.3",
     "lucide-react": "1.70.0",
