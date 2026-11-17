@@ -2,7 +2,7 @@
 
 > For maintainers. What every installer, release and Store submission must carry so Mr. Streamer and what it bundles can be distributed under their licences. [Development](../contributing/development.md#third-party-notices) describes how the notices are built.
 
-Mr. Streamer is GPL-3.0-only. The bundled ffmpeg is GPL-2.0-or-later, because it's built with `--enable-gpl --enable-libx264`. Electron brings Chromium's FFmpeg under LGPL-2.1-or-later and two Microsoft files that aren't open source, and the Windows setup program brings NSIS and its plug-ins. Check this page before changing what the installers ship, how releases are published or withdrawn, or the Store listing, and before upgrading Electron or electron-builder.
+Mr. Streamer is GPL-3.0-only. The bundled ffmpeg is GPL-2.0-or-later, because it's built with `--enable-gpl --enable-libx264`. Electron brings Chromium's FFmpeg under LGPL-2.1-or-later and Microsoft's proprietary Direct3D compiler, and the Windows setup program brings NSIS and its plug-ins. Check this page before changing what the installers ship, how releases are published or withdrawn, or the Store listing, and before upgrading Electron or electron-builder.
 
 This page records what the project ships and what it knows about the terms. It isn't legal advice, and [open questions](#open-questions) lists what it leaves undecided.
 
@@ -12,7 +12,7 @@ Settings > About shows:
 
 - The app's own licence: its copyright, the lack of warranty, where the source is, then the repository's `LICENSE`. GPL-3.0 sections 4 and 5 ask for all of these in an app with an interactive interface. The entry is under `components` in `apps/desktop/licences.config.json`.
 - Every component the installers ship, with its licence. The build fails when one has none (see [development](../contributing/development.md#third-party-notices)). That includes the MinGW-w64 runtime and winpthreads, which the Windows ffmpeg links in statically.
-- What comes with Electron and with the Windows setup program: [Chromium's FFmpeg](#chromiums-ffmpeg), [Microsoft's two Direct3D files](#microsofts-direct3d-files), and [NSIS with its four plug-ins](#windows-setup-program). They show on every platform, and each text says which builds contain the files.
+- What comes with Electron and with the Windows setup program: [Chromium's FFmpeg](#chromiums-ffmpeg), [Microsoft's Direct3D compiler](#microsofts-direct3d-files), and [NSIS with its four plug-ins](#windows-setup-program). They show on every platform, and each text says which builds contain the files.
 - Chromium's credits, which hold Node.js's licence and those of the LGPL parts inside Chromium, and Electron's MIT licence. Every installer keeps `LICENSES.chromium.html` and `LICENSE.electron.txt`: beside the executable on Linux and Windows, in the app's Resources on macOS.
 - Source links: the commit the build comes from (`__BUILD_COMMIT__`), Chromium's source at its exact tag, Node.js's at its tag, and the [archives on the build's own release](#sources-on-every-release).
 - The privacy policy at `https://mrstreamer.app/privacy`, which the website builds from `docs/privacy.md` on `main`. Keep that file where it is.
@@ -48,7 +48,7 @@ Every release, nightlies included, attaches these archives. `sources` in `apps/d
 Electron plays audio and video in its window with Chromium's own build of FFmpeg, under LGPL-2.1-or-later. It is a separate library file in every installer: `ffmpeg.dll`, `libffmpeg.so` or `libffmpeg.dylib`.
 
 - It isn't in `chromium/src`, which About's Chromium notice links. Chromium's DEPS file pins it as a repository of its own, `chromium/third_party/ffmpeg`, at one revision.
-- Electron builds it with its own arguments: `ffmpeg_branding = "Chrome"` and `proprietary_codecs = true` in `build/args/all.gn`, `is_component_ffmpeg = true` in `build/args/release.gn`. It applies one patch, `patches/ffmpeg/link_with_loader_path.patch`, which changes the library's install name on macOS.
+- Electron builds it with its own arguments: `ffmpeg_branding = "Chrome"` and `proprietary_codecs = true` in `build/args/all.gn`, `is_component_ffmpeg = true` in `build/args/release.gn`. In Electron 45.3.2, `patches/ffmpeg` holds `link_with_loader_path.patch`, which changes the library's install name on macOS, and the H.264 decoder and MOV demuxer fixes listed in `.patches`.
 - The **FFmpeg in Chromium** notice names the revision, links that tree and Electron's source on the release, and gives the checkout and build commands for Electron's tag.
 - The two archives aren't a copy of Chromium. A rebuild also needs Chromium itself, its other dependencies and its build tools, which Electron's `gclient` checkout fetches from Google's and GitHub's servers. The notice says so, and [open questions](#open-questions) has what that leaves.
 
@@ -74,17 +74,16 @@ electron-builder makes the setup program with NSIS. With `toolsets.nsis` unset i
 
 ## Microsoft's Direct3D files
 
-Electron's Windows build carries two files from Microsoft beside its executable, so the setup program and the Store package do too:
+Electron's Windows build carries Microsoft's compiler beside its executable, so the setup program and the Store package do too:
 
-- `d3dcompiler_47.dll`, version 10.0.26100.7705, "Direct3D HLSL Compiler for Redistribution". ANGLE's build copies it from the Windows SDK's `Redist/D3D` folder.
-- `dxil.dll`, version 1.8.2502.11. Dawn's build copies it from the Windows SDK's `bin` folder.
+- `d3dcompiler_47.dll`, version 10.0.28000.2270, "Direct3D HLSL Compiler for Redistribution". ANGLE's build copies it from the Windows SDK's `Redist/D3D` folder. Electron 45.3.2 no longer carries `dxil.dll`.
 
-Both are Microsoft's and neither is open source. Chromium's credits page mentions neither, and Electron's MIT licence says nothing about them.
+This file is Microsoft's and isn't open source. Chromium's credits page doesn't mention it, and Electron's MIT licence says nothing about it.
 
-- Microsoft's [REDIST list](https://learn.microsoft.com/en-us/legal/windows-sdk/redist) names both under `Redist\D3D`, as files a holder of the [Windows SDK licence](https://learn.microsoft.com/en-us/legal/windows-sdk/license) may redistribute. The licence's conditions for such files include: unmodified, only for Windows, with their notices intact, and under terms that protect them at least as much. The list adds that these files go with "Classic Windows applications" and not with "Universal Windows apps".
-- `dxcompiler.dll`, beside them, is another case. Its version resource says "Google Dawn Custom Build": it is built from the open-source DirectX Shader Compiler, whose licence Chromium's credits hold under DirectX-Shader-Compiler.
-- The **Microsoft Direct3D compiler files** notice says whose the two files are, links Microsoft's terms and says what the project hasn't confirmed. Its licence is `LicenseRef-proprietary`, which the build accepts only through the exception written on that one component in `licences.config.json`.
-- The project hasn't confirmed which Microsoft agreement applies to these files, or which one Electron's builders redistribute them under. [Open questions](#open-questions) has the rest.
+- Microsoft's [REDIST list](https://learn.microsoft.com/en-us/legal/windows-sdk/redist) names it under `Redist\D3D`, as a file a holder of the [Windows SDK licence](https://learn.microsoft.com/en-us/legal/windows-sdk/license) may redistribute. The licence's conditions for such files include: unmodified, only for Windows, with their notices intact, and under terms that protect them at least as much. The list adds that these files go with "Classic Windows applications" and not with "Universal Windows apps".
+- `dxcompiler.dll`, beside it, is another case. Its version resource says "Google Dawn Custom Build": it is built from the open-source DirectX Shader Compiler, whose licence Chromium's credits hold under DirectX-Shader-Compiler.
+- The **Microsoft Direct3D compiler files** notice says whose the remaining file is, links Microsoft's terms and says what the project hasn't confirmed. Its licence is `LicenseRef-proprietary`, which the build accepts only through the exception written on that one component in `licences.config.json`.
+- The project hasn't confirmed which Microsoft agreement applies to this file, or which one Electron's builders redistribute it under. [Open questions](#open-questions) has the rest.
 
 ## Upgrading Electron or electron-builder
 
@@ -96,7 +95,7 @@ Electron:
 2. `CHROMIUM_VERSION`: `chromium_version` in the `DEPS` file at that commit.
 3. `CHROMIUM_FFMPEG_COMMIT`: `ffmpeg_revision` in Chromium's `DEPS` file at that version.
 4. In Chromium's FFmpeg at that revision, `chromium/config/Chrome/*/*/config.h` must still say `FFMPEG_LICENSE "LGPL version 2.1 or later"` and `CONFIG_GPL 0`. In Electron's tree, read `patches/ffmpeg` and `build/args`. Update `apps/desktop/licences/chromium/FFmpeg.txt` when the patches, the arguments or the build commands in `docs/development/build-instructions-gn.md` changed.
-5. `D3DCOMPILER_VERSION` and `DXIL_VERSION`: `7z l -slt <file>` on each DLL in Electron's Windows zip prints its version. Look for Microsoft files that are new or gone, and update the notice in `apps/desktop/licences/microsoft` to match.
+5. `D3DCOMPILER_VERSION`: `7z l -slt <file>` on each DLL in Electron's Windows zip prints its version. Look for Microsoft files that are new or gone, and update the pins and the notice in `apps/desktop/licences/microsoft` to match. Electron 45.3.2 carries `d3dcompiler_47.dll` but not `dxil.dll`.
 
 electron-builder:
 
@@ -109,14 +108,14 @@ Update the versions this page quotes. Then finish with `pnpm build`, `node apps/
 
 The [27 October desktop component review](desktop-components.md) records the 0.0.21 dependency selection and retained advisory/source qualifications. It does not replace final installed-candidate matching on the release card.
 
-The 23 October 2026 review covers Electron 44.9.3, Chromium 152.0.7977.167 and electron-builder 26.15.7. Chromium's FFmpeg revision, LGPL configurations, Electron's FFmpeg patch, codec arguments and build instructions are unchanged. The Windows archive still carries the two Microsoft DLLs at the versions above; `dxcompiler.dll` remains the open-source Google Dawn build. The reviewed Electron commit and Chromium version are in `licences.config.json`.
+The 17 November 2026 review covers Electron 45.3.2 and Chromium 156.0.8078.100. Chromium names a new FFmpeg revision; its Chrome configurations still select LGPL-2.1-or-later with GPL disabled. Electron retains its loader-path patch and adds H.264 decoder and MOV demuxer fixes. Its codec arguments and build instructions are unchanged; other build arguments change Node's ABI, V8/BoringSSL integration, cache salting, compile hints and resource allowlisting. The checksum-verified Windows archive carries the Direct3D compiler at the version above, no longer carries `dxil.dll`, and retains the open-source Google Dawn `dxcompiler.dll` build. The reviewed source pins are in `licences.config.json`. The release dry run still qualifies the actual installers and their linked source archives.
 
-Builder retains NSIS 3.0.4.1 and nsis-resources 3.4.1 at their previous checksums. A locally generated setup using the repository's NSIS options passed `installer-plugins.ts` with the six setup and four uninstaller plug-ins unchanged. This toolset review used stock Electron as its payload and builder's own `UninstallerReader` to extract the uninstaller on Linux after bundled Wine failed to load. It verifies installer plug-in bytes; the actual candidate still needs its Windows package, installation and update checks in the release dry run.
+electron-builder remains at the reviewed 26.15.7. Builder retains NSIS 3.0.4.1 and nsis-resources 3.4.1 at their previous checksums. A locally generated setup using the repository's NSIS options passed `installer-plugins.ts` with the six setup and four uninstaller plug-ins unchanged. This toolset review used stock Electron as its payload and builder's own `UninstallerReader` to extract the uninstaller on Linux after bundled Wine failed to load. It verifies installer plug-in bytes; the actual candidate still needs its Windows package, installation and update checks in the release dry run.
 
 ## Microsoft Store
 
 - Only stable releases go to the Store, so every Store package has a release with its sources. The package carries the same notices as the direct download, and they link that release.
-- The package isn't made with NSIS, so the notices for NSIS and its plug-ins describe files it doesn't contain, as each of them says. It does carry [Microsoft's two Direct3D files](#microsofts-direct3d-files).
+- The package isn't made with NSIS, so the notices for NSIS and its plug-ins describe files it doesn't contain, as each of them says. It does carry [Microsoft's Direct3D compiler](#microsofts-direct3d-files).
 - GPL-3.0 section 6(d) allows the sources on another server with clear directions next to the object code. About, the notices and the listing give them.
 - The listing's **Additional license terms** say the app is free software under GPL-3.0-only, with links to `LICENSE` and to the releases. Without them, Microsoft's Standard Application License Terms apply, and they forbid reverse engineering and copies beyond what the app allows, which GPL-3.0 section 10 rules out.
 - Free, with Partner Center's organizational licensing defaults, and nothing that encrypts or locks the package. The Store's signature limits none of the GPL's rights.
@@ -127,9 +126,9 @@ The notices and archives above settle none of these. Each is Wout's to decide, w
 
 - **WinShell's terms.** Its author publishes it as "Freeware", as a binary, with no licence text and no source. Nothing written says what redistribution it allows. electron-builder's templates call it in every setup and uninstaller. The choices are to accept that, to ask its author, or to replace it with NSIS scripts of our own; the [plug-in's page](https://nsis.sourceforge.io/WinShell_plug-in) shows a way without it.
 - **SpiderBanner's terms.** Neither its archive nor its [page](https://nsis.sourceforge.io/SpiderBanner_plug-in) states a licence. The NSIS wiki's footer puts page content under zlib/libpng "unless otherwise noted". That line is the wiki's default for every page, and nothing shows its author meant it for the plug-in. The choices are the same three.
-- **Microsoft's terms for the two DLLs.** Which Microsoft agreement Electron's builders hold, and what it passes on to an app built on Electron, isn't known here. The Windows SDK licence asks a distributor for more than a notice. It wants distributors and end users held to "terms that protect it at least as much as this agreement", and it has a clause on licences that require source code, which it calls Excluded Licenses. How that sits with shipping them beside a GPL-3.0 program is a legal question this page doesn't answer. The FSF's [FAQ on Windows runtime DLLs](https://www.gnu.org/licenses/gpl-faq.html#WindowsRuntimeAndGPL) is the nearest published view. It doesn't say whether it matters that Chromium's code loads the files and the app's own code doesn't.
+- **Microsoft's terms for the remaining DLL.** Which Microsoft agreement Electron's builders hold, and what it passes on to an app built on Electron, isn't known here. The Windows SDK licence asks a distributor for more than a notice. It wants distributors and end users held to "terms that protect it at least as much as this agreement", and it has a clause on licences that require source code, which it calls Excluded Licenses. How that sits with shipping it beside a GPL-3.0 program is a legal question this page doesn't answer. The FSF's [FAQ on Windows runtime DLLs](https://www.gnu.org/licenses/gpl-faq.html#WindowsRuntimeAndGPL) is the nearest published view. It doesn't say whether it matters that Chromium's code loads the file and the app's own code doesn't.
 - **The Store package and "Universal Windows apps".** Microsoft's list keeps the D3D files to "Classic Windows applications". The Store package is the desktop app in an MSIX, with `runFullTrust`. MSIX is a way of packaging, and a desktop app inside one isn't a Universal Windows app for that reason alone. Whether Microsoft's wording counts it as one is unconfirmed.
-- **Leaving the two DLLs out.** Untested. The app uses no WebGPU, which is what `dxil.dll` serves, so that file might go. `d3dcompiler_47.dll` would stay. Nothing here removes either.
+- **Leaving the remaining DLL out.** Untested. Nothing here removes `d3dcompiler_47.dll`; Electron itself no longer includes `dxil.dll`.
 - **The rest of Chromium's source.** A release holds FFmpeg's tree and Electron's. Chromium's own tree stays on upstream servers the project doesn't control, with its other dependencies and its build tools. That includes the LGPL parts of Blink, which are linked into Electron's executable. A copy of everything is several GB for each Electron version, and GitHub limits a release file to 2 GiB. Whether exact directions to upstream are enough for those parts is open.
 - **Earlier releases.** 0.0.6 and every release from before this page's archives attach only the FFmpeg and x264 sources, and their About has none of the notices above. Adding the archives to those releases changes published files, which needs Wout's go-ahead. Their notices stay as they shipped.
 
