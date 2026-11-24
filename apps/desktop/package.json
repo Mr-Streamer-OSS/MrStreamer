@@ -37,7 +37,7 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "5.2.0",
+    "@vitejs/plugin-react": "6.3.0",
     "arktype": "2.2.9",
     "class-variance-authority": "0.7.1",
     "dns-packet": "5.6.1",
